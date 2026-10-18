@@ -86,6 +86,7 @@ from core import config, db, extract, ingest as ingest_mod  # noqa: E402
 from core import outline as outline_mod  # noqa: E402
 from core import kp_build as kp_build_mod  # noqa: E402
 from core import kp_batch as kp_batch_mod  # noqa: E402
+from core import kp_import as kp_import_mod  # noqa: E402（M0-6b：整理产物导入）
 from core import pipeline_pool as pool_mod  # noqa: E402
 from core import progress as progress_mod  # noqa: E402
 from core import search as search_mod, study  # noqa: E402
@@ -685,6 +686,30 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
 /* M0-1：学习场景（顶栏标识 + 设置中心三选一）。 */
 #scene-badge{white-space:nowrap}
 .scene-opt.on{border-color:var(--accent);color:var(--accent)}
+/* ---------------- M0-8：≤560px 移动端基础 ----------------
+   两条硬要求：① 任何视图 documentElement 不横向滚动（390 宽 scrollWidth<=390）；
+   ② 首屏不被 autofocus 顶下去（scrollY=0）。表格在窄屏改成"一行一张卡片"
+   （单元格纵向堆叠），长路径/代码允许断行——不靠横向滑动看内容。 */
+@media (max-width:560px){
+  main{padding:14px 12px 44px}
+  header{padding:12px;gap:10px}
+  h1{font-size:16px}
+  .card{padding:12px}
+  #view table{display:block;width:100%}
+  #view thead{display:none}
+  #view tbody{display:block}
+  #view tr{display:block;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel2);padding:8px 10px;margin:8px 0}
+  #view td{display:block;border-bottom:none;padding:3px 0;width:auto!important;
+    max-width:100%}
+  #view td:empty{display:none}
+  #view td .bar{max-width:220px}
+  code,kbd,pre{word-break:break-all;white-space:pre-wrap}
+  .dz-hint,.dz-line,.snav-note,.spmeta,.hint,.sub{overflow-wrap:anywhere}
+  input,select,textarea{max-width:100%}
+  .row{gap:8px}
+  .setbox{width:100%}
+}
 </style>
 </head>
 <body>
@@ -744,6 +769,14 @@ async function api(path, opts){
 const fmtTime = ts => ts ? new Date(ts*1000).toLocaleString('zh-CN',
   {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
 const pct = v => Math.round((v||0)*100);
+
+// M0-8：窄屏自动聚焦输入框会把页面滚下去（问答页首屏 scrollY=401 的根因）。
+// `preventScroll` 让焦点进去但页面不动；老浏览器不认参数时退回普通 focus。
+function safeFocus(el){
+  if (!el || typeof el.focus !== 'function') return;
+  try { el.focus({ preventScroll: true }); }
+  catch(e){ try { el.focus(); } catch(e2){ /* 聚焦失败不影响页面 */ } }
+}
 
 // ---------------- 视图 ----------------
 const VIEWS = {
@@ -1009,7 +1042,7 @@ async function viewAssistant(){
     ta.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
     });
-    if (CHAT.msgs.length === 0) ta.focus();
+    if (CHAT.msgs.length === 0) safeFocus(ta);
   }
   const th = $('#thread');
   if (th) th.scrollTop = th.scrollHeight;
@@ -1542,7 +1575,7 @@ async function sendChat(){
   // 而绑定逻辑当时又是全局查找 id，于是多轮之后跳转全指向第一轮。
   bindCiteClicks(aEl.querySelector('.body'));
   thread.scrollTop = thread.scrollHeight;
-  if (ta) ta.focus();
+  safeFocus(ta);
 }
 
 // ---------------- 总览 ----------------
@@ -3306,6 +3339,8 @@ function kpBuildCard(){
     <div id="kp-build-progress"></div>
     <div class="row">
       <button class="act" id="kp-build-open">选择课件批量整理</button>
+      <button class="ghost" id="kp-import-open"
+        title="把已经整理好的课件知识点直接导入知识点表；不调用模型、不联网、不花钱">导入已整理好的知识点（0 费用）</button>
       <span class="small muted" id="kp-build-state"></span>
     </div>
   </div>`;
@@ -3314,8 +3349,73 @@ function kpBuildCard(){
 function bindKpBuild(){
   const b = $('#kp-build-open'); if (!b) return;
   b.onclick = openKpBuild;
+  // M0-6b：导入已整理产物（零 AI 成本）——与批量整理并排的常驻入口。
+  const imp = $('#kp-import-open');
+  if (imp) imp.onclick = kpImportOpen;
   // 进这一页时若已有任务在跑（或刚跑完），把进度接上，别让人以为没反应
   kpProbe();
+}
+
+// M0-6b：把「已经整理好的知识点」导入知识点表。
+// 只解析本机整理结果并写库：不调用大模型、不联网、不花钱；先预览再确认，
+// 写库幂等（同一批产物重复导入新增 0）。后端固定读本机产物目录，前端不传路径。
+async function kpImportOpen(){
+  const btn = $('#kp-import-open');
+  if (btn) btn.disabled = true;
+  try {
+    const pv = await api('/api/kp-import/preview');
+    const nNew = pv.kps_would_create || 0;
+    const nSrc = pv.kp_sources_would_add || 0;
+    const scanned = pv.scanned_files || 0;
+    const matched = pv.docs_matched || 0;
+    const missing = (pv.docs_missing_in_db || []).length;
+    const failed = (pv.failed_files || []).length;
+    const summary = `扫描到 ${scanned} 份整理结果，匹配库里 ${matched} 份课件。`;
+    if (!nNew){
+      modal(`<h2>导入已整理的知识点</h2>
+        <div class="sub" style="margin:12px 0;line-height:1.9">${esc(summary)}<br>
+          <b>没有需要新建的知识点</b>：这些课件已经导入过（或知识库已是最新）${
+          nSrc ? `；还有 ${nSrc} 条出处可补` : ''}。</div>
+        <div class="row" style="margin-top:16px">
+          <button class="ghost" onclick="closeModal()">关闭</button></div>`);
+      return;
+    }
+    modal(`<h2>导入已整理的知识点</h2>
+      <div class="sub" style="margin:12px 0;line-height:1.9">
+        ${esc(summary)}<br>
+        将新建 <b>${nNew}</b> 条知识点、补 <b>${nSrc}</b> 条原文出处${
+          missing ? `<br>有 ${missing} 份整理结果的课件不在本库，会跳过` : ''}${
+          failed ? `<br>有 ${failed} 份整理结果读不了，会跳过` : ''}。<br>
+        <b>不调用大模型、不联网、不花钱</b>；重复导入不会重复建卡。</div>
+      <div class="row" style="margin-top:16px">
+        <button class="act" id="kp-import-go">开始导入 ${nNew} 条</button>
+        <button class="ghost" onclick="closeModal()">取消</button>
+      </div>`);
+    const goBtn = $('#kp-import-go');
+    if (goBtn) goBtn.onclick = () => kpImportApply(goBtn);
+  } catch(e){
+    toast('预览失败：' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function kpImportApply(btn){
+  if (btn){ btn.disabled = true; btn.textContent = '导入中…'; }
+  try {
+    const r = await api('/api/kp-import/apply', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+    closeModal();
+    const created = r.kps_created || 0;
+    const added = r.kp_sources_added || 0;
+    toast(created
+      ? `已导入 ${created} 条知识点（新增出处 ${added} 条）`
+      : `已是最新：没有新建知识点（补出处 ${added} 条）`);
+    go('kps');
+  } catch(e){
+    toast('导入失败：' + e.message);
+    if (btn){ btn.disabled = false; btn.textContent = '重试导入'; }
+  }
 }
 
 async function kpProbe(){
@@ -7392,6 +7492,33 @@ def api_graph(conn):
         "nodes": nodes,
         "edges": [dict(r) for r in edges],
     }
+
+
+# ---------------- M0-6b：整理产物 → 知识点表（零 AI 成本、幂等） ----------------
+# 产物目录**固定** `config.LOG_DIR/knowledge`（core.kp_import 的默认值），
+# 接口不接受调用方传路径——避免把任意目录当产物目录读（路径注入）。
+# 只支持可选的 doc_id（int 或 "41,42"），非法值由 kp_import 抛 KpImportError → 400。
+def api_kp_import_preview(conn, doc_id=""):
+    """预览导入：只读连接、零写入（返回"将建 / 将补"的条数）。"""
+    try:
+        stats = kp_import_mod.run(conn=conn, doc_id=(doc_id or None))
+    except kp_import_mod.KpImportError as e:
+        return {"ok": False, "error": str(e), "_code": 400}
+    return {"ok": True, **stats}
+
+
+def api_kp_import_apply(conn, payload):
+    """真写库：在调用方的写锁/写连接里执行；幂等（重复导入新增 0）。"""
+    if not isinstance(payload, dict):
+        return {"ok": False, "error": "请求体必须是 JSON 对象", "_code": 400}
+    try:
+        stats = kp_import_mod.run(conn=conn, apply=True,
+                                  doc_id=payload.get("doc_id") or None)
+    except kp_import_mod.KpImportError as e:
+        return {"ok": False, "error": str(e), "_code": 400}
+    except sqlite3.Error as e:
+        return {"ok": False, "error": f"写库失败：{e}", "_code": 500}
+    return {"ok": True, **stats}
 
 
 def _outline_dir():
@@ -12829,6 +12956,10 @@ class Handler(BaseHTTPRequestHandler):
                         ))
                     if path == "/api/kps":
                         return self._json(api_kps(conn))
+                    # M0-6b：导入已整理产物 —— 先预览（只读连接，零写入）
+                    if path == "/api/kp-import/preview":
+                        return self._json_auto(api_kp_import_preview(
+                            conn, qs.get("doc_id", "")))
                     if path == "/api/kp":
                         return self._json(api_kp_detail(conn, _int_arg(qs.get("id"), 0)))
                     if path == "/api/queue":
@@ -13096,6 +13227,9 @@ class Handler(BaseHTTPRequestHandler):
                     # 手工记一道错题（M0-4：知识点详情「记一道错题」）
                     if u.path == "/api/mistake":
                         return self._json_auto(api_add_mistake(conn, payload))
+                    # M0-6b：导入已整理产物（写锁内串行；零 AI 成本；幂等）
+                    if u.path == "/api/kp-import/apply":
+                        return self._json_auto(api_kp_import_apply(conn, payload))
                     # 手工新建知识点（知识点页签的表单）
                     if u.path == "/api/kp":
                         x = str(payload.get("name") or "").strip()

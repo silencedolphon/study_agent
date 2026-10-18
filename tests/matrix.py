@@ -172,6 +172,18 @@ MATRIX = [
     dict(id="F100", feature="M0-7 检索 10 题回归集 + 规则级排序修复",
          entry="study.search（真实库只读副本；分类/机制/对比题）", kind="cli", priority="P0",
          tests=["test_10_search_regression"], evidence="json"),
+    dict(id="F101", feature="M0-1 学习场景预设（A 日常/B 备考/C 冲刺，持久化 + 导航差异）",
+         entry="设置中心三选一 + 顶栏场景标识（localStorage kb_study_scene）",
+         kind="ui", priority="P1", tests=["test_11_m0_scenario_copy"], evidence="json+shot"),
+    dict(id="F102", feature="M0-6a 用户可见文案去工程化 + 空态真实 CTA + 知识点摘要截断",
+         entry="8 个视图可见文本 / 各空态主按钮 / 知识点列表 .kpsum",
+         kind="ui", priority="P0", tests=["test_11_m0_scenario_copy"], evidence="json+shot"),
+    dict(id="F103", feature="M0-6b 产物导入看板入口（preview/apply + 按钮 + 幂等，零 AI 成本）",
+         entry="GET /api/kp-import/preview + POST /api/kp-import/apply + 知识点页按钮",
+         kind="write", priority="P0", tests=["test_12_m0_import_ui_mobile"], evidence="json+shot"),
+    dict(id="F104", feature="M0-8 移动端基础（390 无横向滚动/首屏 scrollY=0/表格卡片式）",
+         entry="≤560px 媒体查询 + safeFocus", kind="ui", priority="P1",
+         tests=["test_12_m0_import_ui_mobile"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
@@ -282,6 +294,37 @@ FIXED_BUGS = [
         verify=("回归用例：test_10_search_regression.py（13/13 全绿，含 10 题期望与契约）\n"
                 "_work/m0/search/report.md（before/after 表与逐题 Top-8 明细）"),
         repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_10_search_regression",
+    ),
+    dict(
+        id="BUG-7", severity="中", matrix_refs=["F102"],
+        title="用户可见页面暴露开发者术语 + 空态死链（学生看不懂/点不到）",
+        symptom="三类学生评测 §4 P0-D：知识点页整屏出现 logs/knowledge/<doc_id>-末级知识点总结.json、"
+                "tools/terms_build.py --doc <id>、卡 C-0058、doc_id 等；笔记/错题/复习空态指向不存在的按钮；"
+                "知识点列表摘要过长。",
+        root_cause="页面文案直接把实现说明/产物路径/卡片号写给用户；C-0053 删除入口后空态文案未同步；"
+                   "知识点 summary 未截断。",
+        impact="新用户读不懂、找不到入口，直接劝退（保研/突击角色均因空态死链放弃）。",
+        fixed_in="M0 waveA（2026-10-18, commit 1674ede）",
+        fix_summary="8 个视图可见文本开发者术语 0 命中（显示层 humanize 过滤 + 文案人话化）；"
+                    "高级说明收进 <details> 折叠；6 个空态补真实主按钮；知识点摘要 2 行截断。",
+        verify=("回归用例：test_11_m0_scenario_copy.py（6/6）\n"
+                "gate v2 基线/终测：_work/m0/gate/gate_v2-*.json；_work/m0/ui/report.md"),
+        repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_11_m0_scenario_copy",
+    ),
+    dict(
+        id="BUG-8", severity="中", matrix_refs=["F104"],
+        title="移动端不可用（资料页 390 宽横向溢出 2.03 倍、问答页首屏自动滚动）",
+        symptom="三类学生评测 §4 P1-F：390/504 宽下资料页 scrollWidth=788 > 390（表格不响应），"
+                "问答页打开即 scrollY=396（autofocus 把首屏滚走），手机上无法正常浏览。",
+        root_cause="看板 CSS 仅 620px 断点调整设置栏，资料页表格/长串未做卡片化；"
+                   "问答页自动 focus 未用 preventScroll。",
+        impact="突击生（手机党）直接放弃；移动端等于不可用。",
+        fixed_in="M0 waveB（2026-10-18, commit 见 git log）",
+        fix_summary="≤560px 表格改卡片式、长串断行、输入不顶宽；safeFocus/focus({preventScroll:true})；"
+                    "CDP 真 390×844 实测 8 视图 sw=cw=390、首屏 scrollY 全 0、溢出元素 0。",
+        verify=("回归用例：test_12_m0_import_ui_mobile.py（7/7）\n"
+                "gate v2 终测：_work/m0/gate/report-v2.md；_work/m0/waveB/shots/fixed390/"),
+        repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_12_m0_import_ui_mobile",
     ),
 ]
 
