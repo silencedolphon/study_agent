@@ -56,7 +56,8 @@ venv\Scripts\python.exe -X utf8 tests\run_all.py
 | `test_03_api_write.py` | 写 API（全在临时副本上）：知识点/复习/笔记/设置/学科/预览类接口 |
 | `test_04_cli.py` | `study.py check/stats/docs/search/show/review/kp/mistake/note/ingest` |
 | `test_05_browser.py` | Edge headless 渲染首页 + 截图证据 |
-| `test_06_healthcheck.py` | `tools/healthcheck.py` 一键自检（隔离 env + 隔离看板端口） |
+| `test_06_healthcheck.py` | `tools/healthcheck.py` 一键自检（隔离 env + 隔离看板端口）、`tools/backup_data.py` 数据备份 |
+| `test_07_legacy_ingest.py` | 旧版 Office（.ppt/.doc/.xls）入库链路判定层：raw 列表 / 导入预览 / 批处理计划 / 产物已入库去重（不触发真实转换） |
 | `run_all.py` | 一键运行、汇总、隔离核对、生成报告、退出码 |
 
 ## 加用例的规矩

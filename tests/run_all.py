@@ -112,9 +112,15 @@ def _git_head() -> str:
         head = cp.stdout.strip()
         cp2 = subprocess.run(["git", "-C", str(env.PROJECT), "status", "--porcelain"],
                              capture_output=True, text=True, timeout=20)
-        # 只关心产品区改动；tests/ 与 _work/ 是验收套件自己的产物，不算“脏”
-        dirty = [ln for ln in cp2.stdout.splitlines() if ln.strip()
-                 and not ln.startswith("?? tests/") and not ln.startswith("?? _work/")]
+        # 只关心产品区改动；tests/ 与 _work/ 是验收套件自己的工作区，不算“脏”
+        dirty = []
+        for ln in cp2.stdout.splitlines():
+            if not ln.strip():
+                continue
+            path_part = ln[3:].split(" -> ")[-1].strip()
+            if path_part.startswith(("tests/", "_work/")):
+                continue
+            dirty.append(ln)
         return f"{head}{'（产品区有未提交改动）' if dirty else '（产品区干净）'}"
     except Exception as e:  # noqa: BLE001
         return f"(git 不可用: {e})"
@@ -366,6 +372,7 @@ def main(argv=None) -> int:
     skipped = sum(1 for c in cases if c["status"] == "SKIP")
 
     matrix_rows = _matrix_status(matrix.MATRIX, records, only=args.only)
+    matrix_rows.sort(key=lambda r: r["id"])       # 报告里按 F01..F99 顺序展示
     covered = sum(1 for r in matrix_rows if r["status"] not in ("MISSING", "NOT_RUN"))
     exit_code = 0 if failed == 0 else 1
 

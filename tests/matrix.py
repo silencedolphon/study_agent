@@ -145,6 +145,20 @@ MATRIX = [
     dict(id="F81", feature="Edge headless 截图证据", entry="Edge --headless --screenshot /", kind="browser",
          priority="P2", tests=["test_edge_screenshot"], evidence="screenshot"),
 
+    # ---------------- 旧版 Office 入库链路（P4 / commit 430b4d8） ----------------
+    dict(id="F92", feature="旧格式在 raw 列表中可入库（supported/kind/note）",
+         entry="GET /api/raw（.ppt/.doc/.xls）", kind="read", priority="P0",
+         tests=["test_raw_list_legacy_supported"], evidence="json"),
+    dict(id="F93", feature="导入预览放开旧格式（supported + 自动转换提示）",
+         entry="POST /api/import (dry_run)（.ppt/.doc/.xls）", kind="read", priority="P0",
+         tests=["test_import_preview_legacy"], evidence="json"),
+    dict(id="F94", feature="批处理计划纳入旧格式（unsupported=0 / 待处理）",
+         entry="POST /api/ingest/batch/plan（.ppt/.doc/.xls）", kind="read", priority="P0",
+         tests=["test_batch_plan_legacy"], evidence="json"),
+    dict(id="F95", feature="转换产物已在库时源文件显示已入库、计划跳过（防重复转换）",
+         entry="GET /api/raw + POST /api/ingest/batch/plan（x.ppt + x.pptx）",
+         kind="read", priority="P0", tests=["test_converted_artifact_indexed"], evidence="json+db"),
+
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
          entry="tools/healthcheck.py --json", kind="cli", priority="P1",
@@ -152,7 +166,7 @@ MATRIX = [
     dict(id="F91", feature="MCP 服务自测与 stdio 握手（经 healthcheck）",
          entry="tools/serve_mcp.py --selftest / verify_mcp_handshake.py", kind="cli",
          priority="P1", tests=["test_healthcheck_all_green"], evidence="json"),
-    dict(id="F92", feature="一键数据备份（备份到临时目录 + integrity + --keep 清理）",
+    dict(id="F96", feature="一键数据备份（备份到临时目录 + integrity + --keep 清理）",
          entry="tools/backup_data.py --json --out <tmp>", kind="cli", priority="P1",
          tests=["test_backup_data_isolated"], evidence="json"),
 ]

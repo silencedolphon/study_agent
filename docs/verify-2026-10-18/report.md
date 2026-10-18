@@ -1,9 +1,9 @@
 # P2 验收基线报告 · study_agent 学习看板
 
-- 生成时间：2026-10-18T17:09:09+0800
-- 代码版本：`4c3d142（产品区干净）`
+- 生成时间：2026-10-18T17:36:29+0800
+- 代码版本：`96a4662（产品区干净）`
 - 被测代码指纹：core/config.py + core/study.py + core/search.py + core/subjects.py + tools/dashboard.py + tools/study.py 的 sha256 见 report.json::env.product_hashes
-- 结论：**63 通过 / 0 失败 / 0 未修复缺陷(expectedFailure) / 0 跳过**，共 63 条用例（功能矩阵 63 行，覆盖 63 行）；历史缺陷已修复 3 个（回归用例已转正）
+- 结论：**67 通过 / 0 失败 / 0 未修复缺陷(expectedFailure) / 0 跳过**，共 67 条用例（功能矩阵 67 行，覆盖 67 行）；历史缺陷已修复 3 个（回归用例已转正）
 - 退出码：`0`
 
 ## 1. 怎么跑
@@ -21,7 +21,7 @@ set VERIFY_REFRESH_FIXTURES=1 & venv\Scripts\python.exe -X utf8 tests\run_all.py
 
 - 代码沙箱与产品代码一致：`是`
 - 运行期间产品代码是否被改动：`否`
-- 测试实例端口：[8897, 8897, 8897, 8897, 8897]；运行后监听状态：{8897: False, 8898: False, 8899: False}
+- 测试实例端口：[8897, 8897, 8897, 8897, 8897, 8897]；运行后监听状态：{8897: False, 8898: False, 8899: False}
 - 残留进程：无
 - 真实数据指纹（运行前后）：运行前后完全一致（本套件未写真实数据）
 - fixture 快照：`_work\verify\fixtures\manifest.json`
@@ -51,7 +51,7 @@ set VERIFY_REFRESH_FIXTURES=1 & venv\Scripts\python.exe -X utf8 tests\run_all.py
 | F22 | 名词解释产物状态 | `GET /api/terms?doc_id=` | P2 | ✅ 通过 | test_02_api_read.TestReadApi.test_terms |
 | F23 | 按页知识点定位 | `GET /api/page-kps?doc_id=&page=` | P2 | ✅ 通过 | test_02_api_read.TestReadApi.test_page_kps |
 | F24 | 知识点整理候选与成本预估 | `GET /api/kp-build/options、/batch/options` | P1 | ✅ 通过 | test_02_api_read.TestReadApi.test_kp_build_options |
-| F25 | 原始资料清单（raw/ 与孤儿） | `GET /api/raw` | P1 | ✅ 通过 | test_02_api_read.TestReadApi.test_raw |
+| F25 | 原始资料清单（raw/ 与孤儿） | `GET /api/raw` | P1 | ✅ 通过 | test_02_api_read.TestReadApi.test_raw<br>test_07_legacy_ingest.TestLegacyIngestDecision.test_raw_list_legacy_supported |
 | F26 | 首次运行体检（空库/凭据判定） | `GET /api/firstrun` | P1 | ✅ 通过 | test_02_api_read.TestReadApi.test_firstrun |
 | F27 | 笔记列表/详情/按来源反查 | `GET /api/notes、/api/note、/api/notes/by_kp` | P1 | ✅ 通过 | test_02_api_read.TestReadApi.test_notes_read |
 | F28 | 学科列表与当前真实路径 | `GET /api/subjects` | P0 | ✅ 通过 | test_02_api_read.TestReadApi.test_subjects |
@@ -66,7 +66,7 @@ set VERIFY_REFRESH_FIXTURES=1 & venv\Scripts\python.exe -X utf8 tests\run_all.py
 | F43 | 课件答疑笔记保存 | `POST /api/note/deck` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_note_deck |
 | F44 | 笔记正文路径安全（拒绝穿越） | `POST /api/note/update（非法 file）` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_note_update_guard |
 | F45 | 设置保存/重置（写沙箱 settings） | `POST /api/settings、/api/settings/reset` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_settings_write |
-| F46 | 按路径导入预览 | `POST /api/import (dry_run)` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_import_preview |
+| F46 | 按路径导入预览 | `POST /api/import (dry_run)` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_import_preview<br>test_07_legacy_ingest.TestLegacyIngestDecision.test_import_preview_legacy |
 | F47 | 批量入库计划预览 | `POST /api/ingest/batch/plan` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_ingest_batch_plan |
 | F48 | 孤儿数据清理预览 | `POST /api/cleanup (dry_run)` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_cleanup_preview |
 | F49 | 单份删除影响预览 | `POST /api/doc/delete (dry_run)` | P1 | ✅ 通过 | test_03_api_write.TestWriteApi.test_doc_delete_preview |
@@ -92,7 +92,11 @@ set VERIFY_REFRESH_FIXTURES=1 & venv\Scripts\python.exe -X utf8 tests\run_all.py
 | F81 | Edge headless 截图证据 | `Edge --headless --screenshot /` | P2 | ✅ 通过 | test_05_browser.TestBrowser.test_edge_screenshot |
 | F90 | 一键健康检查（解释器/导入/语法/库/study check） | `tools/healthcheck.py --json` | P1 | ✅ 通过 | test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green |
 | F91 | MCP 服务自测与 stdio 握手（经 healthcheck） | `tools/serve_mcp.py --selftest / verify_mcp_handshake.py` | P1 | ✅ 通过 | test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green |
-| F92 | 一键数据备份（备份到临时目录 + integrity + --keep 清理） | `tools/backup_data.py --json --out <tmp>` | P1 | ✅ 通过 | test_06_healthcheck.TestHealthcheck.test_backup_data_isolated |
+| F92 | 旧格式在 raw 列表中可入库（supported/kind/note） | `GET /api/raw（.ppt/.doc/.xls）` | P0 | ✅ 通过 | test_07_legacy_ingest.TestLegacyIngestDecision.test_raw_list_legacy_supported |
+| F93 | 导入预览放开旧格式（supported + 自动转换提示） | `POST /api/import (dry_run)（.ppt/.doc/.xls）` | P0 | ✅ 通过 | test_07_legacy_ingest.TestLegacyIngestDecision.test_import_preview_legacy |
+| F94 | 批处理计划纳入旧格式（unsupported=0 / 待处理） | `POST /api/ingest/batch/plan（.ppt/.doc/.xls）` | P0 | ✅ 通过 | test_07_legacy_ingest.TestLegacyIngestDecision.test_batch_plan_legacy |
+| F95 | 转换产物已在库时源文件显示已入库、计划跳过（防重复转换） | `GET /api/raw + POST /api/ingest/batch/plan（x.ppt + x.pptx）` | P0 | ✅ 通过 | test_07_legacy_ingest.TestLegacyIngestDecision.test_converted_artifact_indexed |
+| F96 | 一键数据备份（备份到临时目录 + integrity + --keep 清理） | `tools/backup_data.py --json --out <tmp>` | P1 | ✅ 通过 | test_06_healthcheck.TestHealthcheck.test_backup_data_isolated |
 
 ## 4. 失败与缺陷
 
@@ -149,68 +153,72 @@ Lead 侧独立验证：_work/lead/verify_bugfix.py 12/12 通过
 | 用例 | 状态 | 耗时(s) |
 |---|---|---|
 | `test_01_health.TestHealth.test_home_ok` | ✅ 通过 | 0.02 |
-| `test_01_health.TestHealth.test_index_html_alias` | ✅ 通过 | 0.01 |
-| `test_01_health.TestHealth.test_isolation_paths` | ✅ 通过 | 0.05 |
-| `test_01_health.TestHealth.test_page_self_contained` | ✅ 通过 | 0.01 |
-| `test_01_health.TestHealth.test_real_data_untouched` | ✅ 通过 | 0.07 |
-| `test_01_health.TestHealth.test_unknown_route_404` | ✅ 通过 | 0.07 |
+| `test_01_health.TestHealth.test_index_html_alias` | ✅ 通过 | 0.02 |
+| `test_01_health.TestHealth.test_isolation_paths` | ✅ 通过 | 0.04 |
+| `test_01_health.TestHealth.test_page_self_contained` | ✅ 通过 | 0.03 |
+| `test_01_health.TestHealth.test_real_data_untouched` | ✅ 通过 | 0.06 |
+| `test_01_health.TestHealth.test_unknown_route_404` | ✅ 通过 | 0.04 |
 | `test_02_api_read.TestReadApi.test_chat_status` | ✅ 通过 | 0.02 |
-| `test_02_api_read.TestReadApi.test_chunk` | ✅ 通过 | 0.04 |
-| `test_02_api_read.TestReadApi.test_deck_calendar` | ✅ 通过 | 0.01 |
-| `test_02_api_read.TestReadApi.test_doc_detail` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_chunk` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_deck_calendar` | ✅ 通过 | 0.0 |
+| `test_02_api_read.TestReadApi.test_doc_detail` | ✅ 通过 | 0.06 |
 | `test_02_api_read.TestReadApi.test_docs` | ✅ 通过 | 0.01 |
-| `test_02_api_read.TestReadApi.test_firstrun` | ✅ 通过 | 0.0 |
-| `test_02_api_read.TestReadApi.test_graph` | ✅ 通过 | 0.0 |
-| `test_02_api_read.TestReadApi.test_kp_build_options` | ✅ 通过 | 0.01 |
-| `test_02_api_read.TestReadApi.test_kp_detail` | ✅ 通过 | 0.0 |
-| `test_02_api_read.TestReadApi.test_kps` | ✅ 通过 | 0.02 |
+| `test_02_api_read.TestReadApi.test_firstrun` | ✅ 通过 | 0.02 |
+| `test_02_api_read.TestReadApi.test_graph` | ✅ 通过 | 0.03 |
+| `test_02_api_read.TestReadApi.test_kp_build_options` | ✅ 通过 | 0.05 |
+| `test_02_api_read.TestReadApi.test_kp_detail` | ✅ 通过 | 0.03 |
+| `test_02_api_read.TestReadApi.test_kps` | ✅ 通过 | 0.01 |
 | `test_02_api_read.TestReadApi.test_mindmap` | ✅ 通过 | 0.05 |
-| `test_02_api_read.TestReadApi.test_mistakes` | ✅ 通过 | 0.0 |
-| `test_02_api_read.TestReadApi.test_notes_read` | ✅ 通过 | 0.03 |
-| `test_02_api_read.TestReadApi.test_page_kps` | ✅ 通过 | 0.0 |
-| `test_02_api_read.TestReadApi.test_progress_snapshots` | ✅ 通过 | 0.02 |
-| `test_02_api_read.TestReadApi.test_queue` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_mistakes` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_notes_read` | ✅ 通过 | 0.05 |
+| `test_02_api_read.TestReadApi.test_page_kps` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_progress_snapshots` | ✅ 通过 | 0.05 |
+| `test_02_api_read.TestReadApi.test_queue` | ✅ 通过 | 0.02 |
 | `test_02_api_read.TestReadApi.test_raw` | ✅ 通过 | 0.01 |
-| `test_02_api_read.TestReadApi.test_search` | ✅ 通过 | 0.23 |
+| `test_02_api_read.TestReadApi.test_search` | ✅ 通过 | 0.2 |
 | `test_02_api_read.TestReadApi.test_settings_prompt` | ✅ 通过 | 0.03 |
 | `test_02_api_read.TestReadApi.test_settings_read` | ✅ 通过 | 0.02 |
-| `test_02_api_read.TestReadApi.test_share` | ✅ 通过 | 0.03 |
-| `test_02_api_read.TestReadApi.test_stats` | ✅ 通过 | 0.01 |
+| `test_02_api_read.TestReadApi.test_share` | ✅ 通过 | 0.02 |
+| `test_02_api_read.TestReadApi.test_stats` | ✅ 通过 | 0.03 |
 | `test_02_api_read.TestReadApi.test_subjects` | ✅ 通过 | 0.01 |
 | `test_02_api_read.TestReadApi.test_terms` | ✅ 通过 | 0.03 |
-| `test_03_api_write.TestWriteApi.test_bad_query_params_robust` | ✅ 通过 | 0.31 |
+| `test_03_api_write.TestWriteApi.test_bad_query_params_robust` | ✅ 通过 | 0.33 |
 | `test_03_api_write.TestWriteApi.test_cleanup_preview` | ✅ 通过 | 0.04 |
 | `test_03_api_write.TestWriteApi.test_doc_delete_preview` | ✅ 通过 | 0.06 |
-| `test_03_api_write.TestWriteApi.test_doc_rename_preview` | ✅ 通过 | 0.05 |
-| `test_03_api_write.TestWriteApi.test_docs_delete_preview` | ✅ 通过 | 0.07 |
-| `test_03_api_write.TestWriteApi.test_import_preview` | ✅ 通过 | 0.02 |
+| `test_03_api_write.TestWriteApi.test_doc_rename_preview` | ✅ 通过 | 0.04 |
+| `test_03_api_write.TestWriteApi.test_docs_delete_preview` | ✅ 通过 | 0.08 |
+| `test_03_api_write.TestWriteApi.test_import_preview` | ✅ 通过 | 0.01 |
 | `test_03_api_write.TestWriteApi.test_ingest_batch_plan` | ✅ 通过 | 0.01 |
-| `test_03_api_write.TestWriteApi.test_kp_create` | ✅ 通过 | 0.13 |
-| `test_03_api_write.TestWriteApi.test_note_deck` | ✅ 通过 | 0.06 |
-| `test_03_api_write.TestWriteApi.test_note_lookup_by_name` | ✅ 通过 | 0.22 |
+| `test_03_api_write.TestWriteApi.test_kp_create` | ✅ 通过 | 0.14 |
+| `test_03_api_write.TestWriteApi.test_note_deck` | ✅ 通过 | 0.08 |
+| `test_03_api_write.TestWriteApi.test_note_lookup_by_name` | ✅ 通过 | 0.23 |
 | `test_03_api_write.TestWriteApi.test_note_update_guard` | ✅ 通过 | 0.16 |
-| `test_03_api_write.TestWriteApi.test_note_write` | ✅ 通过 | 0.17 |
-| `test_03_api_write.TestWriteApi.test_rename_raw_preview` | ✅ 通过 | 0.04 |
-| `test_03_api_write.TestWriteApi.test_review` | ✅ 通过 | 0.19 |
-| `test_03_api_write.TestWriteApi.test_settings_write` | ✅ 通过 | 0.16 |
-| `test_03_api_write.TestWriteApi.test_subject_create_rename` | ✅ 通过 | 0.44 |
+| `test_03_api_write.TestWriteApi.test_note_write` | ✅ 通过 | 0.24 |
+| `test_03_api_write.TestWriteApi.test_rename_raw_preview` | ✅ 通过 | 0.05 |
+| `test_03_api_write.TestWriteApi.test_review` | ✅ 通过 | 0.21 |
+| `test_03_api_write.TestWriteApi.test_settings_write` | ✅ 通过 | 0.12 |
+| `test_03_api_write.TestWriteApi.test_subject_create_rename` | ✅ 通过 | 0.42 |
 | `test_03_api_write.TestWriteApi.test_subject_switch_deck` | ✅ 通过 | 0.23 |
-| `test_04_cli.TestCli.test_check` | ✅ 通过 | 1.91 |
-| `test_04_cli.TestCli.test_docs` | ✅ 通过 | 0.9 |
-| `test_04_cli.TestCli.test_docs_outline` | ✅ 通过 | 0.94 |
-| `test_04_cli.TestCli.test_ingest` | ✅ 通过 | 2.06 |
-| `test_04_cli.TestCli.test_ingest_idempotent` | ✅ 通过 | 1.77 |
-| `test_04_cli.TestCli.test_kp` | ✅ 通过 | 1.86 |
-| `test_04_cli.TestCli.test_mistake` | ✅ 通过 | 1.81 |
-| `test_04_cli.TestCli.test_note` | ✅ 通过 | 2.67 |
+| `test_04_cli.TestCli.test_check` | ✅ 通过 | 1.98 |
+| `test_04_cli.TestCli.test_docs` | ✅ 通过 | 0.89 |
+| `test_04_cli.TestCli.test_docs_outline` | ✅ 通过 | 0.89 |
+| `test_04_cli.TestCli.test_ingest` | ✅ 通过 | 2.08 |
+| `test_04_cli.TestCli.test_ingest_idempotent` | ✅ 通过 | 1.8 |
+| `test_04_cli.TestCli.test_kp` | ✅ 通过 | 1.8 |
+| `test_04_cli.TestCli.test_mistake` | ✅ 通过 | 1.87 |
+| `test_04_cli.TestCli.test_note` | ✅ 通过 | 2.76 |
 | `test_04_cli.TestCli.test_review` | ✅ 通过 | 3.63 |
-| `test_04_cli.TestCli.test_search` | ✅ 通过 | 1.09 |
-| `test_04_cli.TestCli.test_show` | ✅ 通过 | 1.77 |
-| `test_04_cli.TestCli.test_stats` | ✅ 通过 | 0.91 |
+| `test_04_cli.TestCli.test_search` | ✅ 通过 | 1.2 |
+| `test_04_cli.TestCli.test_show` | ✅ 通过 | 1.82 |
+| `test_04_cli.TestCli.test_stats` | ✅ 通过 | 0.9 |
 | `test_05_browser.TestBrowser.test_edge_dom` | ✅ 通过 | 0.0 |
 | `test_05_browser.TestBrowser.test_edge_screenshot` | ✅ 通过 | 0.0 |
-| `test_06_healthcheck.TestHealthcheck.test_backup_data_isolated` | ✅ 通过 | 2.86 |
-| `test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green` | ✅ 通过 | 6.48 |
+| `test_06_healthcheck.TestHealthcheck.test_backup_data_isolated` | ✅ 通过 | 2.8 |
+| `test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green` | ✅ 通过 | 6.3 |
+| `test_07_legacy_ingest.TestLegacyIngestDecision.test_batch_plan_legacy` | ✅ 通过 | 0.01 |
+| `test_07_legacy_ingest.TestLegacyIngestDecision.test_converted_artifact_indexed` | ✅ 通过 | 0.05 |
+| `test_07_legacy_ingest.TestLegacyIngestDecision.test_import_preview_legacy` | ✅ 通过 | 0.03 |
+| `test_07_legacy_ingest.TestLegacyIngestDecision.test_raw_list_legacy_supported` | ✅ 通过 | 0.03 |
 
 ## 7. 证据文件
 
@@ -224,6 +232,7 @@ Lead 侧独立验证：_work/lead/verify_bugfix.py 12/12 通过
 - `_work\verify\logs\browser-8897.log` — 被测实例启动日志
 - `_work\verify\logs\health-8897.log` — 被测实例启动日志
 - `_work\verify\logs\healthcheck-8897.log` — 被测实例启动日志
+- `_work\verify\logs\legacy-8897.log` — 被测实例启动日志
 - `_work\verify\logs\read-8897.log` — 被测实例启动日志
 - `_work\verify\logs\write-8897.log` — 被测实例启动日志
 
