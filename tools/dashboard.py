@@ -9975,7 +9975,7 @@ def api_delete_raw(rel):
 
 def _doc_stem(doc_path) -> str:
     """`documents.path` → 文件名主干（figure_desc 的目录名由它清洗而来）。"""
-    return Path(str(doc_path or "")).replace("\\", "/").stem.strip()
+    return Path(str(doc_path or "").replace("\\", "/")).stem.strip()
 
 
 def _artifact_terms_file(doc_id):
@@ -11353,11 +11353,16 @@ def api_note(name):
     取全文（不是 `api_notes_by` 那种截断版）是刻意的：知识点窗口改笔记要拿它
     回写，拿截断的正文回写会把尾部永久砍掉（卡 C-0082 的硬约束）。
     """
+    want = str(name or "").strip()
     notes = study.list_notes()
-    for n in notes:
-        if (name, n["title"], n["file"].removesuffix(".md")) in [(name, n["title"], n["file"].removesuffix(".md"))]:
-            text = Path(n["path"]).read_text(encoding="utf-8", errors="replace")
-            return {"note": n, "content": text, "body": study.note_body(text)}
+    if want:
+        low = want.lower()
+        for n in notes:
+            # 前端两种入口分别传 file 全名与 title；stem 兼容旧链接
+            candidates = (n["file"], n["title"], n["file"].removesuffix(".md"))
+            if want in candidates or low in [c.lower() for c in candidates]:
+                text = Path(n["path"]).read_text(encoding="utf-8", errors="replace")
+                return {"note": n, "content": text, "body": study.note_body(text)}
     return {"error": "笔记不存在"}
 
 
@@ -12294,7 +12299,10 @@ def api_subjects_switch(payload):
             "_code": 409,
         }
     slug = payload.get("slug", "")
-    entry = subjects_mod.switch(slug)
+    try:
+        entry = subjects_mod.switch(slug)
+    except subjects_mod.SubjectError as e:
+        return {"error": str(e), "_code": 400}
     cleared = _reset_subject_caches()
     d = subjects_mod.info()
     d["ok"] = True
@@ -12437,28 +12445,28 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/docs":
                         return self._json(api_docs(conn))
                     if path == "/api/doc":
-                        return self._json(api_doc(conn, int(qs.get("id", 0))))
+                        return self._json(api_doc(conn, _int_arg(qs.get("id"), 0)))
                     if path == "/api/chunk":
                         return self._json(api_chunk(
                             conn,
-                            int(qs.get("id", 0)),
-                            int(qs.get("before", 1)),
-                            int(qs.get("after", 1)),
+                            _int_arg(qs.get("id"), 0),
+                            _int_arg(qs.get("before"), 1),
+                            _int_arg(qs.get("after"), 1),
                         ))
                     if path == "/api/search":
                         return self._json(api_search(
                             conn, qs.get("q", ""),
-                            int(qs.get("k", 8)),
+                            _int_arg(qs.get("k"), 8),
                             qs.get("corpus", "main"),
                         ))
                     if path == "/api/kps":
                         return self._json(api_kps(conn))
                     if path == "/api/kp":
-                        return self._json(api_kp_detail(conn, int(qs.get("id", 0))))
+                        return self._json(api_kp_detail(conn, _int_arg(qs.get("id"), 0)))
                     if path == "/api/queue":
                         return self._json(api_queue(
                             conn,
-                            int(qs.get("limit", 20)),
+                            _int_arg(qs.get("limit"), 20),
                         ))
                     if path == "/api/deck-calendar":
                         return self._json(api_deck_calendar(conn, qs.get("ym", "")))
@@ -12482,7 +12490,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(api_kp_build_batch_options(conn))
                     if path == "/api/mindmap/kp":
                         return self._json(api_mindmap_kp(
-                            int(qs.get("doc_id", 0)), qs.get("kp_id", "")))
+                            _int_arg(qs.get("doc_id"), 0), qs.get("kp_id", "")))
                     # 末级知识点**总结**（新方案，卡 C-0032）：点开末级节点时才取。
                     # 与上面的 /api/mindmap/kp（旧方案，带块原文）并存，互不影响。
                     if path == "/api/summary-kp":
