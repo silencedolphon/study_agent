@@ -1,0 +1,1125 @@
+{
+  "gate": "M0-v2",
+  "gate_version": "2.0",
+  "label": "post",
+  "generated_at": "2026-10-18T23:53:33+0800",
+  "base": "http://127.0.0.1:8914",
+  "instance": {
+    "guard": {
+      "firstrun": {
+        "docs": 9,
+        "empty": false,
+        "credential": {
+          "ok": true,
+          "tail": "cb1e"
+        },
+        "raw_dir": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\raw",
+        "db_path": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\index\\study.db",
+        "settings_file": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\config.local.json",
+        "env_example": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\.env.example"
+      },
+      "port": 8914,
+      "db_path": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\index\\study.db",
+      "raw_dir": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox\\raw"
+    },
+    "code_fingerprint": {
+      "git_head": "816c9d8 + 工作区改动",
+      "sandbox": "D:\\study_agent\\_work\\eval\\instances\\qa-gate\\sandbox",
+      "tools/dashboard.py": {
+        "size": 640923,
+        "sha256": "26494a46d24b964f99ce69c597f908f590f4c5b615553156c8d72cc5c9307986"
+      },
+      "core/search.py": {
+        "size": 54891,
+        "sha256": "63f047e4be9d09d6957e0accac997587e457a23d1f82973ccb5b3c09ad5e8788"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      }
+    }
+  },
+  "http_evidence": {
+    "settings_scenario_hint": {
+      "status": 200,
+      "has_scenario_word": false,
+      "matched_fields": [
+        "mode"
+      ]
+    },
+    "summary_kp": {
+      "status": 200,
+      "kp_id": 1,
+      "summary_len": 202
+    },
+    "import_api_candidates": [
+      {
+        "method": "GET",
+        "path": "/api/kp-import/preview",
+        "status": 200,
+        "exists": true,
+        "body": "{\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\logs\\\\k"
+      },
+      {
+        "method": "POST",
+        "path": "/api/kp-import/apply",
+        "status": 200,
+        "exists": true,
+        "body": "{\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\logs\\\\kno"
+      },
+      {
+        "method": "GET",
+        "path": "/api/kp/import-artifacts",
+        "status": 404,
+        "exists": false,
+        "body": "{\"error\": \"未知路径\"}"
+      },
+      {
+        "method": "POST",
+        "path": "/api/kp/import-artifacts",
+        "status": 404,
+        "exists": false,
+        "body": "{\"error\": \"未知路径\"}"
+      },
+      {
+        "method": "POST",
+        "path": "/api/kp/import",
+        "status": 404,
+        "exists": false,
+        "body": "{\"error\": \"未知路径\"}"
+      },
+      {
+        "method": "POST",
+        "path": "/api/kp-import",
+        "status": 404,
+        "exists": false,
+        "body": "{\"error\": \"未知路径\"}"
+      }
+    ],
+    "import_preview_ok": true,
+    "import_apply_ok": true
+  },
+  "browser": {
+    "m0_1": {
+      "subchecks": [
+        {
+          "name": "设置里存在 A/B/C 场景选择",
+          "ok": true,
+          "detail": "{\"select\":null,\"chips\":[\"A · 日常\",\"B · 备考\",\"C · 冲刺\"]}"
+        },
+        {
+          "name": "切换 B/C 后首屏或导航发生变化",
+          "ok": true,
+          "detail": "{\"A\":{\"nav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"],\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\\n最薄弱的知识点\\n还没有复习记录。\\n复习过一次之后，这里就会列出最需要补的知识点。\\n去「复习」开始\"},\"B\":{\"nav\":[\"总览\",\"复习\",\"知识点\",\"错题\",\"资料\",\"问答\",\"图谱\",\"笔记\"],\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\\n最薄弱的知识点\\n还没有复习记录。\\n复习过一次之后，这里就会列出最需要补的知识点。\\n去「复习」开始\"},\"C\":{\"nav\":[\"复习\",\"问答\",\"资料\",\"知识点\",\"错题\""
+        },
+        {
+          "name": "刷新后场景保持（备考）",
+          "ok": true,
+          "detail": "{\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ON\",\"nav\":[\"总览\",\"复习\",\"知识点\",\"错题\",\"资料\",\"问答\",\"图谱\",\"笔记\"]}"
+        },
+        {
+          "name": "切回 A 后首屏/导航恢复（无功能丢失）",
+          "ok": true,
+          "detail": "{\"back\":{\"ok\":true,\"via\":\"chip\",\"text\":\"A · 日常\"},\"beforeNav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"],\"afterNav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"]}"
+        }
+      ],
+      "evidence": {
+        "scenarios": {
+          "日常": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "A · 日常"
+            },
+            "sig": {
+              "nav": [
+                "总览",
+                "问答",
+                "资料",
+                "复习",
+                "知识点",
+                "图谱",
+                "错题",
+                "笔记"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          },
+          "备考": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "B · 备考"
+            },
+            "sig": {
+              "nav": [
+                "总览",
+                "复习",
+                "知识点",
+                "错题",
+                "资料",
+                "问答",
+                "图谱",
+                "笔记"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          },
+          "冲刺": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "C · 冲刺"
+            },
+            "sig": {
+              "nav": [
+                "复习",
+                "问答",
+                "资料",
+                "知识点",
+                "错题",
+                "总览"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          }
+        },
+        "shots": {
+          "日常": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-日常.png",
+          "备考": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-备考.png",
+          "冲刺": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-冲刺.png",
+          "refresh": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-refresh.png",
+          "backA": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-backA.png"
+        },
+        "control": {
+          "found": true,
+          "hasSceneWord": true,
+          "select": null,
+          "chips": [
+            "A · 日常",
+            "B · 备考",
+            "C · 冲刺"
+          ],
+          "selectCount": 1,
+          "badge": "场景 A · 日常",
+          "modalText": "⚙ 设置中心\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\n✕\n🔒\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\n学习场景\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\nA · 日常\nB · 备考\nC · 冲刺\n💬\nAI 问答\n🧩\nAI 知识点总结\n📥\n入库\n🎓\n课件答疑\n📖\nAI 预习总结\n设置只保存在本机\n不会上传、不会进代码仓库\n密钥留空＝不改动\n💬\nAI 问答\n\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着——问答要的是快与有据。\n模型 · 端点 · 密钥\n模型名\n（看板显式传参，不影响入库那条）。\nAPI Base\n兼容 OpenAI 协议的端点根地址。\nAPI 密钥\n未配置\n留空时回退到 本机已保存的密钥（当前可用 · 尾号 cb1e）。\n只存在本机，不会上传到任何地方。\n识图 · 推理 · 强度\n识图（用图注作证据）\n已开启\n关闭后，检索到的「图示说明」块（视觉模型对插图的解读）不再进提示词，只留原文块。出处角标里也不会再出现图注。\n开启推理\n已关闭\n默认关：问答要的是快与有据。开了会明显变慢、变贵。\n推理强度\nnone\nlow\nhigh\nmax\n官方取值 none/low/high/max。只有开启推理时才会发给服务端。\n高级参数（1 项）\n提示词\n知识库问答 · 系统提示词\n1638 字 · 内建提示词（本版只读）\n查看\n查询改写 · 提示词\n381 字 · 内建提示词（本版只读）\n查看\n问答的系统提示词决定\"只依据资料作答、找不到就说没有\"的口径；这一版不给窗口改，避免一句话改坏引用纪律。\n保存\n本区恢复默认\n重新读取"
+        },
+        "refresh": {
+          "afterRefresh": {
+            "nav": [
+              "总览",
+              "复习",
+              "知识点",
+              "错题",
+              "资料",
+              "问答",
+              "图谱",
+              "笔记"
+            ],
+            "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+          },
+          "navText": "⚙\n设置"
+        }
+      },
+      "status": "PASS"
+    },
+    "m0_6": {
+      "subchecks": [
+        {
+          "name": "8 视图可见文本无开发者术语（logs//tools//卡 C-/doc_id/.json）",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "name": "所有空态至少有 1 个可点 CTA",
+          "ok": true,
+          "detail": "空态缺 CTA 的视图: []"
+        },
+        {
+          "name": "知识点列表 summary 截断（≤80 字/省略号/视觉裁切）",
+          "ok": true,
+          "detail": "{\"found\":true,\"len\":202,\"text\":\"这是一条用于验证知识点列表摘要截断的长摘要：苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通\",\"endsEllipsis\":false,\"maxWidth\":\"426.938px\",\"overflow\":\"hidden\",\"textOverflow\":\"clip\",\"whiteSpace\":\"normal\",\"lineClamp\":\"2\",\"clientH\":40,\"scrollH\":119}"
+        }
+      ],
+      "evidence": {
+        "views": {
+          "overview": {
+            "view": "overview",
+            "textLen": 194,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "去「复习」开始"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-overview.png"
+          },
+          "docs": {
+            "view": "docs",
+            "textLen": 3400,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 5,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "导入",
+              "选择教材并入库",
+              "入库全部待处理文件",
+              "看包信息并导入"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-docs.png"
+          },
+          "assistant": {
+            "view": "assistant",
+            "textLen": 370,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 0,
+            "ctaCount": 1,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "发送"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-assistant.png"
+          },
+          "review": {
+            "view": "review",
+            "textLen": 1412,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 0,
+            "emptyCtaCount": 0,
+            "ctaTexts": [],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-review.png"
+          },
+          "kps": {
+            "view": "kps",
+            "textLen": 94798,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 6,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "＋ 新建知识点",
+              "保存知识点",
+              "选择课件批量整理",
+              "去整理这份课件"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-kps.png"
+          },
+          "mistakes": {
+            "view": "mistakes",
+            "textLen": 70,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "＋ 记一道错题"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-mistakes.png"
+          },
+          "graph": {
+            "view": "graph",
+            "textLen": 4005,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 0,
+            "ctaCount": 0,
+            "emptyCtaCount": 0,
+            "ctaTexts": [],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-graph.png"
+          },
+          "notes": {
+            "view": "notes",
+            "textLen": 65,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "去「知识点」写笔记"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-notes.png"
+          }
+        },
+        "shots": {},
+        "terms": {},
+        "summary": {
+          "found": true,
+          "len": 202,
+          "text": "这是一条用于验证知识点列表摘要截断的长摘要：苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通",
+          "endsEllipsis": false,
+          "maxWidth": "426.938px",
+          "overflow": "hidden",
+          "textOverflow": "clip",
+          "whiteSpace": "normal",
+          "lineClamp": "2",
+          "clientH": 40,
+          "scrollH": 119
+        }
+      },
+      "status": "PASS"
+    },
+    "m0_6b": {
+      "ui": {
+        "found": true,
+        "text": "导入已整理好的知识点（0 费用）",
+        "selector": "#kp-import-open",
+        "viewText": "新建知识点 名称必填；建好后自动进入今天的复习队列\n＋ 新建知识点\n手工建一条最轻量的知识点：名称必填，科目 / 一句话摘要 / 出处 chunk_id（如 12,13）都可留空。 想批量整理已有课件，用下面的「批量整理知识点」。\n知识点 · 共 257 个（按掌握度升序）\n知识点\t科目\t掌握度\t间隔\t复习\t遗忘\t下次\n5-羟色胺功能与通路\n5-羟色胺（5-HT，血清素）是中枢神经系统中重要的单胺类递质，参与多种生理与行为调节。其作用既影响睡眠与体温等基础生理过程，也涉及情绪、摄食和痛觉感受。5-HT能神经元胞体主要位于脑干中缝核，纤维向上广泛投射到前额皮质、纹状体、海马等前脑区域。5-HT不足与抑郁症相关，说明它在情绪调节中起关键作用。比较5-HT与多巴胺通路可见，不同单胺递质各有起源核团和投射网络，不能只记功能而忽略通路。 要点：5-HT又称血清素，属单胺类递质，与多巴胺各有独立的起源"
+      },
+      "subchecks": [
+        {
+          "name": "知识点页存在「导入已整理产物」按钮",
+          "ok": true,
+          "detail": "{\"found\":true,\"text\":\"导入已整理好的知识点（0 费用）\",\"selector\":\"#kp-import-open\",\"viewText\":\"新建知识点 名称必填；建好后自动进入今天的复习队列\\n＋ 新建知识点\\n手工建一条最轻量的知识点：名称必填，科目 / 一句话摘要 / 出处 chunk_id（如 12,13）都可留空。 想批量整理已有课件，用下面的「批量整理知识点」。\\n知识点 · 共 257 个（按掌握度升序）\\n知识点\\t科目\\t掌握度\\t间隔\\t复习\\t遗忘\\t下次\\n5-羟色胺功能与通路\\n5-羟色胺（5-HT，血清素）是中枢神经系统中重要的单胺类递质，参与多种生理与行为调节。其作用既影响睡眠与体温等基础生理过程，也涉及情绪、摄食和痛觉感受。5-HT能神经元胞体主要位于脑干中缝核，纤维向上广泛投射到前额皮质、纹状体、海马等前脑区域。5-HT不足与抑郁症相关"
+        }
+      ]
+    },
+    "m0_8": {
+      "subchecks": [
+        {
+          "name": "390 宽无横向滚动：overview",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：overview",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：docs",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：docs",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：assistant",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：assistant",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：review",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：review",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：kps",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：kps",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：mistakes",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：mistakes",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：graph",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：graph",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：notes",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：notes",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "资料页 390 宽不横向滑（scrollWidth<=clientWidth+2）",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390}"
+        }
+      ],
+      "evidence": {
+        "views": {
+          "overview": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-overview.png"
+          },
+          "docs": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-docs.png"
+          },
+          "assistant": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-assistant.png"
+          },
+          "review": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-review.png"
+          },
+          "kps": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-kps.png"
+          },
+          "mistakes": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-mistakes.png"
+          },
+          "graph": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-graph.png"
+          },
+          "notes": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-notes.png"
+          }
+        },
+        "shots": {}
+      },
+      "status": "PASS"
+    }
+  },
+  "browser_error": "",
+  "checks": [
+    {
+      "id": "M0-1",
+      "title": "场景预设（A/B/C）切换/保持/恢复",
+      "status": "PASS",
+      "criteria": "设置里存在 A/B/C 场景选择；切换 B/C 后首屏或导航变化；刷新后保持；切回 A 恢复",
+      "subchecks": [
+        {
+          "name": "设置里存在 A/B/C 场景选择",
+          "ok": true,
+          "detail": "{\"select\":null,\"chips\":[\"A · 日常\",\"B · 备考\",\"C · 冲刺\"]}"
+        },
+        {
+          "name": "切换 B/C 后首屏或导航发生变化",
+          "ok": true,
+          "detail": "{\"A\":{\"nav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"],\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\\n最薄弱的知识点\\n还没有复习记录。\\n复习过一次之后，这里就会列出最需要补的知识点。\\n去「复习」开始\"},\"B\":{\"nav\":[\"总览\",\"复习\",\"知识点\",\"错题\",\"资料\",\"问答\",\"图谱\",\"笔记\"],\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\\n最薄弱的知识点\\n还没有复习记录。\\n复习过一次之后，这里就会列出最需要补的知识点。\\n去「复习」开始\"},\"C\":{\"nav\":[\"复习\",\"问答\",\"资料\",\"知识点\",\"错题\""
+        },
+        {
+          "name": "刷新后场景保持（备考）",
+          "ok": true,
+          "detail": "{\"first\":\"资料文档\\n9\\n322 切块 · 4.8 万字\\n知识点\\n257\\n未学 257 · 已复习 0\\n今日待复习\\n0\\n今日已复习 0 次\\n未解决错题\\n0\\n累计 0 道\\n笔记\\n0\\n跨会话保留的学习记录\\n资料构成\\npptx 9\\n检索引擎：向量（本地 ON\",\"nav\":[\"总览\",\"复习\",\"知识点\",\"错题\",\"资料\",\"问答\",\"图谱\",\"笔记\"]}"
+        },
+        {
+          "name": "切回 A 后首屏/导航恢复（无功能丢失）",
+          "ok": true,
+          "detail": "{\"back\":{\"ok\":true,\"via\":\"chip\",\"text\":\"A · 日常\"},\"beforeNav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"],\"afterNav\":[\"总览\",\"问答\",\"资料\",\"复习\",\"知识点\",\"图谱\",\"错题\",\"笔记\"]}"
+        }
+      ],
+      "evidence": {
+        "scenarios": {
+          "日常": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "A · 日常"
+            },
+            "sig": {
+              "nav": [
+                "总览",
+                "问答",
+                "资料",
+                "复习",
+                "知识点",
+                "图谱",
+                "错题",
+                "笔记"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          },
+          "备考": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "B · 备考"
+            },
+            "sig": {
+              "nav": [
+                "总览",
+                "复习",
+                "知识点",
+                "错题",
+                "资料",
+                "问答",
+                "图谱",
+                "笔记"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          },
+          "冲刺": {
+            "switch": {
+              "ok": true,
+              "via": "chip",
+              "text": "C · 冲刺"
+            },
+            "sig": {
+              "nav": [
+                "复习",
+                "问答",
+                "资料",
+                "知识点",
+                "错题",
+                "总览"
+              ],
+              "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+            }
+          }
+        },
+        "shots": {
+          "日常": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-日常.png",
+          "备考": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-备考.png",
+          "冲刺": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-冲刺.png",
+          "refresh": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-refresh.png",
+          "backA": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-01-scene-backA.png"
+        },
+        "control": {
+          "found": true,
+          "hasSceneWord": true,
+          "select": null,
+          "chips": [
+            "A · 日常",
+            "B · 备考",
+            "C · 冲刺"
+          ],
+          "selectCount": 1,
+          "badge": "场景 A · 日常",
+          "modalText": "⚙ 设置中心\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\n✕\n🔒\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\n学习场景\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\nA · 日常\nB · 备考\nC · 冲刺\n💬\nAI 问答\n🧩\nAI 知识点总结\n📥\n入库\n🎓\n课件答疑\n📖\nAI 预习总结\n设置只保存在本机\n不会上传、不会进代码仓库\n密钥留空＝不改动\n💬\nAI 问答\n\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着——问答要的是快与有据。\n模型 · 端点 · 密钥\n模型名\n（看板显式传参，不影响入库那条）。\nAPI Base\n兼容 OpenAI 协议的端点根地址。\nAPI 密钥\n未配置\n留空时回退到 本机已保存的密钥（当前可用 · 尾号 cb1e）。\n只存在本机，不会上传到任何地方。\n识图 · 推理 · 强度\n识图（用图注作证据）\n已开启\n关闭后，检索到的「图示说明」块（视觉模型对插图的解读）不再进提示词，只留原文块。出处角标里也不会再出现图注。\n开启推理\n已关闭\n默认关：问答要的是快与有据。开了会明显变慢、变贵。\n推理强度\nnone\nlow\nhigh\nmax\n官方取值 none/low/high/max。只有开启推理时才会发给服务端。\n高级参数（1 项）\n提示词\n知识库问答 · 系统提示词\n1638 字 · 内建提示词（本版只读）\n查看\n查询改写 · 提示词\n381 字 · 内建提示词（本版只读）\n查看\n问答的系统提示词决定\"只依据资料作答、找不到就说没有\"的口径；这一版不给窗口改，避免一句话改坏引用纪律。\n保存\n本区恢复默认\n重新读取"
+        },
+        "refresh": {
+          "afterRefresh": {
+            "nav": [
+              "总览",
+              "复习",
+              "知识点",
+              "错题",
+              "资料",
+              "问答",
+              "图谱",
+              "笔记"
+            ],
+            "first": "资料文档\n9\n322 切块 · 4.8 万字\n知识点\n257\n未学 257 · 已复习 0\n今日待复习\n0\n今日已复习 0 次\n未解决错题\n0\n累计 0 道\n笔记\n0\n跨会话保留的学习记录\n资料构成\npptx 9\n检索引擎：向量（本地 ONNX） + 全文索引 （FTS5 trigram）\n最薄弱的知识点\n还没有复习记录。\n复习过一次之后，这里就会列出最需要补的知识点。\n去「复习」开始"
+          },
+          "navText": "⚙\n设置"
+        }
+      }
+    },
+    {
+      "id": "M0-6",
+      "title": "文案清理 + 空态 CTA + summary 截断",
+      "status": "PASS",
+      "criteria": "8 视图可见文本无开发者术语；所有空态至少有 1 个可点 CTA；知识点 summary 截断",
+      "subchecks": [
+        {
+          "name": "8 视图可见文本无开发者术语（logs//tools//卡 C-/doc_id/.json）",
+          "ok": true,
+          "detail": "[]"
+        },
+        {
+          "name": "所有空态至少有 1 个可点 CTA",
+          "ok": true,
+          "detail": "空态缺 CTA 的视图: []"
+        },
+        {
+          "name": "知识点列表 summary 截断（≤80 字/省略号/视觉裁切）",
+          "ok": true,
+          "detail": "{\"found\":true,\"len\":202,\"text\":\"这是一条用于验证知识点列表摘要截断的长摘要：苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通\",\"endsEllipsis\":false,\"maxWidth\":\"426.938px\",\"overflow\":\"hidden\",\"textOverflow\":\"clip\",\"whiteSpace\":\"normal\",\"lineClamp\":\"2\",\"clientH\":40,\"scrollH\":119}"
+        }
+      ],
+      "evidence": {
+        "views": {
+          "overview": {
+            "view": "overview",
+            "textLen": 194,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "去「复习」开始"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-overview.png"
+          },
+          "docs": {
+            "view": "docs",
+            "textLen": 3400,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 5,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "导入",
+              "选择教材并入库",
+              "入库全部待处理文件",
+              "看包信息并导入"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-docs.png"
+          },
+          "assistant": {
+            "view": "assistant",
+            "textLen": 370,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 0,
+            "ctaCount": 1,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "发送"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-assistant.png"
+          },
+          "review": {
+            "view": "review",
+            "textLen": 1412,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 0,
+            "emptyCtaCount": 0,
+            "ctaTexts": [],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-review.png"
+          },
+          "kps": {
+            "view": "kps",
+            "textLen": 94798,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 1,
+            "ctaCount": 6,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "＋ 新建知识点",
+              "保存知识点",
+              "选择课件批量整理",
+              "去整理这份课件"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-kps.png"
+          },
+          "mistakes": {
+            "view": "mistakes",
+            "textLen": 70,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 0,
+            "ctaTexts": [
+              "＋ 记一道错题"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-mistakes.png"
+          },
+          "graph": {
+            "view": "graph",
+            "textLen": 4005,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": false,
+            "emptyBlocks": 0,
+            "ctaCount": 0,
+            "emptyCtaCount": 0,
+            "ctaTexts": [],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-graph.png"
+          },
+          "notes": {
+            "view": "notes",
+            "textLen": 65,
+            "terms": [],
+            "termCtx": [],
+            "termCount": 0,
+            "is_empty": true,
+            "emptyBlocks": 1,
+            "ctaCount": 1,
+            "emptyCtaCount": 1,
+            "ctaTexts": [
+              "去「知识点」写笔记"
+            ],
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-06-notes.png"
+          }
+        },
+        "shots": {},
+        "terms": {},
+        "summary": {
+          "found": true,
+          "len": 202,
+          "text": "这是一条用于验证知识点列表摘要截断的长摘要：苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通过增强GABA能神经传递发挥抗焦虑、镇静催眠、抗惊厥和中枢性肌肉松弛作用。苯二氮卓类药物通",
+          "endsEllipsis": false,
+          "maxWidth": "426.938px",
+          "overflow": "hidden",
+          "textOverflow": "clip",
+          "whiteSpace": "normal",
+          "lineClamp": "2",
+          "clientH": 40,
+          "scrollH": 119
+        }
+      }
+    },
+    {
+      "id": "M0-6b",
+      "title": "知识点页「导入已整理产物」入口 + API",
+      "status": "PASS",
+      "criteria": "知识点页有「导入已整理产物」按钮，且存在对应 API（候选接口非 404）",
+      "subchecks": [
+        {
+          "name": "知识点页存在「导入已整理产物」按钮",
+          "ok": true,
+          "detail": "{\"found\":true,\"text\":\"导入已整理好的知识点（0 费用）\",\"selector\":\"#kp-import-open\",\"viewText\":\"新建知识点 名称必填；建好后自动进入今天的复习队列\\n＋ 新建知识点\\n手工建一条最轻量的知识点：名称必填，科目 / 一句话摘要 / 出处 chunk_id（如 12,13）都可留空。 想批量整理已有课件，用下面的「批量整理知识点」。\\n知识点 · 共 257 个（按掌握度升序）\\n知识点\\t科目\\t掌握度\\t间隔\\t复习\\t遗忘\\t下次\\n5-羟色胺功能与通路\\n5-羟色胺（5-HT，血清素）是中枢神经系统中重要的单胺类递质，参与多种生理与行为调节。其作用既影响睡眠与体温等基础生理过程，也涉及情绪、摄食和痛觉感受。5-HT能神经元胞体主要位于脑干中缝核，纤维向上广泛投射到前额皮质、纹状体、海马等前脑区域。5-HT不足与抑郁症相关"
+        },
+        {
+          "name": "存在对应 API（preview GET / apply POST 均非 404）",
+          "ok": true,
+          "detail": "[{\"method\": \"GET\", \"path\": \"/api/kp-import/preview\", \"status\": 200, \"exists\": true, \"body\": \"{\\\"ok\\\": true, \\\"mode\\\": \\\"dry_run\\\", \\\"db\\\": \\\"D:\\\\\\\\study_agent\\\\\\\\_work\\\\\\\\eval\\\\\\\\instances\\\\\\\\qa-gate\\\\\\\\sandbox\\\\\\\\index\\\\\\\\study.db\\\", \\\"artifacts_dir\\\": \\\"D:\\\\\\\\study_agent\\\\\\\\_work\\\\\\\\eval\\\\\\\\instances\\\\\\\\qa-gate\\\\\\\\sandbox\\\\\\\\logs\\\\\\\\k\"}, {\"method\": \"POST\", \"path\": \"/api/kp-import/apply\", \"status\": 200, \"exists\": true, \"body\": \"{\\\"ok\\\": true, \\\"mode\\\": \\\"apply\\\", \\\"db\\\": \\\"D:\\\\\\\\study_agent\\\\\\\\_work\\\\\\\\eval\\\\\\\\instances\\\\\\\\qa-gate\\\\\\\\sandbox\\\\\\\\index\\\\\\\\study.db\\\", \\\"artifacts_dir\\\": \\\"D:\\\\\\\\study_agent\\\\\\\\_work\\\\\\\\eval\\\\\\\\instances\\\\\\\\qa-gate\\\\\\\\sandbox\\\\\\\\logs\\\\\\\\kno\"}, {\"method\": \"GET\", \"path\": \"/api/kp/import-artifacts\", \"status\": 404, \"exists\": false, \"body\": \"{\\\"error\\\": \\\"未知路径\\\"}\"}, {\"method\": \"POST\", \"path\": \"/api/kp/import-artifacts\", \"status\": 404, \"exists\": false, \"body\": \"{\\"
+        }
+      ],
+      "evidence": {
+        "ui": {
+          "found": true,
+          "text": "导入已整理好的知识点（0 费用）",
+          "selector": "#kp-import-open",
+          "viewText": "新建知识点 名称必填；建好后自动进入今天的复习队列\n＋ 新建知识点\n手工建一条最轻量的知识点：名称必填，科目 / 一句话摘要 / 出处 chunk_id（如 12,13）都可留空。 想批量整理已有课件，用下面的「批量整理知识点」。\n知识点 · 共 257 个（按掌握度升序）\n知识点\t科目\t掌握度\t间隔\t复习\t遗忘\t下次\n5-羟色胺功能与通路\n5-羟色胺（5-HT，血清素）是中枢神经系统中重要的单胺类递质，参与多种生理与行为调节。其作用既影响睡眠与体温等基础生理过程，也涉及情绪、摄食和痛觉感受。5-HT能神经元胞体主要位于脑干中缝核，纤维向上广泛投射到前额皮质、纹状体、海马等前脑区域。5-HT不足与抑郁症相关，说明它在情绪调节中起关键作用。比较5-HT与多巴胺通路可见，不同单胺递质各有起源核团和投射网络，不能只记功能而忽略通路。 要点：5-HT又称血清素，属单胺类递质，与多巴胺各有独立的起源"
+        },
+        "api_candidates": [
+          {
+            "method": "GET",
+            "path": "/api/kp-import/preview",
+            "status": 200,
+            "exists": true,
+            "body": "{\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\logs\\\\k"
+          },
+          {
+            "method": "POST",
+            "path": "/api/kp-import/apply",
+            "status": 200,
+            "exists": true,
+            "body": "{\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-gate\\\\sandbox\\\\logs\\\\kno"
+          },
+          {
+            "method": "GET",
+            "path": "/api/kp/import-artifacts",
+            "status": 404,
+            "exists": false,
+            "body": "{\"error\": \"未知路径\"}"
+          },
+          {
+            "method": "POST",
+            "path": "/api/kp/import-artifacts",
+            "status": 404,
+            "exists": false,
+            "body": "{\"error\": \"未知路径\"}"
+          },
+          {
+            "method": "POST",
+            "path": "/api/kp/import",
+            "status": 404,
+            "exists": false,
+            "body": "{\"error\": \"未知路径\"}"
+          },
+          {
+            "method": "POST",
+            "path": "/api/kp-import",
+            "status": 404,
+            "exists": false,
+            "body": "{\"error\": \"未知路径\"}"
+          }
+        ]
+      }
+    },
+    {
+      "id": "M0-8",
+      "title": "移动端 390 宽无横向滚动 / 首屏不自动滚",
+      "status": "PASS",
+      "criteria": "390×844 下 8 视图 scrollWidth<=clientWidth+2 且首屏 scrollY=0；资料页不横滑",
+      "subchecks": [
+        {
+          "name": "390 宽无横向滚动：overview",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：overview",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：docs",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：docs",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：assistant",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：assistant",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：review",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：review",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：kps",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：kps",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：mistakes",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：mistakes",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：graph",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：graph",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "390 宽无横向滚动：notes",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"bodySw\":390,\"viewSw\":366,\"viewCw\":366}"
+        },
+        {
+          "name": "390 宽首屏 scrollY=0：notes",
+          "ok": true,
+          "detail": "scrollY=0"
+        },
+        {
+          "name": "资料页 390 宽不横向滑（scrollWidth<=clientWidth+2）",
+          "ok": true,
+          "detail": "{\"sw\":390,\"cw\":390}"
+        }
+      ],
+      "evidence": {
+        "views": {
+          "overview": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-overview.png"
+          },
+          "docs": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-docs.png"
+          },
+          "assistant": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-assistant.png"
+          },
+          "review": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-review.png"
+          },
+          "kps": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-kps.png"
+          },
+          "mistakes": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-mistakes.png"
+          },
+          "graph": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-graph.png"
+          },
+          "notes": {
+            "sw": 390,
+            "cw": 390,
+            "scrollY": 0,
+            "bodySw": 390,
+            "viewSw": 366,
+            "viewCw": 366,
+            "ok": true,
+            "shot": "D:\\study_agent\\_work\\m0\\gate\\v2-shots\\POST-08-mobile-notes.png"
+          }
+        },
+        "shots": {}
+      }
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "pass": 4,
+    "fail": 0,
+    "result": "PASS"
+  }
+}
