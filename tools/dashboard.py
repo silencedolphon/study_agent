@@ -4245,9 +4245,7 @@ async function loadMindmapTree(){
   const lkpLine = d.lkp_available
     ? `知识点 <b>${d.lkp_total || 0} 条</b> · 已挂到 ${d.lkp_ready || 0} 个末级节点${
         d.lkp_pending ? `（<span style="color:var(--warn)">待生成 ${
-          d.lkp_pending} 个</span>）` : ''}${
-        d.lkp_source ? ` · 数据源 ${esc(d.lkp_source)}` : ''}${
-        d.lkp_source_card ? ` · 产出卡 ${esc(d.lkp_source_card)}` : ''}`
+          d.lkp_pending} 个</span>）` : ''}`
     : '末级知识点总结：<span class="badge warn">待生成</span>（还没读到总结数据文件）';
   // 卡 C-0045 的核心成果得看得见：覆盖了全篇多少页 · 有没有一页被两条重复计数 ·
   // 多少页是下放过来的。**向后兼容**：17 份旧产物没有 `meta.coverage`，
