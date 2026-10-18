@@ -1529,7 +1529,8 @@ async function viewReview(){
   //   ② 无论队列空不空，下面都接上遗忘曲线月历卡片。
   const queueHtml = !queue.length
     ? `<div class="empty">今天没有到期的复习 🎉<br>
-      <span class="small">在「知识点」页可以查看全部知识点，或让助手从资料中生成新的知识点。</span></div>`
+      <span class="small">还没有知识点的话，去「知识点」页点「＋ 新建知识点」建一条，
+      建好就会出现在这里的复习队列。</span></div>`
     : `<div class="card">
       <h2>到期复习队列 · 共 ${queue.length} 项</h2>
       <table><thead><tr><th>知识点</th><th>科目</th><th>掌握度</th><th>已复习</th>
@@ -1547,8 +1548,8 @@ async function viewReview(){
       <td class="small">${x.reps||0} 次</td>
     </tr>`).join('')}</tbody></table>
       <div class="sub" style="margin-top:12px">
-        点知识点名称可查看它的原文出处并直接打分。评分 0–2 视为答错（重置为 1 天），
-        3 勉强、4 正确、5 轻松。
+        点知识点名称可查看它的原文出处并直接打分。评分 0–2 视为答错（自动记入错题本、
+        复习间隔归零，详情弹窗里也能点「记一道错题」手动记），3 勉强、4 正确、5 轻松。
       </div>
     </div>`;
   $('#view').innerHTML = queueHtml + deckCalendarCard();
@@ -3117,14 +3118,50 @@ async function openDoc(id){
 // 删的只是**页签上的入口**：后端 `POST /api/kp`（库内知识点 CRUD）与 `kpForm()` /
 // `bindKpForm()` 两个函数**保留**（全仓库没有别的前端调用方，但接口是公开契约，
 // 删了会砸到脚本/将来的入口；见 `cards/C-0053/交付说明.md`）。
+//
+// M0-2（2026-10-18 三类学生评测 P0-A 修复）：手工入口**回来了**——空态与列表页
+// 都常驻「＋ 新建知识点」（`kpCreateCard()`，复用的就是保留下来的 `kpForm()` /
+// `bindKpForm()`，没有第二套表单）。空库从「知识点」页 2 次点击即可展开表单。
 // 同时在「课件思维导图」栏**上面**加一栏「名词解释」（`termsCard()`）。
+function kpCreateCard(){
+  return `<div class="card" style="margin-top:14px" id="kp-create-card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">新建知识点
+        <span class="small muted">名称必填；建好后自动进入今天的复习队列</span></h2>
+      <button class="act" id="kp-create-toggle">＋ 新建知识点</button>
+    </div>
+    <div class="small muted" style="margin-top:6px">
+      手工建一条最轻量的知识点：名称必填，科目 / 一句话摘要 / 出处 chunk_id（如 12,13）都可留空。
+      想批量整理已有课件，用下面的「批量整理知识点」。
+    </div>
+    <div id="kp-create-form" hidden style="margin-top:10px">${kpForm()}</div>
+  </div>`;
+}
+
+function bindKpCreate(){
+  const toggle = $('#kp-create-toggle');
+  if (!toggle) return;
+  toggle.onclick = () => {
+    const form = $('#kp-create-form');
+    if (!form) return;
+    form.hidden = !form.hidden;
+    toggle.textContent = form.hidden ? '＋ 新建知识点' : '收起表单';
+    if (!form.hidden){
+      bindKpForm();
+      const nm = $('#kp-name');
+      if (nm) nm.focus();
+    }
+  };
+}
+
 async function viewKps(){
   const {knowledge_points: kps} = await api('/api/kps');
   if (!kps.length){
-    $('#view').innerHTML = `${kpBuildCard()}
+    $('#view').innerHTML = `${kpCreateCard()}
+      ${kpBuildCard()}
       ${termsCard()}
       ${mindmapCard()}`;
-    bindKpBuild(); mountTerms(); mountMindmap(); return;
+    bindKpCreate(); bindKpBuild(); mountTerms(); mountMindmap(); return;
   }
   const rows = kps.map(k => {
     const cls = k.mastery>=.75?'ok':(k.mastery>=.4?'warn':'bad');
@@ -3140,7 +3177,8 @@ async function viewKps(){
       <td class="small muted">${k.due_at?fmtTime(k.due_at):'未排期'}</td>
     </tr>`;}).join('');
   $('#view').innerHTML = `
-    <div class="card">
+    ${kpCreateCard()}
+    <div class="card" style="margin-top:14px">
       <h2>知识点 · 共 ${kps.length} 个（按掌握度升序）</h2>
       <table><thead><tr><th>知识点</th><th>科目</th><th>掌握度</th><th>间隔</th>
       <th>复习</th><th>遗忘</th><th>下次</th></tr></thead><tbody>${rows}</tbody></table>
@@ -3148,6 +3186,7 @@ async function viewKps(){
     ${kpBuildCard()}
     ${termsCard()}
     ${mindmapCard()}`;
+  bindKpCreate();
   bindKpBuild();
   mountTerms();
   mountMindmap();
@@ -5212,24 +5251,34 @@ function kpForm(){
   return `<div class="row">
     <input id="kp-name" placeholder="名称（必填）" style="flex:1;min-width:180px">
     <input id="kp-subject" placeholder="科目" style="width:120px">
-    <input id="kp-chunks" placeholder="出处 chunk_id，如 12,13" style="width:170px">
-    <button class="act" id="kp-add">添加</button>
+    <input id="kp-chunks" placeholder="出处 chunk_id，如 12,13（可空）" style="width:210px">
+    <button class="act" id="kp-add">保存知识点</button>
   </div>
   <div class="row" style="margin-top:8px">
-    <input id="kp-summary" placeholder="一句话摘要" style="flex:1">
+    <input id="kp-summary" placeholder="一句话摘要（可空）" style="flex:1">
   </div>`;
 }
+// M0-2：保存成功后刷新「知识点」页（`go('kps')` 会重取 /api/kps，列表里立刻能看到）；
+// 失败走 toast 而不是静默——原来的实现不看响应，保存失败时人只会觉得"点了没反应"。
 function bindKpForm(){
   const btn = $('#kp-add'); if(!btn) return;
   btn.onclick = async () => {
     const name = $('#kp-name').value.trim();
-    if (!name) return alert('名称不能为空');
+    if (!name) { alert('名称不能为空'); $('#kp-name').focus(); return; }
     const cids = $('#kp-chunks').value.split(',').map(s=>parseInt(s.trim()))
       .filter(n=>!isNaN(n));
-    await api('/api/kp', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, summary:$('#kp-summary').value.trim(),
-        subject:$('#kp-subject').value.trim(), chunk_ids:cids})});
-    go('kps');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/kp', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name, summary:$('#kp-summary').value.trim(),
+          subject:$('#kp-subject').value.trim(), chunk_ids:cids})});
+      toast(`已新建知识点：${name}${r && r.kp_id ? '（#' + r.kp_id + '）' : ''}`);
+      await go('kps');
+    } catch(e){
+      toast('新建知识点失败：' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
   };
 }
 
@@ -5267,7 +5316,8 @@ async function openKp(id){
       ? `<div class="sub" style="margin-top:12px">前置知识点：${
           kp.prerequisites.map(p=>esc(p.name)).join('、')}</div>` : ''}
     <h2 style="margin:18px 0 8px">原文出处（复习依据）</h2>${src}
-    <h2 style="margin:18px 0 8px">评分</h2>
+    <h2 style="margin:18px 0 8px">评分
+      <span class="small muted">0–2 视为答错，会自动记一条错题</span></h2>
     <div class="chips">
       ${[0,1,2,3,4,5].map(g=>`<span class="chip g${g}" data-g="${g}">
         ${g} · ${['完全不会','几乎不会','答错','勉强','正确','轻松'][g]}</span>`).join('')}
@@ -5276,17 +5326,80 @@ async function openKp(id){
     ${hist ? `<table><thead><tr><th>时间</th><th>结果</th><th>题目</th></tr>
       </thead><tbody>${hist}</tbody></table>` : '<div class="small muted">暂无记录</div>'}
     <div class="row" style="margin-top:18px">
+      <button class="act" id="kp-add-mistake">记一道错题</button>
       <button class="ghost" onclick="closeModal()">关闭</button>
     </div>`);
+
+  const mkBtn = $('#kp-add-mistake');
+  if (mkBtn) mkBtn.onclick = () => openMistakeForm({kpId: id, kpName: kp.name});
 
   $('#modalbox').querySelectorAll('.chip').forEach(c => c.onclick = async () => {
     const r = await api('/api/review', {method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({kp_id:id, grade:parseInt(c.dataset.g)})});
     closeModal();
-    toast(`${r.name}：${r.due_in_days} 天后复习（掌握度 ${pct(r.mastery)}%）`);
+    // M0-4：0–2 分后端会自动记一条错题（auto_mistake_id），toast 里如实告知
+    const tail = r.auto_mistake_id ? ' · 已记入错题本，间隔归零' : '';
+    const when = r.due_in_days > 0 ? `${r.due_in_days} 天后复习` : '现在就该重学';
+    toast(`${r.name}：${when}（掌握度 ${pct(r.mastery)}%）${tail}`);
     go(CURRENT);
   });
+}
+
+// M0-4：手工记一道错题（错题页与知识点详情共用同一张表单）。
+// 绑定知识点时交给后端 `add_mistake` 做降级（间隔归零 + 提前复习），前端不自己算。
+const MISTAKE_REASONS = ['概念混淆','计算失误','前置缺失','审题错误','记忆遗忘','方法不会'];
+
+function openMistakeForm(opts){
+  const o = opts || {};
+  modal(`
+    <h2>记一道错题${o.kpName ? '：' + esc(o.kpName) : ''}</h2>
+    <div class="small muted" style="margin-bottom:10px">
+      保存后出现在「错题」页${o.kpId ? '；这条错题绑定的知识点会把复习间隔归零、提前复习' : ''}。
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="mk-question" placeholder="题目（必填）" style="flex:1;min-width:260px">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="mk-my" placeholder="我的答案（可空）" style="flex:1">
+      <input id="mk-right" placeholder="正确答案（可空）" style="flex:1">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label class="small muted" for="mk-reason">错因</label>
+      <select id="mk-reason" style="flex:1">
+        ${MISTAKE_REASONS.map(r => `<option value="${r}"
+          ${r === '记忆遗忘' ? 'selected' : ''}>${r}</option>`).join('')}
+        <option value="">未分类</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:18px">
+      <button class="act" id="mk-save">保存错题</button>
+      <button class="ghost" onclick="closeModal()">取消</button>
+    </div>`);
+  const save = $('#mk-save');
+  if (!save) return;
+  save.onclick = async () => {
+    const box = $('#mk-question');
+    const question = box.value.trim();
+    if (!question){ alert('题目不能为空'); box.focus(); return; }
+    save.disabled = true;
+    try {
+      const body = {question, my_answer: $('#mk-my').value.trim(),
+                    right_answer: $('#mk-right').value.trim(),
+                    reason: $('#mk-reason').value};
+      if (o.kpId) body.kp_id = o.kpId;
+      if (o.docId) body.doc_id = o.docId;
+      const r = await api('/api/mistake', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      closeModal();
+      toast(`已记入错题本（#${r.mistake_id}）`
+            + (o.kpId ? '；该知识点的复习间隔已归零' : ''));
+      go(CURRENT);
+    } catch(e){
+      toast('保存错题失败：' + e.message);
+      save.disabled = false;
+    }
+  };
 }
 
 // ---------------- 错题 ----------------
@@ -5318,7 +5431,10 @@ async function viewMistakes(){
         : ''}
     </div>
     <div class="card" style="margin-top:14px">
-      <h2>错题本 · ${mistakes.length} 道</h2>
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">错题本 · ${mistakes.length} 道</h2>
+        <button class="act" id="mk-new">＋ 记一道错题</button>
+      </div>
       ${mistakes.length ? `
         <div class="row" style="margin:10px 0 14px">
           <label class="row" style="gap:6px">
@@ -5334,12 +5450,14 @@ async function viewMistakes(){
         <th>我的答案</th><th>正确答案</th><th>时间</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
         : `<div class="empty">还没有错题记录。<br>
-            <span class="small">复习答错时让助手记录，或在知识点详情里添加。</span></div>`}
+            <span class="small">点右上角「＋ 记一道错题」手动记一条；复习时评分 0–2 也会自动记入。</span></div>`}
     </div>`;
   const all = $('#mk-all');
   if (all) all.onclick = () => {
     document.querySelectorAll('.mk-ck').forEach(c => c.checked = all.checked);
   };
+  const mkNew = $('#mk-new');
+  if (mkNew) mkNew.onclick = () => openMistakeForm({});
 }
 
 function delSelectedMistakes(){
@@ -7084,18 +7202,27 @@ def api_search(conn, q, k, corpus):
 
 
 def api_kps(conn):
+    """知识点列表（M0-5：掌握度与 /api/kp?id=、/api/stats 同一口径）。
+
+    这里**不再直接返回库里恒为 0 的 `mastery` 列**：掌握度一律由
+    `study.compute_mastery(row)` 现算（与详情/总览同一函数、不写库）。
+    排序也随之下沉到 Python 侧——SQL 的 `ORDER BY mastery` 排的是库列，
+    换成现算之后它已经没有意义；按「掌握度升序、同名按名称」排与原来一致。
+    """
     rows = conn.execute(
-        'SELECT id, name, summary, subject, mastery, ease, interval_days, reps,\n                  lapses, due_at, last_review\n           FROM knowledge_points ORDER BY mastery ASC, name'
+        'SELECT id, name, summary, subject, mastery, ease, interval_days, reps,\n                  lapses, due_at, last_review\n           FROM knowledge_points'
     ).fetchall()
     out = []
     for r in rows:
         d = dict(r)
+        d['mastery'] = study.compute_mastery(r)
         n = conn.execute(
             'SELECT COUNT(*) AS n FROM kp_sources WHERE kp_id=?',
             (r['id'],)
         ).fetchone()['n']
         d['n_sources'] = int(n)
         out.append(d)
+    out.sort(key=lambda d: (d['mastery'], d['name'] or ''))
     return {'knowledge_points': out}
 
 
@@ -7133,6 +7260,8 @@ def api_graph(conn):
     """知识点图谱：节点 + 依赖边。
 
     节点带掌握度，前端据此上色；边区分 prereq（前置）与 related（相关）。
+    M0-5：`mastery` 与其他接口同口径（`study.compute_mastery` 现算，不写库），
+    否则列表里 32% 的节点在图谱上还是全红。
     """
     kps = conn.execute(
         'SELECT id, name, subject, mastery, reps, lapses, interval_days\n           FROM knowledge_points ORDER BY id'
@@ -7140,8 +7269,13 @@ def api_graph(conn):
     edges = conn.execute(
         'SELECT src_id, dst_id, kind FROM kp_edges'
     ).fetchall()
+    nodes = []
+    for r in kps:
+        d = dict(r)
+        d['mastery'] = study.compute_mastery(r)
+        nodes.append(d)
     return {
-        "nodes": [dict(r) for r in kps],
+        "nodes": nodes,
         "edges": [dict(r) for r in edges],
     }
 
@@ -11356,6 +11490,81 @@ def api_chat_stream(handler, payload):
                 pass
 
 
+def _opt_int(payload, key):
+    """取可选整数参数：没给 / 空串 → (True, None)；给了但不是整数 → (False, None)。
+
+    与 GET 侧的 `_int_arg()` 不同：查询串里非法数字可以"退回默认值"（只读、无副作用），
+    而写接口里的非法参数必须**明确拒绝**（400），不能悄悄当成没填。
+    """
+    v = payload.get(key)
+    if v is None:
+        return True, None
+    if isinstance(v, bool):
+        return False, None
+    s = str(v).strip()
+    if s == "":
+        return True, None
+    try:
+        return True, int(s)
+    except (TypeError, ValueError):
+        return False, None
+
+
+def api_add_mistake(conn, payload):
+    """M0-4：手工记一道错题（`POST /api/mistake`，知识点详情「记一道错题」用）。
+
+    返回 `{"ok": True, "mistake_id": N}`；参数缺失/非法一律 `_code: 400` JSON。
+    带 `kp_id` 时由 `core.study.add_mistake` 负责把该知识点**降级 + 间隔归零 +
+    立即到期**（core 已有语义，这里不重写第二套规则）。
+    """
+    if not isinstance(payload, dict):
+        return {"error": "请求体必须是 JSON 对象", "_code": 400}
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        return {"error": "题目不能为空（question 必填）", "_code": 400}
+
+    kp_id = doc_id = chunk_id = None
+    for key in ("kp_id", "doc_id", "chunk_id"):
+        ok, val = _opt_int(payload, key)
+        if not ok:
+            return {"error": f"{key} 必须是整数", "_code": 400}
+        if val is not None and val <= 0:
+            return {"error": f"{key} 必须是正整数", "_code": 400}
+        if key == "kp_id":
+            kp_id = val
+        elif key == "doc_id":
+            doc_id = val
+        else:
+            chunk_id = val
+
+    # 引用不存在的行时给 400（不给 500/FK 报错）：错题挂到不存在的知识点上是无效写入
+    if kp_id is not None:
+        if conn.execute("SELECT 1 FROM knowledge_points WHERE id=?", (kp_id,)).fetchone() is None:
+            return {"error": f"知识点不存在: {kp_id}", "_code": 400}
+    if doc_id is not None:
+        if conn.execute("SELECT 1 FROM documents WHERE id=?", (doc_id,)).fetchone() is None:
+            return {"error": f"文档不存在: {doc_id}", "_code": 400}
+    if chunk_id is not None:
+        if conn.execute("SELECT 1 FROM chunks WHERE id=?", (chunk_id,)).fetchone() is None:
+            return {"error": f"切块不存在: {chunk_id}", "_code": 400}
+
+    reason = str(payload.get("reason") or "").strip()
+    if reason and reason not in study.REASON_TAGS:
+        return {"error": "错因必须是：" + " / ".join(study.REASON_TAGS), "_code": 400}
+
+    mid = study.add_mistake(
+        conn,
+        question=question,
+        my_answer=str(payload.get("my_answer") or ""),
+        right_answer=str(payload.get("right_answer") or ""),
+        reason=reason,
+        kp_id=kp_id,
+        chunk_id=chunk_id,
+        doc_id=doc_id,
+    )
+    return {"ok": True, "mistake_id": int(mid), "kp_id": kp_id}
+
+
 def api_mistakes(conn):
     rows = conn.execute(
         'SELECT m.*, k.name AS kp_name, d.title AS doc_title\n           FROM mistakes m\n           LEFT JOIN knowledge_points k ON k.id = m.kp_id\n           LEFT JOIN documents d ON d.id = m.doc_id\n           ORDER BY m.resolved ASC, m.created_at DESC LIMIT 200'
@@ -11633,21 +11842,40 @@ def api_review(conn, kp_id, grade, question, answer):
     落进 `reviews`）。
     返回体补上前端 toast 读的三个键（`name` / `due_in_days` / `mastery`，
     见 dashboard 前端 JS 的 `${r.name}：${r.due_in_days} 天后复习（掌握度 ${pct(r.mastery)}%）`）。
+
+    M0-4：评分 0–2（答错）时**自动记一条错题**（`reason` 默认「记忆遗忘」），
+    `question` 用本次题面、没有题面就用知识点名称；响应带 `auto_mistake_id`
+    供前端 toast 告知「已记入错题本」。重复评分允许各记一条（不去重）。
+    注意执行顺序：先 `record_review`（写评价链 + SM-2），再 `add_mistake`
+    （它会把该 KP 的间隔归零、立即到期、lapses+1）——最终状态以 core 为准。
     """
     row = conn.execute("SELECT * FROM knowledge_points WHERE id=?",
                        (int(kp_id),)).fetchone()
     if row is None:
         return {"error": "知识点不存在: %d" % int(kp_id)}
-    st = study.record_review(conn, int(kp_id), int(grade),
+    g = int(grade)
+    if not (0 <= g <= 5):
+        return {"error": "评分必须是 0–5 的整数"}
+    st = study.record_review(conn, int(kp_id), g,
                              question=question or "", answer=answer or "")
-    due = float(st.get("due_at") or 0.0)
+    auto_mistake_id = None
+    if int(st.get("grade", g)) < 3:
+        auto_mistake_id = study.add_mistake(
+            conn,
+            question=str(question or "").strip() or str(row["name"] or ""),
+            right_answer=str(answer or ""),
+            reason="记忆遗忘",
+            kp_id=int(kp_id),
+        )
     now_row = conn.execute("SELECT * FROM knowledge_points WHERE id=?",
                            (int(kp_id),)).fetchone()
+    due = float((now_row["due_at"] if now_row is not None else st.get("due_at")) or 0.0)
     return {
         **st,
         "name": row["name"],
         "mastery": study.compute_mastery(now_row) if now_row else 0.0,
         "due_in_days": max(0, int(round((due - db.now()) / study.DAY))) if due else 0,
+        "auto_mistake_id": None if auto_mistake_id is None else int(auto_mistake_id),
     }
 
 
@@ -12748,9 +12976,12 @@ class Handler(BaseHTTPRequestHandler):
                     # 复习评分
                     if u.path == "/api/review":
                         return self._json(api_review(
-                            conn, int(payload.get("kp_id", 0)),
-                            int(payload.get("grade", -1)),
+                            conn, _int_arg(payload.get("kp_id"), 0),
+                            _int_arg(payload.get("grade"), -1),
                             payload.get("question", ""), payload.get("answer", "")))
+                    # 手工记一道错题（M0-4：知识点详情「记一道错题」）
+                    if u.path == "/api/mistake":
+                        return self._json_auto(api_add_mistake(conn, payload))
                     # 手工新建知识点（知识点页签的表单）
                     if u.path == "/api/kp":
                         x = str(payload.get("name") or "").strip()
