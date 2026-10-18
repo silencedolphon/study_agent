@@ -675,11 +675,24 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
 @keyframes dzflash{0%,100%{box-shadow:0 0 0 0 rgba(91,157,255,0)}
   35%{box-shadow:0 0 0 3px rgba(91,157,255,.5)}}
 .card.flash{animation:dzflash 1.1s ease-in-out 3}
+/* M0-6a：知识点列表摘要 2 行截断（点进详情弹窗仍能看到全文）。 */
+.kpsum{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;max-width:66ch}
+/* M0-6a：需要保留的高级说明收进可折叠区，默认收起。 */
+.adv{margin:6px 0 0;font-size:12px;color:var(--dim);line-height:1.8}
+.adv summary{cursor:pointer;color:var(--accent);font-size:12px;outline:none}
+.adv[open] summary{margin-bottom:4px}
+/* M0-1：学习场景（顶栏标识 + 设置中心三选一）。 */
+#scene-badge{white-space:nowrap}
+.scene-opt.on{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
 <header>
   <h1>📚 学习看板</h1>
+  <!-- M0-1：学习场景标识（A 日常 / B 备考 / C 冲刺）。点击循环切换，只存本机浏览器。 -->
+  <button class="ghost" id="scene-badge"
+    title="学习场景：A 日常 / B 备考 / C 冲刺（点击切换；设置中心里也能改）">场景 A · 日常</button>
   <nav id="nav"></nav>
   <span style="flex:1"></span>
   <input id="q" placeholder="搜资料…（回车）">
@@ -735,7 +748,7 @@ const pct = v => Math.round((v||0)*100);
 // ---------------- 视图 ----------------
 const VIEWS = {
   assistant:{label:'问答',  render: viewAssistant},
-  overview: {label:'总览', render: viewOverview},
+  overview: {label:'总览',  render: viewOverview},
   review:   {label:'复习',  render: viewReview},
   graph:    {label:'图谱',  render: viewGraph},
   docs:     {label:'资料',  render: viewDocs},
@@ -744,9 +757,76 @@ const VIEWS = {
   notes:    {label:'笔记',  render: viewNotes},
 };
 
+// ---------------- 学习场景预设（M0-1 骨架） ----------------
+// A 日常 / B 备考 / C 冲刺。M0 阶段只做三处差异（首屏默认视图、导航顺序/可见性、
+// 顶栏场景标识），不做专属功能；切换只存**本机浏览器 localStorage**，不动后端配置。
+// 切回 A/B 会恢复被 C 隐藏的页面，任何功能都不会丢。
+const SCENE_KEY = 'kb_study_scene';
+const SCENE_ORDER = ['A', 'B', 'C'];
+const SCENES = {
+  A: {name: '日常', short: 'A · 日常',
+      desc: '全部功能都在，从总览开始',
+      defaultView: 'overview',
+      views: ['overview', 'assistant', 'docs', 'review', 'kps', 'graph', 'mistakes', 'notes']},
+  B: {name: '备考', short: 'B · 备考',
+      desc: '复习与错题排前面，资料在手边',
+      defaultView: 'overview',
+      views: ['overview', 'review', 'kps', 'mistakes', 'docs', 'assistant', 'graph', 'notes']},
+  C: {name: '冲刺', short: 'C · 冲刺',
+      desc: '精简导航，打开就是今天该复习的',
+      defaultView: 'review',
+      views: ['review', 'assistant', 'docs', 'kps', 'mistakes', 'overview']},
+};
+
+function loadScene(){
+  try {
+    const v = localStorage.getItem(SCENE_KEY);
+    if (v && SCENES[v]) return v;
+  } catch(e){ /* 隐私模式读不到 localStorage：退回默认 A */ }
+  return 'A';
+}
+let SCENE = loadScene();
+
+function sceneCfg(){ return SCENES[SCENE] || SCENES.A; }
+
+function scenePaint(){
+  const cfg = sceneCfg();
+  const b = $('#scene-badge');
+  if (b) b.textContent = '场景 ' + cfg.short;
+  document.body.dataset.scene = SCENE;
+}
+
+// 切换场景：写 localStorage → 重画顶栏标识与导航 → 当前页被本场景隐藏时回到默认页。
+// opts.silent=true 时不出 toast（启动时静默应用）。
+function setScene(code, opts){
+  if (!SCENES[code]) return;
+  SCENE = code;
+  try { localStorage.setItem(SCENE_KEY, code); } catch(e){ /* 存不了也不影响本次使用 */ }
+  scenePaint();
+  const cfg = sceneCfg();
+  if (cfg.views.indexOf(CURRENT) < 0){
+    go(cfg.defaultView);
+  } else {
+    renderNav(CURRENT);
+  }
+  if (!(opts && opts.silent)){
+    toast('已切换学习场景：' + cfg.name + ' — ' + cfg.desc);
+  }
+}
+
+function cycleScene(){
+  const i = SCENE_ORDER.indexOf(SCENE);
+  setScene(SCENE_ORDER[(i + 1) % SCENE_ORDER.length]);
+}
+
+function navViews(){
+  const cfg = sceneCfg();
+  return cfg.views.filter(k => VIEWS[k]);
+}
+
 function renderNav(active){
-  $('#nav').innerHTML = Object.entries(VIEWS).map(([k,v]) =>
-    `<button data-v="${k}" class="${k===active?'on':''}">${v.label}</button>`).join('');
+  $('#nav').innerHTML = navViews().map(k =>
+    `<button data-v="${k}" class="${k===active?'on':''}">${VIEWS[k].label}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b =>
     b.onclick = () => go(b.dataset.v));
 }
@@ -783,10 +863,8 @@ function renderFirstrun(){
       </div>
       <div class="fract">
         <button class="act" onclick="openSettings()">打开右上角「⚙ 设置」填密钥</button>
-        <span class="small muted">在「AI 问答」区填 <code>DEEPSEEK_API_KEY</code>，
-          保存即生效、不用重启看板；也可以把 <code>.env.example</code> 复制成
-          <code>.env</code> 再填（要重启）。两种写法见
-          <code>README.md</code> 的「三步上手」。</span>
+        <span class="small muted">在设置中心的「AI 问答」区填入密钥，
+          保存即生效、不用重启看板。</span>
       </div>
     </div>`);
   }
@@ -1317,8 +1395,8 @@ function evCiteSlide(d, page, el){
   if (!slides.some(s => s.page === page && s.ok)){
     box.innerHTML = `<div class="small muted">该页没有课件图缓存${
       sl.deck
-        ? `（logs/figure_desc/${esc(sl.deck)}/ 下没有对应的 slide_&lt;页号&gt;.png）`
-        : '（这份课件在 logs/figure_desc/ 下没有目录）'}。其他内容照常可看。</div>`;
+        ? '（这张页图还没有缓存）'
+        : '（这份课件还没有缓存页图）'}。其他内容照常可看。</div>`;
     evPopPlace(el);
     return;
   }
@@ -1494,7 +1572,7 @@ async function viewOverview(){
         <div class="big" style="color:${m.open?'var(--bad)':'var(--ok)'}">${m.open}</div>
         <div class="sub">累计 ${m.total} 道</div></div>
       <div class="card"><h2>笔记</h2><div class="big">${d.notes}</div>
-        <div class="sub">抗上下文刷新的长期记忆</div></div>
+        <div class="sub">跨会话保留的学习记录</div></div>
     </div>
     <section class="on" style="margin-top:20px">
       <div class="card">
@@ -1514,9 +1592,13 @@ async function viewOverview(){
         <h2>最薄弱的知识点</h2>
         ${weak ? `<table><thead><tr><th>知识点</th><th>掌握度</th>
           <th>复习间隔</th><th>遗忘</th></tr></thead><tbody>${weak}</tbody></table>`
-          : '<div class="empty">还没有复习记录。先在「复习」页开始。</div>'}
+          : `<div class="empty">还没有复习记录。<br>
+             <span class="small">复习过一次之后，这里就会列出最需要补的知识点。</span><br>
+             <button class="act" id="ov-go-review">去「复习」开始</button></div>`}
       </div>
     </section>`;
+  const ovr = $('#ov-go-review');
+  if (ovr) ovr.onclick = () => go('review');
 }
 
 // ---------------- 复习 ----------------
@@ -1529,8 +1611,8 @@ async function viewReview(){
   //   ② 无论队列空不空，下面都接上遗忘曲线月历卡片。
   const queueHtml = !queue.length
     ? `<div class="empty">今天没有到期的复习 🎉<br>
-      <span class="small">还没有知识点的话，去「知识点」页点「＋ 新建知识点」建一条，
-      建好就会出现在这里的复习队列。</span></div>`
+      <span class="small">还没有知识点的话，先建一条；建好后会出现在这里的复习队列。</span><br>
+      <button class="act" id="rv-go-kps">去「知识点」新建</button></div>`
     : `<div class="card">
       <h2>到期复习队列 · 共 ${queue.length} 项</h2>
       <table><thead><tr><th>知识点</th><th>科目</th><th>掌握度</th><th>已复习</th>
@@ -1553,6 +1635,8 @@ async function viewReview(){
       </div>
     </div>`;
   $('#view').innerHTML = queueHtml + deckCalendarCard();
+  const rvGo = $('#rv-go-kps');
+  if (rvGo) rvGo.onclick = () => go('kps');
   await mountDeckCalendar();
 }
 
@@ -2041,7 +2125,7 @@ async function viewDocs(){
         <button class="ghost" id="sh-pick">从 share\\ 目录选一个</button>
       </div>
       <div class="sub" style="margin-top:6px">
-        导入前会先核对整包（逐条 sha256）与向量模型：模型与本库不一致就<b>拒绝导入</b>
+        导入前会先核对整包内容与向量模型：模型与本库不一致就<b>拒绝导入</b>
         并告诉你该怎么办，绝不用"重算一遍"偷偷花掉接口费。
       </div>
     </div>
@@ -2075,9 +2159,9 @@ async function viewDocs(){
       </div>
       <div class="sub" style="margin-top:6px">
         「批量删除」是真删：勾几份就整批删掉它们的库记录、切块与向量、知识点出处，
-        以及四处整理产物（末级知识点总结+备份、名词解释、outline 缓存、页图目录）。
+        以及四处整理产物（末级知识点总结+备份、名词解释、结构缓存、页图目录）。
         弹窗里再选原文件留不留——选「连原文件一起删」就彻底不留。
-        <b>删除不可逆</b>，确认前会先把影响范围摆出来（卡 C-0084）。
+        <b>删除不可逆</b>，确认前会先把影响范围摆出来。
       </div>
     </div>
     ${orphanNote}`;
@@ -2739,7 +2823,7 @@ async function renameDocTitle(docId, oldTitle){
     <div class="sub" style="margin:12px 0;line-height:1.95">
       · 改的是<b>库里这一列</b>（<code>documents.title</code>）：资料列表、导图页的
         课件下拉、页签上都显示它<br>
-      · <b>不动</b> raw 里的文件，也不动整理产物文件，doc_id 不变<br>
+      · <b>不动</b> raw 里的文件，也不动整理产物文件<br>
       · ⚠ 产物<b>内容</b>里那个课件名（思维导图根名）是整理时写进去的，
         <b>不会跟着变</b>；想让页签上那个根名立刻换，请用「改产物标题」
         （只改名字、不重跑、不花一分钱）
@@ -2816,8 +2900,8 @@ async function renameArtifactTitle(docId, oldName){
         ${spot('meta.deck', pv.spots_before && pv.spots_before['meta.deck'])}
       </div>
       · <b>知识点关联一个字都不动</b>（节点之间靠 id 引用，不靠名字），
-        产物文件名也不变（它由 doc_id 拼）<br>
-      · 改之前会自动备份一份旧产物（<code>.bak-rename-&lt;时间戳&gt;</code>）<br>
+        整理产物文件名也不变<br>
+      · 改之前会自动备份一份旧产物<br>
       · 这是<b>不花钱</b>的那条路：不重跑整理、不调模型
     </div>
     <input id="at-name" value="${esc(pv.name ? (pv.name.from || '') : '')}" style="width:100%"
@@ -2958,9 +3042,8 @@ async function openDocDelByIds(ids){
       · 解除知识点对它们的引用，并清理因此失去全部出处的知识点
         ${purge ? esc(purge).replace(/\n/g,'<br>') : '（本次预览：无）'}<br>
       · 一并删除 <b>${art}</b> 个整理产物文件（约 ${artMb.toFixed(1)} MB）与
-        <b>${(pv && pv.decks_total) || 0}</b> 个页图目录：末级知识点总结 + 它的 .bak-* 备份、
-        名词解释产物、outline 缓存（<code>logs\\knowledge\\</code>、<code>logs\\outline\\</code>），
-        以及 <code>logs\\figure_desc\\&lt;课件&gt;\\</code> 下的 slide_*.png/.md<br>
+        <b>${(pv && pv.decks_total) || 0}</b> 个页图目录：末级知识点总结及备份、
+        名词解释、结构缓存，以及课件页图<br>
       · 删完页签与知识点页签<b>不会再留下「有产物但已不在库」的幽灵条目</b>
     </div>
     <div class="sub" style="margin-top:14px;line-height:1.95;border-top:1px solid var(--line);padding-top:12px">
@@ -3167,7 +3250,7 @@ async function viewKps(){
     const cls = k.mastery>=.75?'ok':(k.mastery>=.4?'warn':'bad');
     return `<tr>
       <td><a href="#" onclick="openKp(${k.id});return false">${esc(k.name)}</a>
-        <div class="small muted">${esc(k.summary||'')}</div></td>
+        <div class="small muted kpsum">${esc(k.summary||'')}</div></td>
       <td class="small">${esc(k.subject||'—')}</td>
       <td style="width:140px"><div class="bar"><i style="width:${pct(k.mastery)}%"></i></div>
         <span class="small muted">${pct(k.mastery)}%</span></td>
@@ -3210,18 +3293,15 @@ const KPB = { timer: null, batchTimer: null, docs: [], sel: null, thr: 2.0 };
 function kpBuildCard(){
   return `<div class="card" style="margin-top:14px">
     <h2>批量整理知识点
-      <span class="small muted">勾多份课件 → 多管线并发跑 → 回导图点节点看结果</span></h2>
+      <span class="small muted">勾几份课件，一次整理成知识点</span></h2>
     <div class="small muted" style="margin-bottom:10px">
-      整理 = 用模型读这份课件的正文（库里的文本块），先生成一张<b>思维导图结构</b>，
-      再把每个结构节点覆盖的页（连续 ≤3 页）提炼成「一段理解 + 3~6 条要点」。
-      <b>知识点页签上的全部内容都来自这份产物</b>（结构、理解、要点都在里面），
-      不再读入库导图 <code>logs/outline/</code>。<br>
-      产物只写到 <code>logs/knowledge/&lt;doc_id&gt;-末级知识点总结.json</code>，
-      <b>不写数据库任何表</b>；每生成一条就落盘一次，中断可续跑。<br>
-      一次可勾<b>多份</b>课件，按指定<b>并发数</b>同时跑；某一份失败不影响其他份，
-      失败原因逐条列出并可单独重试。勾好之后也可以点<b>清除</b>：删掉这些课件的
-      产物与备份（不可逆），它们会回到"未整理"。
+      整理会读课件正文，生成一张<b>思维导图结构</b>，再把每个节点的理解与要点提炼出来；
+      知识点页签上的内容都来自这次整理。一次可以勾多份，某一份失败不影响其他份，失败可单独重试。
     </div>
+    <details class="adv"><summary>高级说明（整理产物与花费）</summary>
+      整理要调用大模型，开始前会给出预估条数与花费上限；结果按课件逐条保存，中途中断可以继续。
+      整理完成的课件也可以点「清除」删掉结果，回到"未整理"状态（不可逆）。
+    </details>
     <div id="kp-batch-progress"></div>
     <div id="kp-build-progress"></div>
     <div class="row">
@@ -3461,7 +3541,7 @@ function kpbPaintSum(){
     <span class="muted">（上界：按每页一条算；合并掉的页不单独调用，真实只会更少）</span>
     ${over ? `<br><span style="color:var(--warn)">⚠ 合计超过 CNY${thr.toFixed(2)} 阈值，
       点「开始批量整理」会再弹一次确认</span>` : ''}
-    <br><span class="muted">写入：logs/knowledge/&lt;doc_id&gt;-末级知识点总结.json（不写数据库任何表）</span>
+    <br><span class="muted">整理结果会保存在本机，点节点即可查看</span>
   </div></div>`;
 }
 
@@ -3573,7 +3653,7 @@ async function kpbClear(){
     `将清除这 ${sel.length} 份课件的整理产物（思维导图结构 + 理解 + 要点）及其备份：\n` +
     lines + more + '\n\n' +
     '⚠ 此操作不可逆：清除后页签回到"未整理"，必须重新整理才能重建。\n' +
-    '不会动 logs/outline/（入库结构），也不会写数据库任何一张表。\n\n确定清除？');
+    '不会动入库结构，也不会写数据库任何一张表。\n\n确定清除？');
   if (!ok) return;                       // 二次确认：点"取消"就什么都不做
   const btn = $('#kpb-clear');
   if (btn){ btn.disabled = true; btn.textContent = '清除中…'; }
@@ -3716,18 +3796,15 @@ const TERMS = {docId: 0, open: true, n: 0, data: null};
 function termsCard(){
   return `<div class="card" style="margin-top:14px">
     <h2>名词解释
-      <span class="small muted">卡 C-0058 起是<b>独立功能</b> ·
-        点名词跳到它<b>第一次出现</b>的那条知识点</span></h2>
+      <span class="small muted">选一份课件 → 展开；点名词跳到它第一次出现的知识点</span></h2>
     <div class="small muted" style="margin-bottom:10px">
-      这一栏专收名词解释（名词 / 英文 / 中文解释）：选一份课件 → 展开，
-      就能看到这份课件的全部名词；
-      <b>点名词</b>会跳出它<b>第一次出现</b>的那条知识点（与导图里点节点看到的是同一个窗口）。<br>
-      数据后端按顺序取两处，取到就用：<code>&lt;doc_id&gt;-名词解释.json</code>
-      （卡 C-0058 起的<b>独立</b>名词解释产物）→
-      <code>&lt;doc_id&gt;-末级知识点总结.json</code> 的 <code>terms</code>
-      （卡 C-0052 那代随知识点提炼的旧写法）。两处都没有时这里写明"暂无名词解释"
-      （<b>不报错</b>）。
+      这一栏专收课件里的名词解释（名词 / 英文 / 中文解释）。
+      <b>点名词</b>会打开它<b>第一次出现</b>的那条知识点，和导图里点节点看到的是同一个窗口。
     </div>
+    <details class="adv"><summary>高级说明（数据来源）</summary>
+      名词解释优先读这份课件单独生成的名词结果；旧版课件随知识点整理一起生成的名词也能兼容读取。
+      两处都没有时这里会写明"暂无名词解释"，不是报错。
+    </details>
     <div class="row" style="margin-bottom:10px">
       <select id="term-doc" style="flex:1;min-width:260px"></select>
       <button class="ghost" id="term-unfold">展开</button>
@@ -3741,8 +3818,9 @@ function termsCard(){
 function termsBodyHtml(d){
   const ts = (d && d.terms) || [];
   if (!d || d.terms_state !== 'ok' || !ts.length){
-    return `<div class="empty">${esc((d && d.message)
-      || '该课件暂无名词解释。')}</div>`;
+    return `<div class="empty">这份课件还没有名词解释。<br>
+      <span class="small">用下面的「选择课件批量整理」整理这份课件后，这里就会显示它的名词。</span><br>
+      <button class="act" id="term-go-build">去整理这份课件</button></div>`;
   }
   if (!TERMS.open){
     return `<div class="small muted">共 <b>${ts.length}</b> 个名词解释（已收起）——
@@ -3764,8 +3842,8 @@ function termsBodyHtml(d){
       <div class="termdef" style="margin-top:6px;line-height:1.65">${
         esc(t.def || '（这条没有解释）')}</div>
       <div class="small muted" style="margin-top:6px">
-        首次出现 p.${t.first_page || '?'} · 知识点 <code>${esc(kp || '—')}</code>${
-        t.first_kp_name ? ' ' + esc(t.first_kp_name) : ''}${
+        首次出现 p.${t.first_page || '?'}${
+        t.first_kp_name ? ' · 知识点 ' + esc(t.first_kp_name) : ''}${
         (t.kp_ids || []).length > 1
           ? ` · 共出现在 ${t.kp_ids.length} 条知识点里` : ''}
       </div>
@@ -3773,11 +3851,7 @@ function termsBodyHtml(d){
   }).join('');
   return `<div class="small muted" style="margin-bottom:8px">
       共 <b>${ts.length}</b> 个名词解释${
-      (d.terms_pipeline_version || d.pipeline_version)
-        ? ` · 名词产物 ${esc(d.terms_pipeline_version || d.pipeline_version)}` : ''}${
-      d.terms_source === 'own_file' ? '（独立功能生成）'
-        : (d.terms_source === 'kp_artifact' ? '（随知识点提炼的旧写法）' : '')}${
-      d.title ? ` · ${esc(d.title)}` : ''}（点名词跳到它第一次出现的知识点）</div>
+      d.title ? ' · ' + esc(d.title) : ''}（点名词跳到它第一次出现的知识点）</div>
     <ul style="list-style:none;padding:0;margin:0">${rows}</ul>`;
 }
 
@@ -3785,6 +3859,8 @@ function renderTerms(){
   const box = $('#term-box'); if (!box) return;
   const d = TERMS.data || {};
   box.innerHTML = termsBodyHtml(d);
+  const gb = $('#term-go-build');
+  if (gb) gb.onclick = () => openKpBuild();
   const n = (d.terms_state === 'ok') ? ((d.terms || []).length) : 0;
   const btn = $('#term-unfold');
   if (btn){
@@ -3879,20 +3955,19 @@ const MINDMAP = {docId: 0, open: {}, nodes: {}, downshift: false,
 
 function mindmapCard(){
   return `<div class="card" style="margin-top:14px">
-    <h2>课件思维导图</h2>
+    <h2>课件思维导图
+      <span class="small muted">点节点看这条知识点的理解与要点</span></h2>
     <div class="small muted" style="margin-bottom:10px">
-      <b>这一屏的一切都来自「整理产物」</b>
-      （<code>logs/knowledge/&lt;doc_id&gt;-末级知识点总结.json</code>）：
-      思维导图结构、理解、要点都在那份产物里，<b>不读</b>入库导图
-      <code>logs/outline/</code>。
-      <b>点任一节点名可查看该节点的知识点总结</b>
-      （末级节点一个知识点：把该节点覆盖的页（连续 ≤3 页）提炼成一段理解 +
-      3~6 条要点，不贴原文；带 <span style="color:var(--accent)">◆</span>
-      的是已有总结的末级节点，
-      <span style="color:var(--warn)">◇</span> 的是待生成）。
-      还没整理过的课件会在这里写明"未整理"并告诉你从哪儿开始；
-      旧格式的产物<b>保留文件、但页签不显示</b>，在下面重新整理一份即可。
+      这一屏来自「整理产物」：思维导图的树、每一条的理解与要点都在里面。
+      <b>点任一节点名</b>可查看该节点的知识点总结：带
+      <span style="color:var(--accent)">◆</span> 的是已有总结的末级节点，
+      <span style="color:var(--warn)">◇</span> 的是待生成。
+      还没整理过的课件会在这里写明"未整理"并告诉你从哪儿开始。
     </div>
+    <details class="adv"><summary>高级说明（结构口径与旧格式）</summary>
+      一条知识点覆盖连续 ≤3 页，所以"知识点条数"与"末级节点数"可能不同；
+      旧格式的整理结果会保留文件、但这里不乱显示，重新整理一份即可。
+    </details>
     <div id="mm-box"><div class="small muted">加载中…</div></div>
     <!-- 卡 C-0052：右下角「AI答疑」按钮。刻意放在 #mm-box **外面**——
          mountMindmap 每次进页签都会重写 #mm-box 的内容，放里面会被连根换掉。
@@ -4049,14 +4124,13 @@ async function loadMindmapTree(){
       : (ast === 'incomplete' ? '产物不完整，需重新整理' : '未整理');
     t.innerHTML = `<div class="empty">
       <span class="badge warn">${esc(astTag)}</span>
-      <div style="margin-top:8px">${esc(d.artifact_message ||
-        '该课件还没有整理过知识点，点【整理知识点】生成。')}</div>
+      <div style="margin-top:8px">该课件还没有整理过知识点。<br>
+        <span class="small">整理入口：本页下面的「选择课件批量整理」，勾上这份课件即可。</span></div>
       ${d.lkp_total ? `<div class="small muted" style="margin-top:8px">
         这份课件已有 ${d.lkp_total} 条知识点记录，但读不到结构树。</div>` : ''}
-      <div class="small muted" style="margin-top:8px">
-        整理入口：本页下面的「批量整理知识点」卡片 → 选择课件批量整理。
-        产物写在 <code>logs/knowledge/&lt;doc_id&gt;-末级知识点总结.json</code>，
-        页签上的思维导图、理解、要点全部来自它。</div></div>`;
+      <div style="margin-top:10px"><button class="act" id="mm-go-build">去整理</button></div></div>`;
+    const gb = $('#mm-go-build');
+    if (gb) gb.onclick = () => openKpBuild();
     return;
   }
   MINDMAP.nodes = {};   // 重新渲染前清空：下标路径只在本次渲染里有效
@@ -5061,8 +5135,8 @@ function mmShowSlide(d, page){
   if (!has.length){
     box.innerHTML = `<div class="small muted">该页没有课件图缓存${
       d.slide_deck
-        ? `（logs/figure_desc/${esc(d.slide_deck)}/ 下没有对应的 slide_&lt;页号&gt;.png）`
-        : '（这份课件在 logs/figure_desc/ 下没有目录）'}。其他内容照常可看。</div>`;
+        ? '（这张页图还没有缓存）'
+        : '（这份课件还没有缓存页图）'}。其他内容照常可看。</div>`;
     return;
   }
   const pick = has.some(s => s.page === page) ? page : has[0].page;
@@ -5514,7 +5588,11 @@ function confirmBox(title, text){
 async function viewGraph(){
   const {nodes, edges} = await api('/api/graph');
   if (!nodes.length){
-    $('#view').innerHTML = '<div class="empty">还没有知识点，图谱为空。</div>';
+    $('#view').innerHTML = `<div class="empty">还没有知识点，所以图谱是空的。<br>
+      <span class="small">先去「知识点」页建第一条，图谱会自动长出来。</span><br>
+      <button class="act" id="gr-go-kps">去「知识点」新建</button></div>`;
+    const b = $('#gr-go-kps');
+    if (b) b.onclick = () => go('kps');
     return;
   }
   const byId = {}; nodes.forEach(n => byId[n.id] = n);
@@ -5616,10 +5694,11 @@ async function viewNotes(){
   const {notes} = await api('/api/notes');
   if (!notes.length){
     $('#view').innerHTML = `<div class="empty">还没有笔记。<br>
-      <span class="small">笔记是抗上下文刷新的长期记忆：既有结论落成文件，
-      下次直接读回即可，不依赖检索运气。<br>
-      在「知识点」页签点开任一知识点可以【记入笔记】；
-      在「课件思维导图」右下角可以【AI答疑】，并把问答记进来。</span></div>`;
+      <span class="small">笔记会一直留在这里，下次打开还能看。<br>
+      在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。</span><br>
+      <button class="act" id="nt-go-kps">去「知识点」写笔记</button></div>`;
+    const b = $('#nt-go-kps');
+    if (b) b.onclick = () => go('kps');
     return;
   }
   const rows = notes.map(n => {
@@ -6217,7 +6296,7 @@ function subjRenameDialog(slug){
     const h = $('#sr-hint');
     // 目录原样摆出来：让人亲眼确认"改名不搬目录"
     if (h) h.textContent = '目录：' + (s.dir || '') + (s.slug === 'default'
-      ? '（默认库没有 subject.json，名字记在 logs/subjects.json）' : '');
+      ? '（名字记在本机学科注册表里）' : '');
   };
   if (sel){ sel.onchange = fill; fill(); }
   if (inp){
@@ -6362,6 +6441,26 @@ function setPipe(){
 
 function setOr(v, dflt){ return (v === undefined || v === null) ? dflt : v; }
 
+// M0-6a：设置项的说明文字来自后端元数据，里面混着模块名 / 文件路径 / 接口名这类
+// 开发者术语。**不改后端契约**，只在渲染前翻成人话；只过滤"实现细节"，
+// 功能说明与警告一个字都不删（过滤后为空就整段不显示）。
+const HUMAN_RULES = [
+  [/本机 config\.local\.json/g, '本机'],
+  [/（[^（）]*?(?:\.gitignore|config\.local\.json|\.env\b|core\/|payload\.|\.py\b|\.json\b|\.dsh)[^（）]*?）/g, ''],
+  [/[，、；]?[^，。；：（）]*?(?:core\/[A-Za-z0-9_\/.:]+|payload\.[A-Za-z0-9_.]+|\/api\/[A-Za-z0-9_\/-]+)/g, ''],
+  [/，不带 \/chat\/completions/g, ''],
+  [/config\.local\.json/g, '本机设置'],
+  [/\.gitignore/g, '版本管理'],
+  [/\.dsh 凭据文件里的那把/g, '本机已保存的密钥'],
+  [/\.dsh 凭据文件/g, '本机已保存的密钥'],
+];
+function humanize(s){
+  let t = String(s == null ? '' : s);
+  for (const [re, rep] of HUMAN_RULES) t = t.replace(re, rep);
+  return t.replace(/（\s*）|\(\s*\)/g, '').replace(/[，、；]\s*。/g, '。')
+    .replace(/\s{2,}/g, ' ').trim();
+}
+
 function setFieldHtml(f){
   const k = 'data-k="' + f.key + '"';
   let ctl = '', orig = '';
@@ -6393,7 +6492,7 @@ function setFieldHtml(f){
                : '还没配置（留空＝不改动）') + '">'
       + '<span class="sbadge ' + (f.set ? 'on' : '') + '">'
       + (f.set ? '已配置 · 尾号 ' + esc(f.tail) : '未配置') + '</span>'
-      + '<div class="shint">' + em(fb) + '</div>';
+      + '<div class="shint">' + em(humanize(fb)) + '</div>';
   } else if (f.type === 'int'){
     orig = String(setOr(f.value, ''));
     ctl = '<input type="number" ' + k + ' data-orig="' + esc(orig) + '" value="'
@@ -6404,42 +6503,40 @@ function setFieldHtml(f){
       + esc(orig) + '">';
   }
   return '<div class="srow"><label>' + esc(f.label) + '</label><div class="sctl">'
-    + ctl + '<div class="shint">' + em(f.hint || '') + '</div></div></div>';
+    + ctl + '<div class="shint">' + em(humanize(f.hint || '')) + '</div></div></div>';
 }
 
 function setPromptsHtml(p){
   if (p.id === 'kp'){
     const cards = (SET.prompts || []).map(s =>
       '<div class="spcard" id="spc-' + s.id + '"><div class="spname">'
-      + esc(s.label) + ' · 提示词真源</div>'
-      + '<div class="spmeta">' + esc(s.role || '') + ' · ' + esc(s.name || '')
-      + ' · ' + setOr(s.chars, 0) + ' 字 · sha256 '
-      + esc(String(s.sha256 || '').slice(0, 12)) + '…<br>' + esc(s.path || '') + '</div>'
+      + esc(s.label) + '</div>'
+      + '<div class="spmeta">' + esc(humanize(s.role || ''))
+      + ' · ' + setOr(s.chars, 0) + ' 字</div>'
       + '<div class="spact"><button class="ghost" onclick="promptOpen(\'' + s.id
       + '\')">查看 / 编辑</button></div><div id="sp-' + s.id + '"></div></div>').join('');
-    return cards + '<div class="shint" style="margin-top:6px">保存时自动备份成 '
-      + '<kbd>文件名.bak-时间戳</kbd>，并回报新旧 sha256；整理产物 meta 里的 '
-      + '<kbd>prompt_sha256</kbd> 就是这个文件的哈希。</div>';
+    return cards + '<div class="shint" style="margin-top:6px">'
+      + '保存时自动备份旧版本；整理记录里会记下用的是哪一版提示词。</div>';
   }
   if (p.id === 'deck'){
     return '<div class="spcard readonly"><div class="spname">这条管线不用提示词</div>'
-      + '<div class="spmeta">' + em('人拍板要求：每份课件的答疑**不检索、不用提示词**——'
-      + '不调 build_messages、messages 里没有 system 角色、也不读 logs/knowledge/ '
-      + '下的任何文件。所以这里没有可编辑的提示词真源。') + '</div></div>';
+      + '<div class="spmeta">' + em('每份课件的答疑**不检索、不用提示词**：'
+      + '直接基于这份课件的全文回答，所以这里没有可编辑的提示词。') + '</div></div>';
   }
   const ids = (p.id === 'chat')
     ? ['chat_system', 'chat_expand'] : ['ingest_outline'];
-  const cards = (SET.builtin_prompts || []).filter(b => ids.indexOf(b.id) >= 0).map(b =>
-    '<div class="spcard readonly" id="spc-' + b.id + '"><div class="spname">'
+  const cards = (SET.builtin_prompts || []).filter(b => ids.indexOf(b.id) >= 0).map(b => {
+    const src = humanize(b.source);
+    return '<div class="spcard readonly" id="spc-' + b.id + '"><div class="spname">'
     + esc(b.label) + '</div>'
-    + '<div class="spmeta">' + esc(b.source) + ' · ' + setOr(b.chars, 0)
-    + ' 字 · 内建在代码里（本版不支持从窗口编辑）</div>'
+    + '<div class="spmeta">' + (src ? esc(src) + ' · ' : '') + setOr(b.chars, 0)
+    + ' 字 · 内建提示词（本版只读）</div>'
     + '<div class="spact"><button class="ghost" onclick="promptOpenBuiltin(\''
-    + b.id + '\')">查看</button></div><div id="sp-' + b.id + '"></div></div>').join('');
+    + b.id + '\')">查看</button></div><div id="sp-' + b.id + '"></div></div>';
+  }).join('');
   const tail = (p.id === 'ingest')
-    ? '<div class="shint" style="margin-top:6px">' + em('入库识图**没有提示词文件**：'
-      + '写死在 core/figures.py 的 SYSTEM_STYLE_PROMPT / OUTPUT_FORMAT 里，'
-      + '上面那段是结构分析用的。要改它们得改代码。') + '</div>'
+    ? '<div class="shint" style="margin-top:6px">' + em('入库识图**没有可编辑的提示词**：'
+      + '它的口径是固定的，上面这段用于整份资料的结构分析。') + '</div>'
     : '<div class="shint" style="margin-top:6px">问答的系统提示词决定"只依据资料作答、'
       + '找不到就说没有"的口径；这一版不给窗口改，避免一句话改坏引用纪律。</div>';
   return cards + tail;
@@ -6453,7 +6550,7 @@ function setPaneHtml(p){
     !f.advanced && f.type !== 'str' && f.type !== 'secret' && f.type !== 'note');
   const adv = p.fields.filter(f => f.advanced);
   let html = '<h3><span>' + (p.icon || '') + '</span>' + esc(p.label) + '</h3>'
-    + '<div class="pdesc">' + esc(p.sub || '') + '<br>' + em(p.desc || '') + '</div>';
+    + '<div class="pdesc">' + esc(humanize(p.sub || '')) + '<br>' + em(humanize(p.desc || '')) + '</div>';
   if (conn.length){
     html += '<div class="set-group"><h4>模型 · 端点 · 密钥</h4>'
       + conn.map(setFieldHtml).join('') + '</div>';
@@ -6486,24 +6583,41 @@ function setRender(){
     + '" onclick="setTab(\'' + p.id + '\')"><span>' + (p.icon || '')
     + '</span><span>' + esc(p.label) + '</span></button>').join('');
   const cur = setPipe();
-  const fname = String(SET.settings_file || '').split('\\').pop();
   box.innerHTML =
     '<div class="set-head"><div><h2>⚙ 设置中心</h2>'
     + '<div class="ssub">四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；'
     + '保存后<strong>立刻生效</strong>，不用重启看板（正在跑的任务不受影响）</div></div>'
     + '<button class="set-x" onclick="closeSettings()" title="关闭（Esc）">✕</button></div>'
     + '<div class="set-secretbar"><span>🔒</span><span>'
-    + esc(SET.secret_notice || '') + '</span></div>'
+    + 'API 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。'
+    + '</span></div>'
+    + sceneSettingsHtml()
     + '<div class="set-body"><div class="set-nav">' + nav
-    + '<div class="snav-note">配置文件<br>' + esc(fname)
-    + '<br>（本机私有 · 已被 .gitignore 忽略）'
-    + '<br>首次配置见仓库根目录的 <kbd>.env.example</kbd> 与 README「首次配置」</div></div>'
+    + '<div class="snav-note">设置只保存在本机<br>不会上传、不会进代码仓库<br>密钥留空＝不改动</div></div>'
     + '<div class="set-pane" id="setpane">' + setPaneHtml(cur) + '</div></div>'
     + '<div class="set-foot"><button class="act" onclick="setSave()">保存</button>'
     + '<button class="ghost" onclick="setResetPane()">本区恢复默认</button>'
     + '<button class="ghost" onclick="SET=null;openSettings()">重新读取</button>'
     + '<div class="sstat ' + SET_MSG.cls + '" id="setstat">' + esc(SET_MSG.text || '')
     + '</div></div>';
+  // M0-1：设置中心里的「学习场景」三选一（与顶栏标识同一套状态）
+  box.querySelectorAll('.scene-opt').forEach(b => {
+    b.onclick = () => { setScene(b.dataset.s); setRender(); };
+  });
+}
+
+// M0-1：设置中心顶部的「学习场景」分段按钮（A 日常 / B 备考 / C 冲刺）。
+function sceneSettingsHtml(){
+  const btns = SCENE_ORDER.map(c => {
+    const s = SCENES[c];
+    return '<button class="ghost scene-opt' + (c === SCENE ? ' on' : '')
+      + '" data-s="' + c + '" title="' + esc(s.desc) + '">' + esc(s.short) + '</button>';
+  }).join('');
+  return '<div class="set-scene" style="padding:10px 18px;border-bottom:1px solid var(--line);'
+    + 'display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    + '<b>学习场景</b>'
+    + '<span class="small muted">决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能</span>'
+    + '<span style="flex:1"></span>' + btns + '</div>';
 }
 
 function setCollect(){
@@ -6578,7 +6692,7 @@ async function setResetPane(){
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keys: keys }) });
     if (r.settings) SET = r.settings;
-    SET_MSG = { cls: 'ok', text: '本区已恢复默认（跟随 .env / 内置默认）' };
+    SET_MSG = { cls: 'ok', text: '本区已恢复默认设置' };
   } catch(e){
     SET_MSG = { cls: 'bad', text: '恢复失败：' + e.message };
   }
@@ -6602,8 +6716,7 @@ async function promptOpen(slotId){
       + '"></textarea><div class="row" style="margin-top:9px">'
       + '<button class="act" onclick="promptSave(\'' + slotId + '\')">保存提示词</button>'
       + '<button class="ghost" onclick="promptOpen(\'' + slotId + '\')">取消</button>'
-      + '<span class="small muted">' + esc(d.path || '') + ' · 当前 sha256 '
-      + esc(String(d.sha256 || '').slice(0, 12)) + '…</span></div>'
+      + '<span class="small muted">保存后立即用于下一次整理</span></div>'
       + '<div class="spmsg" id="spmsg-' + slotId + '"></div></div>';
     $('#sptext-' + slotId).value = d.text || '';
   } catch(e){
@@ -6622,11 +6735,7 @@ async function promptSave(slotId){
       body: JSON.stringify({ name: slotId, text: ta.value }) });
     if (!r || !r.ok) throw new Error((r && r.error) || '保存失败');
     msg.className = 'spmsg ok';
-    msg.innerHTML = '已保存 · 新 sha256 <kbd>'
-      + esc(String(r.sha256_after || '').slice(0, 12)) + '…</kbd>（改前 <kbd>'
-      + esc(String(r.sha256_before || '').slice(0, 12)) + '…</kbd>）· 备份 '
-      + esc(String(r.backup || '').split('\\').pop())
-      + ' · 下一次整理就用新提示词';
+    msg.innerHTML = '已保存（旧版本已自动备份）· 下一次整理就用新提示词';
     if (r.prompts) SET.prompts = r.prompts;
   } catch(e){
     msg.className = 'spmsg bad';
@@ -6647,7 +6756,7 @@ async function promptOpenBuiltin(bid){
     box.setAttribute('data-open', '1');
     box.innerHTML = '<div class="spedit"><textarea readonly '
       + 'style="min-height:32vh"></textarea><div class="spmsg muted">'
-      + esc(d.source || '') + ' —— 只读（内建在代码里）</div></div>';
+      + esc(humanize(d.source || '')) + ' —— 内建提示词，只能查看（本版不支持在窗口里改）</div></div>';
     box.querySelector('textarea').value = d.text || '';
   } catch(e){
     box.innerHTML = '<div class="spmsg bad">' + esc(e.message) + '</div>';
@@ -6933,7 +7042,7 @@ async function shareInspect(zip){
       </div>
       ${m.importable ? `<div class="card" style="margin-top:10px;padding:10px;border-color:#1f4a24">
         <b style="color:var(--ok)">校验通过</b>
-        <div class="sub" style="margin-top:4px">整包 sha256 逐条核对通过；向量模型与本库一致
+        <div class="sub" style="margin-top:4px">整包内容逐条核对通过；向量模型与本库一致
           （${esc(emb.model)} dim=${esc(emb.dim)}）。</div>
       </div>` : `<div class="card" style="margin-top:10px;padding:10px;border-color:#4a1f1c">
         <b style="color:var(--bad)">不能导入：模型不一致</b>
@@ -7042,9 +7151,9 @@ function shareImportResult(r){
       <div class="sub">模型调用：<b>${r.model_calls} 次</b>，花费 <b>CNY ${(r.cost_cny||0).toFixed(2)}</b></div>
       ${r.source ? `<div class="sub">来源：${esc(r.source.subject || '未知学科')} ·
         doc#${esc(r.source.doc_id)} · ${esc(r.source.title || '')}</div>` : ''}
-      ${r.package_sha256 ? `<div class="sub">包指纹 sha256：
+      ${r.package_sha256 ? `<div class="sub">已记录来源
         <span style="user-select:all">${esc(String(r.package_sha256).slice(0, 16))}…</span>
-        （已记进这份资料的 extra.shared_from，日后可追溯是从哪个包来的）</div>` : ''}
+        （日后可追溯是从哪个包来的）</div>` : ''}
       ${r.file ? `<div class="sub">原课件已落到 raw\\：${esc(r.file)}</div>`
                : `<div class="sub">包内不含原课件，入库路径用占位标记（不影响检索与问答）</div>`}
       ${r.overwritten ? `<div class="sub">已按你的选择覆盖：先删掉本库已有的同一份
@@ -7062,7 +7171,12 @@ function shareImportResult(r){
   $('#shi-see').onclick = () => { closeModal(); go('docs'); };
 }
 
-go('assistant');
+// M0-1：启动按「学习场景」走——恢复上次场景、画顶栏标识、进该场景的默认首屏。
+// 默认 A（日常）从总览开始；C（冲刺）直接进复习页。
+SCENE = loadScene();
+scenePaint();
+if ($('#scene-badge')) $('#scene-badge').onclick = cycleScene;
+go(SCENES[SCENE].defaultView);
 </script>
 </body>
 </html>"""
@@ -10569,7 +10683,7 @@ def api_delete_docs(conn, payload):
         "artifact_errors": artifact_errors,
         "files_removed": nfile_total,
         "deleted": deleted,
-        "note": '库记录 / 切块 / 向量 / 识图记录 / 知识点引用 与四处文件系统产物（末级知识点总结+备份、名词解释、outline 缓存、页图目录）一并不留' + ('，raw\\ 里的原文件也已永久删除' if delete_file else '；raw\\ 里的原文件**保留**（本次没勾「连原文件一起删」）'),
+        "note": '库记录 / 切块 / 向量 / 识图记录 / 知识点引用 与四处文件系统产物（末级知识点总结+备份、名词解释、结构缓存、页图目录）一并不留' + ('，raw\\ 里的原文件也已永久删除' if delete_file else '；raw\\ 里的原文件**保留**（本次没勾「连原文件一起删」）'),
     }
 
 

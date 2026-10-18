@@ -1,8 +1,8 @@
-"""M0-3 整理产物 → 知识点表导入（tools/import_kp_artifacts.py）验收。
+"""M0-3 整理产物 → 知识点表导入（tools/import_kp_artifacts.py + core/kp_import.py）验收。
 
-全程只碰 `_work/verify/data/` 下的**副本库**与自造产物 fixture，不读不写真实的
+全程只碰 `_work/verify/t09_private/` 下的**副本库**与自造产物 fixture，不读不写真实的
 `logs/knowledge` 与 `index/study.db`（真实产物只由工具在真实副本上人工验收，
-见 `_work/m0/import/report.md`）。
+见 `_work/m0/import/report.md` 与 `refactor-report.md`）。
 
 覆盖：
   · dry-run（默认）只预览、库与 meta 清单零写入；
@@ -11,7 +11,9 @@
   · meta 导入清单被清掉后仍按「名称 + 摘要一致」认领，不重复建卡；
   · 同一产物内/跨课件**同名**节点自动加父级前缀区分；
   · 坏产物文件（坏 JSON）只记失败并继续，退出码仍 0；
-  · --doc-id 只导指定课件。
+  · --doc-id 只导指定课件；
+  · `core.kp_import.run()` 直调（dashboard 接线路径）：纯函数、默认 dry-run 零写入、
+    传 conn 时不关闭调用方连接、前置错误抛 `KpImportError`。
 """
 from __future__ import annotations
 
@@ -26,6 +28,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import env  # noqa: E402
+
+# 直调用例要 import core（模拟 dashboard 的接法）；run_all 从项目根起跑，这里补路径
+sys.path.insert(0, str(env.PROJECT))
+from core import kp_import  # noqa: E402
 
 PROJECT = env.PROJECT
 TOOL = PROJECT / "tools" / "import_kp_artifacts.py"
@@ -406,6 +412,37 @@ class TestImportArtifacts(_Base):
         self.assertIsNotNone(row, "v1 条目的名称应可导入")
         self.assertIn("要点：v1 要点甲", row[0], "v1 的 points 也应拼进 summary")
         self.assertEqual(nsrc, 1, "v1 的 sources.chunk_ids 应落 kp_sources")
+
+    def test_core_run_direct_dry_run(self):
+        """`core.kp_import.run()` 直调（dashboard 接线路径）：纯函数 + 零写入。"""
+        stats = kp_import.run(db_path=self.db_path, artifacts_dir=ART_DIR)
+        self.assertEqual(stats["mode"], "dry_run")
+        self.assertEqual(stats["kps_found"], 4)
+        self.assertEqual(stats["kps_would_create"], 4)
+        self.assertEqual(stats["kps_created"], 0, "默认 apply=False，创建数必须为 0")
+        self.assertGreater(stats["kp_sources_would_add"], 0)
+        self.assertIsInstance(stats["elapsed_ms"], int)
+        self.assertEqual(_count(self.db_path, "knowledge_points"), 0, "dry-run 零写入")
+        self.assertEqual(_count(self.db_path, "kp_sources"), 0)
+        self.assertIsNone(_manifest(self.db_path))
+
+        # 传 conn：调用方拥有连接，函数不得关闭它；dry-run 仍零写入
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            stats2 = kp_import.run(conn=conn, artifacts_dir=ART_DIR)
+            self.assertEqual(stats2["mode"], "dry_run")
+            self.assertEqual(stats2["kps_found"], 4)
+            conn.execute("SELECT COUNT(*) FROM knowledge_points").fetchone()  # 连接仍可用
+        finally:
+            conn.close()
+        self.assertEqual(_count(self.db_path, "knowledge_points"), 0, "传 conn 也不得写入")
+
+        # 前置错误：库/产物目录不存在 → API 抛 KpImportError（CLI 映射退出码 2）
+        with self.assertRaises(kp_import.KpImportError):
+            kp_import.run(db_path=T09_DIR / "not-exists.db", artifacts_dir=ART_DIR)
+        with self.assertRaises(kp_import.KpImportError):
+            kp_import.run(db_path=self.db_path, artifacts_dir=T09_DIR / "no-artifacts")
 
 
 def tearDownModule():
