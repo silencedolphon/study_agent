@@ -1,0 +1,1218 @@
+{
+ "meta": {
+  "generated_by": "build_reports.py",
+  "sources": {
+   "rescue_final": "D:\\harness\\rescue\\study_agent-final\\project\\study_agent",
+   "rescue_recovered2": "D:\\harness\\rescue\\study_agent-recovered2\\project\\study_agent",
+   "rescue_recovered": "D:\\harness\\rescue\\study_agent-recovered\\project\\study_agent",
+   "rescue_manual": "D:\\harness\\rescue\\study_agent-final\\_需要人工补充\\study_agent",
+   "rescue_flat": "D:\\harness\\rescue\\recovered",
+   "work_rebuilt": "D:\\harness\\rescue\\_work\\{rebuilt,built,assembled,decompiled}",
+   "v1_1_pyc": "C:\\Users\\Lenovo\\StudyDashboard.exe_extracted (PYZ.pyz_extracted)"
+  }
+ },
+ "summary": {
+  "audit_time": "2026-10-18 16:52 +08:00",
+  "worktree_head": "d10941f (baseline 04835f9 + 935e757 修 serve_mcp + d10941f 加 healthcheck)",
+  "scope": "core 25 py + tools 162 py + 根目录探针；对照 4 个恢复源 + 2 个 _work 重建源 + v1.1 PYZ pyc 真值",
+  "current_py_total": 300,
+  "core_py": 25,
+  "tools_py": 162,
+  "compile_fail_tools": 7,
+  "compile_fail_core": 0,
+  "byte_identical_to_rescue_final": 172,
+  "current_newer_than_rescue_final": [
+   "core/extract.py",
+   "core/figures.py",
+   "core/kp_batch.py",
+   "core/kp_build.py",
+   "core/outline.py",
+   "core/pipeline_pool.py",
+   "core/search.py",
+   "core/study.py",
+   "tools/dashboard.py",
+   "tools/serve_mcp.py",
+   "tools/study.py"
+  ],
+  "v1_1_truth_modules": 22,
+  "v1_1_truth_funcs": 781,
+  "v1_1_missing_funcs_total": 13,
+  "v1_1_string_retention_overall": 0.9664,
+  "modules_retention_below_98": {
+   "kp_batch": 0.8665,
+   "kp_build": 0.8651,
+   "search": 0.3269,
+   "study": 0.8986
+  },
+  "dashboard_routes": {
+   "truth": 67,
+   "current": 70,
+   "truth_missing_in_current": [
+    "/api/mistake"
+   ]
+  }
+ },
+ "files": [
+  {
+   "file": "core/chat.py",
+   "current_lines": 1090,
+   "current_bytes": 50733,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/chat.py",
+    "truth_funcs": 34,
+    "truth_last_line": 1090,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/chunk.py",
+   "current_lines": 692,
+   "current_bytes": 34801,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec2": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/chunk.py",
+    "truth_funcs": 25,
+    "truth_last_line": 692,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/config.py",
+   "current_lines": 1052,
+   "current_bytes": 56916,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_ok)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/config.py",
+    "truth_funcs": 33,
+    "truth_last_line": 966,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/db.py",
+   "current_lines": 675,
+   "current_bytes": 30979,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec2": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/db.py",
+    "truth_funcs": 17,
+    "truth_last_line": 674,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/embed.py",
+   "current_lines": 119,
+   "current_bytes": 4959,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/embed.py",
+    "truth_funcs": 10,
+    "truth_last_line": 119,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/extract.py",
+   "current_lines": 1319,
+   "current_bytes": 59009,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_ok)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "final（57360B/1294L，missing=0）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/extract.py",
+    "truth_funcs": 37,
+    "truth_last_line": 1294,
+    "missing_funcs": [],
+    "string_retention": 0.9941,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/figures.py",
+   "current_lines": 2111,
+   "current_bytes": 102678,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_ok)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "final（96785B/2013L，missing=0）",
+   "missing_defs": [],
+   "extra_defs": [
+    "_blank_page_texts",
+    "_fig_skip"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/figures.py",
+    "truth_funcs": 57,
+    "truth_last_line": 2013,
+    "missing_funcs": [],
+    "string_retention": 0.9954,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/ingest.py",
+   "current_lines": 1173,
+   "current_bytes": 61071,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_ok)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/ingest.py",
+    "truth_funcs": 25,
+    "truth_last_line": 1041,
+    "missing_funcs": [],
+    "string_retention": 0.9941,
+    "truncated_candidates": [],
+    "arg_mismatch": {
+     "ingest_file": {
+      "truth": 6,
+      "cur": 7
+     },
+     "_upsert_doc": {
+      "truth": 10,
+      "cur": 12
+     }
+    }
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/kp_batch.py",
+   "current_lines": 798,
+   "current_bytes": 40130,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec2": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（残缺 263 行）；当前为重建+增强版",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/kp_batch.py",
+    "truth_funcs": 17,
+    "truth_last_line": 570,
+    "missing_funcs": [],
+    "string_retention": 0.8665,
+    "truncated_candidates": [],
+    "arg_mismatch": {
+     "_run_one": {
+      "truth": 1,
+      "cur": 3
+     }
+    }
+   },
+   "recommendation": "函数齐全（含历史缺失的 _blank_task/_task_of/_task_percent/_bump_global/_run_one 均已补齐），v1.1 字符保留 86.7%（含重建注记与文案改写）。建议对批量整理入口做一次 dry-run 冒烟（不写真实库用临时数据根），重点验 plan()/start()。",
+   "risk": "P2",
+   "confidence": "medium"
+  },
+  {
+   "file": "core/kp_build.py",
+   "current_lines": 5670,
+   "current_bytes": 261066,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec2": "differs(parse_bad)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-recovered2（3562 行，残缺）；_work/rebuilt/kp_build/kp_build.rebuilt.py（4882 行，可解析，可作修复参照）；v1.1 pyc 为真值",
+   "missing_defs": [],
+   "extra_defs": [
+    "ModelCallHang",
+    "ModelSlotTimeout",
+    "_abandoned_done",
+    "_abandoned_enter",
+    "_call_with_hard_timeout",
+    "_dur_bucket",
+    "_env_seconds",
+    "_fmt_secs",
+    "_slot_was_reclaimed",
+    "call_hard_timeout",
+    "observe_call_seconds",
+    "observed_call_seconds",
+    "reclaim_stalled_slots",
+    "seconds_since_last_call",
+    "slot_wait_timeout",
+    "stall_timeout"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/kp_build.py",
+    "truth_funcs": 132,
+    "truth_last_line": 4792,
+    "missing_funcs": [],
+    "string_retention": 0.8651,
+    "truncated_candidates": [],
+    "arg_mismatch": {
+     "estimate_v1": {
+      "truth": 1,
+      "cur": 4
+     },
+     "model_slot": {
+      "truth": 1,
+      "cur": 2
+     },
+     "plan_kp_tasks_v2": {
+      "truth": 2,
+      "cur": 5
+     },
+     "estimate_terms": {
+      "truth": 1,
+      "cur": 4
+     }
+    }
+   },
+   "recommendation": "函数名 132/132 齐全、v1.1 字符保留 86.5%（主要为长 docstring 缺失，属 AI 反编译痕迹，不建议回退）。★必须修 `_page_stats`：L724-738 被拼入 render_materials 的代码块，引用未定义名 win/lines/pages/pp/cur/fig ⇒ 调用即 NameError（调用点 L1371 estimate_v1）。修法：删除 L724-738，并把 L739-741 的 `for p in range(a,b+1)` 移回 L722 后（for ref 循环内）；干净参照：_work/rebuilt/kp_build/kp_build.rebuilt.py::_page_stats（42 行）。另有 3 处 `TODO(反编译存疑)`（L1466/1926/2843）需行为验证。",
+   "risk": "P1",
+   "confidence": "high"
+  },
+  {
+   "file": "core/layout.py",
+   "current_lines": 312,
+   "current_bytes": 13137,
+   "compile": true,
+   "sources_status": {},
+   "best_source": "无可用解析源（全部候选均语法不过）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/layout.py",
+    "truth_funcs": 13,
+    "truth_last_line": 289,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/multippt.py",
+   "current_lines": 237,
+   "current_bytes": 10469,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/multippt.py",
+    "truth_funcs": 7,
+    "truth_last_line": 237,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/outline.py",
+   "current_lines": 655,
+   "current_bytes": 28058,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)"
+   },
+   "best_source": "work:outline.rebuilt.py（20183B/543L，missing=0）",
+   "missing_defs": [],
+   "extra_defs": [
+    "_same_theme"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/outline.py",
+    "truth_funcs": 16,
+    "truth_last_line": 597,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {
+     "analyze_deck": {
+      "truth": 4,
+      "cur": 5
+     }
+    }
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/pipeline_pool.py",
+   "current_lines": 759,
+   "current_bytes": 36784,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_ok)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "final（34795B/730L，missing=0）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/pipeline_pool.py",
+    "truth_funcs": 30,
+    "truth_last_line": 730,
+    "missing_funcs": [],
+    "string_retention": 0.9892,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/preview.py",
+   "current_lines": 1294,
+   "current_bytes": 68704,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "v1.1 无此模块（C-0086 之后新增，PYZ 里没有对应 pyc）；与 rescue-final/recovered2 逐字节相同，即最佳可用版本，编译通过。无需行动。",
+   "risk": "none",
+   "confidence": "medium"
+  },
+  {
+   "file": "core/progress.py",
+   "current_lines": 122,
+   "current_bytes": 5011,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/progress.py",
+    "truth_funcs": 7,
+    "truth_last_line": 121,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/search.py",
+   "current_lines": 856,
+   "current_bytes": 40035,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "无完整源码；v1.1 pyc 真值：C:\\Users\\Lenovo\\StudyDashboard.exe_extracted\\PYZ.pyz_extracted\\core\\search.pyc（57,664B）",
+   "missing_defs": [
+    "_base_of",
+    "_flag_confidence",
+    "_is_figure_hit",
+    "_is_prefix",
+    "_path_parts",
+    "expand_continuations.fetch",
+    "expand_continuations.topic_candidates",
+    "expand_neighbors.base_of",
+    "expand_neighbors.expand_one",
+    "expand_neighbors.group_of",
+    "expand_neighbors.rows_near",
+    "expand_neighbors.same_theme",
+    "expand_neighbors.wrap"
+   ],
+   "extra_defs": [
+    "get_chunk",
+    "neighbors"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/search.py",
+    "truth_funcs": 32,
+    "truth_last_line": 1355,
+    "missing_funcs": [
+     "_is_figure_hit",
+     "_base_of",
+     "_path_parts",
+     "_is_prefix",
+     "expand_continuations.fetch",
+     "expand_continuations.topic_candidates",
+     "expand_neighbors.base_of",
+     "expand_neighbors.group_of",
+     "expand_neighbors.same_theme",
+     "expand_neighbors.rows_near",
+     "expand_neighbors.wrap",
+     "expand_neighbors.expand_one",
+     "_flag_confidence"
+    ],
+    "string_retention": 0.3269,
+    "truncated_candidates": [
+     {
+      "qualname": "_same_theme",
+      "truth_span": 38,
+      "cur_span": 15,
+      "ratio": 0.39,
+      "truth_line": 578,
+      "cur_line": 736
+     },
+     {
+      "qualname": "expand_continuations",
+      "truth_span": 182,
+      "cur_span": 64,
+      "ratio": 0.35,
+      "truth_line": 618,
+      "cur_line": 753
+     },
+     {
+      "qualname": "expand_neighbors",
+      "truth_span": 195,
+      "cur_span": 49,
+      "ratio": 0.25,
+      "truth_line": 802,
+      "cur_line": 626
+     }
+    ],
+    "arg_mismatch": {
+     "_same_theme": {
+      "truth": 4,
+      "cur": 2
+     }
+    }
+   },
+   "recommendation": "当前是 AI 重建版（非原版）：v1.1 真值 32 个函数中缺 13 个、字符保留率 32.7%、expand_neighbors 49 行 vs 真值 195 行。无完整源码可用。用 `ai_decompile.py --pyc ...core\\search.pyc` 从 v1.1 字节码重建缺失函数，或保留现版并跑检索质量回归（8 条口语化查询 Top-1 对照）。",
+   "risk": "P1",
+   "confidence": "high"
+  },
+  {
+   "file": "core/sections.py",
+   "current_lines": 983,
+   "current_bytes": 47409,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "v1.1 无此模块（C-0086 之后新增，PYZ 里没有对应 pyc）；与 rescue-final/recovered2 逐字节相同，即最佳可用版本，编译通过。无需行动。",
+   "risk": "none",
+   "confidence": "medium"
+  },
+  {
+   "file": "core/share.py",
+   "current_lines": 1491,
+   "current_bytes": 73345,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/share.py",
+    "truth_funcs": 43,
+    "truth_last_line": 1467,
+    "missing_funcs": [],
+    "string_retention": 0.9963,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/study.py",
+   "current_lines": 1204,
+   "current_bytes": 55684,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_ok)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（477 行残缺）；当前为重建增强版",
+   "missing_defs": [],
+   "extra_defs": [
+    "_deck_days",
+    "_deck_ensure",
+    "_deck_load",
+    "_deck_summary",
+    "_deck_today",
+    "add_mistake",
+    "compute_mastery",
+    "deck_calendar",
+    "deck_curve",
+    "deck_mark",
+    "decks_for",
+    "due_queue",
+    "enroll_deck",
+    "link_kp",
+    "read_note",
+    "record_review",
+    "resolve_mistake",
+    "review_queue",
+    "schedule"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/study.py",
+    "truth_funcs": 30,
+    "truth_last_line": 970,
+    "missing_funcs": [],
+    "string_retention": 0.8986,
+    "truncated_candidates": [],
+    "arg_mismatch": {
+     "schedule": {
+      "truth": 7,
+      "cur": 3
+     },
+     "add_mistake": {
+      "truth": 8,
+      "cur": 9
+     }
+    }
+   },
+   "recommendation": "函数齐全（SM-2/遗忘曲线/错题/笔记均在），v1.1 字符保留 89.9%，缺失项主要是 SQL 文本与 docstring 的重建改写（如 INSERT INTO mistakes 等）。建议用临时库做 review/mistake/note 行为回归，确认列名与语义一致。",
+   "risk": "P2",
+   "confidence": "medium"
+  },
+  {
+   "file": "core/subjects.py",
+   "current_lines": 514,
+   "current_bytes": 20715,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_ok)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/subjects.py",
+    "truth_funcs": 27,
+    "truth_last_line": 513,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/tables.py",
+   "current_lines": 644,
+   "current_bytes": 23623,
+   "compile": true,
+   "sources_status": {},
+   "best_source": "无可用解析源（全部候选均语法不过）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> core/tables.py",
+    "truth_funcs": 20,
+    "truth_last_line": 639,
+    "missing_funcs": [],
+    "string_retention": 1.0,
+    "truncated_candidates": [],
+    "arg_mismatch": {}
+   },
+   "recommendation": "无需行动（编译通过、结构对照无缺失）",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "core/teach.py",
+   "current_lines": 857,
+   "current_bytes": 37979,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "v1.1 无此模块（C-0086 之后新增，PYZ 里没有对应 pyc）；与 rescue-final/recovered2 逐字节相同，即最佳可用版本，编译通过。无需行动。",
+   "risk": "none",
+   "confidence": "medium"
+  },
+  {
+   "file": "core/textbook.py",
+   "current_lines": 1225,
+   "current_bytes": 57097,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "v1.1 无此模块（C-0086 之后新增，PYZ 里没有对应 pyc）；与 rescue-final/recovered2 逐字节相同，即最佳可用版本，编译通过。无需行动。",
+   "risk": "none",
+   "confidence": "medium"
+  },
+  {
+   "file": "tools/dashboard.py",
+   "current_lines": 12821,
+   "current_bytes": 603760,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec2": "differs(parse_bad)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（12,403 行，无法解析）；_work/built/dashboard.py（12,038 行，可解析，更旧）",
+   "missing_defs": [],
+   "extra_defs": [
+    "Handler._do_post",
+    "_chapters_of_doc",
+    "_doc_row_of_file",
+    "_inside_dir",
+    "_page_span",
+    "_path_key",
+    "api_ingest_textbook"
+   ],
+   "v1_1_truth": {
+    "file": "v1.1 pyc -> tools/dashboard.py",
+    "truth_funcs": 169,
+    "truth_last_line": 12428,
+    "missing_funcs": [],
+    "string_retention": 0.9905,
+    "truncated_candidates": [
+     {
+      "qualname": "Handler.do_POST",
+      "truth_span": 268,
+      "cur_span": 19,
+      "ratio": 0.07,
+      "truth_line": 5496,
+      "cur_line": 12522
+     }
+    ],
+    "arg_mismatch": {
+     "_rename_error": {
+      "truth": 1,
+      "cur": 3
+     },
+     "_clean_new_name": {
+      "truth": 1,
+      "cur": 3
+     }
+    }
+   },
+   "recommendation": "无需修复：v1.1 真值 169/169 函数齐全（仅 Handler.do_POST 重构为委托 _do_post），INDEX_HTML 行覆盖 99.9%（274,587→280,085 字符，含新版新增），路由 70（真值 67，仅 /api/mistake 被更名为 /api/mistakes，新增 4 条）。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/study.py",
+   "current_lines": 788,
+   "current_bytes": 36648,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "rescue-final（与当前逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同（重建版 677 行，8 个命令实现按报告补齐）；v1.1 无 tools/ 真值，无法逐函数对照。建议 CLI 冒烟（check/docs/stats/search 等只读命令）。",
+   "risk": "P2",
+   "confidence": "low"
+  },
+  {
+   "file": "tools/serve_mcp.py",
+   "current_lines": 569,
+   "current_bytes": 23631,
+   "compile": true,
+   "sources_status": {
+    "final": "differs(parse_bad)",
+    "rec2": "differs(parse_bad)",
+    "rec": "differs(parse_bad)"
+   },
+   "best_source": "无完整恢复源（final 14575B/rec2 12651B/rec 12289B/flat 4158B 全部语法不过且尾部截断）；当前重建版为唯一可运行版",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "已由 lead 在 commit 935e757 重建（HEAD d10941f）：23,631B/570 行、可编译、7 个顶层函数、14 个 MCP 工具 + selftest，协议要素齐全；基线 04835f9 的版本才是断头 JSON 片段。无 v1.1 pyc 真值（v1.1 PYZ 内无 serve_mcp.pyc），无法逐功能对照；建议跑 tools/verify_mcp_handshake.py 做握手验收。",
+   "risk": "none",
+   "confidence": "medium"
+  },
+  {
+   "file": "tools/kp_build.py",
+   "current_lines": 170,
+   "current_bytes": 10083,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同，编译通过，dashboard 引用正常。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/terms_build.py",
+   "current_lines": 120,
+   "current_bytes": 6131,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同，编译通过。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/reimport_all.py",
+   "current_lines": 216,
+   "current_bytes": 9928,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_ok)"
+   },
+   "best_source": "rescue-final（逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同，编译通过（README 推荐入口）。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/share.py",
+   "current_lines": 274,
+   "current_bytes": 13208,
+   "compile": true,
+   "sources_status": {
+    "final": "identical",
+    "rec": "differs(parse_ok)"
+   },
+   "best_source": "rescue-final（逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同，编译通过（dashboard 引用 29 处）。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/preview_build.py",
+   "current_lines": 157,
+   "current_bytes": 7924,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "rescue-final（逐字节相同）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "与 rescue-final 逐字节相同，编译通过。",
+   "risk": "none",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/run_figure_desc.py",
+   "current_lines": 50,
+   "current_bytes": 2228,
+   "compile": true,
+   "sources_status": {
+    "final": "identical"
+   },
+   "best_source": "无（final/rec2/rec 均 2,228B 同版断头）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "v1_1_truth": null,
+   "recommendation": "断头文件：仅 2,228B，从 `def main()` 起（无 imports/模块头），且无尾部 `if __name__` 调用；运行时 NameError（argparse/Path/figures/config/time 未定义）。全部恢复源同版断头，无可用源；它被 release_pack.py 白名单列为 R3 用户工具 ⇒ 发布包会带一个坏工具。修：按 core/figures.py 的 extract_pages/build_contexts 接口重写（~60 行），或从 TOOLS_RELEASE 移除。",
+   "risk": "P1",
+   "confidence": "high"
+  }
+ ],
+ "broken_files": [
+  {
+   "file": "tools/c0089_tmp_launch.py",
+   "current_lines": 1,
+   "current_bytes": 72,
+   "compile": false,
+   "error": "invalid syntax (line 1)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "manual": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P3",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/c0098_audit_ui.py",
+   "current_lines": 299,
+   "current_bytes": 12303,
+   "compile": false,
+   "error": "invalid character '（' (U+FF08) (line 102)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "manual": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P3",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/check_mindmap_kp.py",
+   "current_lines": 263,
+   "current_bytes": 12803,
+   "compile": false,
+   "error": "unexpected indent (line 1)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "rec": "parse_bad",
+    "manual": "parse_bad",
+    "flat": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/smoke_test.py",
+   "current_lines": 250,
+   "current_bytes": 12689,
+   "compile": false,
+   "error": "unexpected indent (line 1)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "rec": "parse_bad",
+    "manual": "parse_bad",
+    "flat": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/verify_c0039_precheck.py",
+   "current_lines": 40,
+   "current_bytes": 2448,
+   "compile": false,
+   "error": "unexpected indent (line 1)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "rec": "parse_bad",
+    "manual": "parse_bad",
+    "flat": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P3",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/verify_c0057_browser.py",
+   "current_lines": 342,
+   "current_bytes": 15642,
+   "compile": false,
+   "error": "closing parenthesis '}' does not match opening parenthesis '(' on line 329 (line 335)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "rec": "parse_bad",
+    "manual": "parse_bad",
+    "flat": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P3",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  },
+  {
+   "file": "tools/verify_c0057_offline.py",
+   "current_lines": 33,
+   "current_bytes": 1700,
+   "compile": false,
+   "error": "'(' was never closed (line 33)",
+   "sources_status": {
+    "final": "parse_bad",
+    "rec2": "parse_bad",
+    "rec": "parse_bad",
+    "manual": "parse_bad",
+    "flat": "parse_bad"
+   },
+   "best_source": "无（所有恢复源均为同一坏版本或更差）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "历史/开发验证脚本，无恢复源；从产品树归档（移入 archive/ 或删除），并从任何发布白名单排除。",
+   "risk": "P3",
+   "confidence": "high",
+   "evidence": "badfiles_serve.py：7 个源逐字节比对全部失败"
+  }
+ ],
+ "missing_whitelist_files": [
+  {
+   "file": "tools/split_multippt.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": false,
+   "error": "文件缺失（全恢复源均无）",
+   "sources_status": {
+    "final": "absent",
+    "rec2": "absent",
+    "rec": "absent",
+    "recovered": "absent"
+   },
+   "best_source": "无（D:\\harness\\rescue 全树搜索 0 命中）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "在 release_pack.py 白名单中声明（R3 把一份含多课件的 pptx 拆开（资料准备阶段用））但文件不存在：按 core 对应模块能力重写，或从 TOOLS_RELEASE 移除；否则发布包缺项。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "Get-ChildItem D:\\harness\\rescue -Recurse -Filter <name> = 0 命中"
+  },
+  {
+   "file": "tools/make_test_files.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": false,
+   "error": "文件缺失（全恢复源均无）",
+   "sources_status": {
+    "final": "absent",
+    "rec2": "absent",
+    "rec": "absent",
+    "recovered": "absent"
+   },
+   "best_source": "无（D:\\harness\\rescue 全树搜索 0 命中）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "在 release_pack.py 白名单中声明（R3 生成真实格式的测试文件，供用户第一次试跑管线）但文件不存在：按 core 对应模块能力重写，或从 TOOLS_RELEASE 移除；否则发布包缺项。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "Get-ChildItem D:\\harness\\rescue -Recurse -Filter <name> = 0 命中"
+  },
+  {
+   "file": "tools/ingest_figures.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": false,
+   "error": "文件缺失（全恢复源均无）",
+   "sources_status": {
+    "final": "absent",
+    "rec2": "absent",
+    "rec": "absent",
+    "recovered": "absent"
+   },
+   "best_source": "无（D:\\harness\\rescue 全树搜索 0 命中）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "在 release_pack.py 白名单中声明（R3 把识图结果写回知识库（run_figure_desc 的落库端））但文件不存在：按 core 对应模块能力重写，或从 TOOLS_RELEASE 移除；否则发布包缺项。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "Get-ChildItem D:\\harness\\rescue -Recurse -Filter <name> = 0 命中"
+  },
+  {
+   "file": "tools/restore_figures.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": false,
+   "error": "文件缺失（全恢复源均无）",
+   "sources_status": {
+    "final": "absent",
+    "rec2": "absent",
+    "rec": "absent",
+    "recovered": "absent"
+   },
+   "best_source": "无（D:\\harness\\rescue 全树搜索 0 命中）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "在 release_pack.py 白名单中声明（R3 误删识图块后的恢复工具）但文件不存在：按 core 对应模块能力重写，或从 TOOLS_RELEASE 移除；否则发布包缺项。",
+   "risk": "P2",
+   "confidence": "high",
+   "evidence": "Get-ChildItem D:\\harness\\rescue -Recurse -Filter <name> = 0 命中"
+  }
+ ],
+ "empty_files": [
+  {
+   "file": "tools/find_empty_figures.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": true,
+   "error": "0 字节空文件",
+   "sources_status": {
+    "final": "identical(0B)",
+    "rec2": "identical(0B)",
+    "rec": "absent"
+   },
+   "best_source": "无（final/rec2 同为 0B，内容全失）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "开发/历史脚本，内容不可恢复：删除或归档；不需要修复。",
+   "risk": "P3",
+   "confidence": "high"
+  },
+  {
+   "file": "tools/verify_c0048_window.py",
+   "current_lines": 0,
+   "current_bytes": 0,
+   "compile": true,
+   "error": "0 字节空文件",
+   "sources_status": {
+    "final": "identical(0B)",
+    "rec2": "identical(0B)",
+    "rec": "absent"
+   },
+   "best_source": "无（final/rec2 同为 0B，内容全失）",
+   "missing_defs": [],
+   "extra_defs": [],
+   "recommendation": "开发/历史脚本，内容不可恢复：删除或归档；不需要修复。",
+   "risk": "P3",
+   "confidence": "high"
+  }
+ ],
+ "known_limitations": [
+  "v1.1 pyc 真值是 2026-10-12 前的发布版基线（≈C-0086），当前树更新，故「v1.1 文本保留率 <100%」部分是新版有意改写，不能一律视为丢失。",
+  "tools/ 与 4 个新 core 模块（preview/sections/teach/textbook）在 v1.1 PYZ 中无 pyc，无逐字真值；只能做恢复源对照。",
+  "serve_mcp.py 在 v1.1 PYZ 中不存在（MCP 为后续功能），无字节码真值；当前版本按工具清单重建，功能正确性需握手/端到端验证。",
+  "所有动态行为（启动看板、检索质量、批量整理）需由 verifier 在隔离环境实测，本审计只覆盖静态完整性。",
+  "_work 既有报告（缺口清单/README/第39轮）是 10-14 早期状态，其中多数缺口在 10-15/16 的修复轮次已关闭，不要按其结论直接施工。"
+ ],
+ "moving_target_note": "审计期间 lead 仍在提交（16:44 修 serve_mcp、16:52 加 healthcheck）。本报告以 16:52 的快照与 snapshot-manifest.txt 的 md5 为准；产品文件若再变更需重跑 _work/audit/*.py。"
+}

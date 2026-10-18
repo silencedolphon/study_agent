@@ -1,0 +1,182 @@
+
+##############################################################################
+## 0. 审计环境与快照
+##############################################################################
+$ git log --oneline -3
+d10941f feat(tools): 新增一键健康检查 healthcheck.py
+935e757 fix(mcp): 重建 serve_mcp.py（14 工具/stdio）+ 新增握手验证脚本
+04835f9 baseline: 恢复后的项目快照（2026-10-18，开发迭代起点）
+$ git status --short
+?? tests/
+$ (Get-ChildItem core,tools -File -Filter *.py).Count
+core=25 tools=162
+python: 3.13.2 (tags/v3.13.2:4f8bb39, Feb  4 2025, 15:23:48) [MSC v.1942 64 bit (AMD64)]
+
+##############################################################################
+## 1. 全量语法检查（compile(bytes)，不落 .pyc）
+##############################################################################
+core+tools 共 187 个文件；语法不过 7 个：
+  tools\c0089_tmp_launch.py -> invalid syntax (line 1)
+  tools\c0098_audit_ui.py -> invalid character '（' (U+FF08) (line 102)
+  tools\check_mindmap_kp.py -> unexpected indent (line 1)
+  tools\smoke_test.py -> unexpected indent (line 1)
+  tools\verify_c0039_precheck.py -> unexpected indent (line 1)
+  tools\verify_c0057_browser.py -> closing parenthesis '}' does not match opening parenthesis '(' on line 329 (line 335)
+  tools\verify_c0057_offline.py -> '(' was never closed (line 33)
+
+##############################################################################
+## 2. 当前树 vs 恢复源（core+tools 逐字节 md5 比对）
+##############################################################################
+-- rescue-final: identical=172 differ=11 absent_in_source=4
+   differ: core\extract.py, core\figures.py, core\kp_batch.py, core\kp_build.py, core\outline.py, core\pipeline_pool.py, core\search.py, core\study.py, tools\dashboard.py, tools\serve_mcp.py, tools\study.py
+   absent_in_source: core\layout.py, core\tables.py, tools\healthcheck.py, tools\verify_mcp_handshake.py
+-- rescue-recovered2: identical=169 differ=14 absent_in_source=4
+   differ: core\chunk.py, core\db.py, core\extract.py, core\figures.py, core\kp_batch.py, core\kp_build.py, core\outline.py, core\pipeline_pool.py, core\search.py, core\study.py, tools\dashboard.py, tools\serve_mcp.py, tools\study.py, tools\verify_c0057_browser.py
+   absent_in_source: core\layout.py, core\tables.py, tools\healthcheck.py, tools\verify_mcp_handshake.py
+-- rescue-recovered: identical=26 differ=47 absent_in_source=114
+   differ: core\chat.py, core\config.py, core\extract.py, core\figures.py, core\ingest.py, core\kp_batch.py, core\kp_build.py, core\outline.py, core\pipeline_pool.py, core\search.py, core\share.py, core\study.py, core\subjects.py, tools\c0100_probe_ui.py, tools\c0100_tmp_launch.py, tools\check_mindmap_kp.py, tools\check_steward_review_watch.py, tools\dashboard.py, tools\pack_exe.py, tools\probe_c0074_firstrun.py, tools\probe_c0074_three_steps.py, tools\reimport_all.py, tools\release_pack.py, tools\serve_mcp.py, tools\share.py, tools\steward_poll.py, tools\steward_review_watch.py, tools\study.py, tools\verify_c0052_browser.py, tools\verify_c0052_quick.py, tools\verify_c0053_browser.py, tools\verify_c0053_quick.py, tools\verify_c0055_browser.py, tools\verify_c0055_quick.py, tools\verify_c0056_quick.py, tools\verify_c0057_offline.py, tools\verify_c0059_browser.py, tools\verify_c0059_offline.py, tools\verify_c0061_browser.py, tools\verify_c0061_offline.py, tools\verify_c0065_legacy.py, tools\verify_c0073_exe.py, tools\verify_c0077_empty_kp.py, tools\verify_c0079_share.py, tools\verify_c0080_share_ui.py, tools\verify_c0092_sections.py, tools\verify_c0093.py
+   absent_in_source: core\layout.py, core\preview.py, core\sections.py, core\tables.py, core\teach.py, core\textbook.py, tools\_c0052_base_compare.py, tools\_c0052_check_result.py, tools\_c0052_final_check.py, tools\_c0052_probe_stream.py, tools\_c0052_selftest_notes.py, tools\_c0057_probe.py, tools\_c0057_probe_call.py, tools\_c0058_diff.py, tools\_c0058_probe.py, tools\_c0058_report.py, tools\_c0058_snap.py, tools\_c0058_terms_check.py, tools\_c0082_probe_note.py, tools\audit_c0099.py, tools\author_mark.py, tools\c0083_tmp_launch.py, tools\c0084_tmp_launch.py, tools\c0085_tmp_launch.py, tools\c0087_report.py, tools\c0088_selftest_compare.py, tools\c0088_snapshot.py, tools\c0089_make_textbook.py, tools\c0089_probe_dbcheck.py, tools\c0089_tmp_launch.py, tools\c0090_backup.py, tools\c0090_batch_equiv.py, tools\c0090_before_cross.py, tools\c0090_compare.py, tools\c0090_diagnose_chapters.py, tools\c0090_guard_test.py, tools\c0090_probe.py, tools\c0090_report.py, tools\c0090_rerun.py, tools\c0090_rerun2.py, tools\c0090_search_probe.py, tools\c0090_snapshot.py, tools\c0092_sections.py, tools\c0094_estimate_doc.py, tools\c0094_sha_compare.py, tools\c0097_apply_patch.py, tools\c0097_verify.py, tools\c0098_apply_patch.py, tools\c0098_apply_patch2.py, tools\c0098_audit_ui.py, tools\c0098_docs_probe.py, tools\c0098_fix_escapes.py, tools\c0098_js_syntax_check.py, tools\c0098_scan_escapes.py, tools\c0098_shots.py, tools\c0098_verify_static.py, tools\c0100_apply_patch.py, tools\c0100_apply_patch2.py, tools\c0100_apply_patch3.py, tools\c0101_apply_patch.py, tools\c0101_apply_patch2.py, tools\c0101_diff_scope.py, tools\c0101_probe_all.py, tools\c0101_probe_cost.py, tools\c0101_probe_db.py, tools\c0101_probe_ui.py, tools\c0101_tmp_launch.py, tools\c0101_verify.py, tools\c0102_apply_patch.py, tools\c0102_diag_click.py, tools\c0102_diff_scope.py, tools\c0102_probe_db.py, tools\c0102_probe_http.py, tools\c0102_probe_ui.py, tools\c0102_tmp_launch.py, tools\c0102_verify.py, tools\check_c0084_artifacts.py, tools\find_empty_figures.py, tools\healthcheck.py, tools\preview_build.py, tools\probe_c0093_http.py, tools\steward_card_set_status.py, tools\steward_poll_daemon.py, tools\steward_wake.py, tools\steward_wake_watch.py, tools\test_textbook_chapters.py, tools\verify_c0048_window.py, tools\verify_c0056_browser.py, tools\verify_c0071_firstrun.py, tools\verify_c0071_leak_scan.py, tools\verify_c0074_docs.py, tools\verify_c0078_yen_encoding.py, tools\verify_c0080_delivery.py, tools\verify_c0081_delivery.py, tools\verify_c0081_host.py, tools\verify_c0081_share_e2e.py, tools\verify_c0082_browser.py, tools\verify_c0082_offline.py, tools\verify_c0083_dragdrop.py, tools\verify_c0084_fixture.py, tools\verify_c0084_purge.py, tools\verify_c0085_fixture.py, tools\verify_c0085_rename.py, tools\verify_c0086_release.py, tools\verify_c0087_textbook.py, tools\verify_c0088_regression.py, tools\verify_c0088_textbook.py, tools\verify_c0089_textbook.py, tools\verify_c0090_textbook.py, tools\verify_c0094_preview.py, tools\verify_c0095_share_preview.py, tools\verify_c0099.py, tools\verify_c0100.py, tools\verify_mcp_handshake.py
+
+##############################################################################
+## 3. v1.1 PYZ .pyc 真值（C:\Users\Lenovo\StudyDashboard.exe_extracted）
+##############################################################################
+$ 用 Python 3.13 marshal 加载 .pyc（header 16B），递归收集 code 对象
+真值模块数 22；函数总数 781；当前树缺失函数 13（全部在 search.py）
+整体字符串保留率（按字符加权）: 0.9664
+模块               真值函数  真值末行  当前行数  缺失  截断  字符串保留率
+dashboard              169     12428     12822    0     1  0.9905
+__init__                 0         6         6    0     0  1.0
+chat                    34      1090      1090    0     0  1.0
+chunk                   25       692       692    0     0  1.0
+config                  33       966      1052    0     0  1.0
+db                      17       674       675    0     0  1.0
+embed                   10       119       119    0     0  1.0
+extract                 37      1294      1319    0     0  0.9941
+figures                 57      2013      2111    0     0  0.9954
+ingest                  25      1041      1173    0     0  0.9941
+kp_batch                17       570       798    0     0  0.8665
+kp_build               132      4792      5671    0     0  0.8651
+layout                  13       289       313    0     0  1.0
+multippt                 7       237       237    0     0  1.0
+outline                 16       597       655    0     0  1.0
+pipeline_pool           30       730       759    0     0  0.9892
+progress                 7       121       122    0     0  1.0
+search                  32      1355       857   13     3  0.3269
+share                   43      1467      1492    0     0  0.9963
+study                   30       970      1204    0     0  0.8986
+subjects                27       513       514    0     0  1.0
+tables                  20       639       645    0     0  1.0
+
+search.py 缺失函数明细：
+  {"qualname": "_is_figure_hit", "line": 109, "args": 1}
+  {"qualname": "_base_of", "line": 563, "args": 1}
+  {"qualname": "_path_parts", "line": 568, "args": 1}
+  {"qualname": "_is_prefix", "line": 573, "args": 2}
+  {"qualname": "expand_continuations.fetch", "line": 658, "args": 1}
+  {"qualname": "expand_continuations.topic_candidates", "line": 671, "args": 1}
+  {"qualname": "expand_neighbors.base_of", "line": 854, "args": 1}
+  {"qualname": "expand_neighbors.group_of", "line": 857, "args": 2}
+  {"qualname": "expand_neighbors.same_theme", "line": 867, "args": 4}
+  {"qualname": "expand_neighbors.rows_near", "line": 871, "args": 3}
+  {"qualname": "expand_neighbors.wrap", "line": 880, "args": 2}
+  {"qualname": "expand_neighbors.expand_one", "line": 891, "args": 2}
+  {"qualname": "_flag_confidence", "line": 1228, "args": 2}
+
+##############################################################################
+## 4. core/kp_build.py `_page_stats` 拼接损坏（P1）
+##############################################################################
+证据 A：symtable 在模块作用域外发现被引用但未定义的全局名（仅 6 个，全部在 _page_stats）：
+  win / lines / pages / pp / cur / fig
+证据 B：当前 _page_stats 定义行 692，结束行 743（52 行）；其中 724-738 行调用了上述未定义名。
+File "<string>", line 1
+    import ast,pathlib;src=pathlib.Path(\'core/kp_build.py\').read_text(encoding=\'utf-8-sig\');t=ast.parse(src);print([(n.name,n.lineno,n.end_lineno) for n in ast.walk(t) if isinstance(n,ast.FunctionDef) and n.name in (\'_page_stats\',\'render_materials\')])
+                                         ^
+SyntaxError: unexpected character after line continuation character
+证据 C：干净参照 _work/rebuilt/kp_build/kp_build.rebuilt.py 中同名函数为 42 行，跨页覆盖循环在 `for ref...` 循环体内；当前版被插入了 render_materials 的 15 行代码块，且原循环尾（`for p in range(a,b+1)`）被挤到循环外。
+调用点：core/kp_build.py:1371  st = _page_stats(doc_id, db_path)（estimate_v1 路径）
+修复：删除 L724-738；把 L739-741 移回 L722（for ref 循环内、n_blocks += 之后）。
+
+##############################################################################
+## 5. 7 个语法坏文件：所有恢复源均无可用版本
+##############################################################################
+（来源：badfiles-serve.py 对 final/rec2/rec/manual/flat 逐字节 md5 比对；输出摘录）
+- tools/c0089_tmp_launch.py: current 72B md5=7d65911ddd2d err=invalid syntax (line 1)
+    恢复源候选 3 个，md5 集合 ['7d65911ddd']；其中 current 的 md5 在恢复源中：True
+- tools/c0098_audit_ui.py: current 12303B md5=bf79d02280b6 err=invalid character '（' (U+FF08) (line 102)
+    恢复源候选 3 个，md5 集合 ['bf79d02280']；其中 current 的 md5 在恢复源中：True
+- tools/check_mindmap_kp.py: current 12803B md5=f333d8bbd328 err=unexpected indent (line 1)
+    恢复源候选 5 个，md5 集合 ['32f263359d', '6ad556c72d', 'f333d8bbd3']；其中 current 的 md5 在恢复源中：True
+- tools/smoke_test.py: current 12689B md5=404104364cba err=unexpected indent (line 1)
+    恢复源候选 5 个，md5 集合 ['404104364c', '6700d14808']；其中 current 的 md5 在恢复源中：True
+- tools/verify_c0039_precheck.py: current 2448B md5=05bb99ce3eb3 err=unexpected indent (line 1)
+    恢复源候选 5 个，md5 集合 ['05bb99ce3e', '45dd1fa672']；其中 current 的 md5 在恢复源中：True
+- tools/verify_c0057_browser.py: current 15642B md5=01cbc1fa06dc err=closing parenthesis '}' does not match opening parenthesis '(' on line 329 (line 335)
+    恢复源候选 5 个，md5 集合 ['01cbc1fa06', '254277af6f', '93dd6e6320']；其中 current 的 md5 在恢复源中：True
+- tools/verify_c0057_offline.py: current 1700B md5=440f607708df err='(' was never closed (line 33)
+    恢复源候选 5 个，md5 集合 ['18068893b2', '440f607708', '8dc85d6cd9']；其中 current 的 md5 在恢复源中：True
+
+##############################################################################
+## 6. release_pack.py TOOLS_RELEASE 白名单文件存在性
+##############################################################################
+  OK   dashboard.py
+  OK   study.py
+  OK   serve_mcp.py
+  OK   convert_legacy.ps1
+  OK   render_pptx_slides.ps1
+  OK   download_model.py
+  OK   kp_build.py
+  OK   terms_build.py
+  OK   reimport_all.py
+  OK   reingest_doc.py
+  MISS split_multippt.py
+  MISS make_test_files.py
+  OK   inventory.py
+  OK   list_docs.py
+  OK   run_figure_desc.py
+  MISS ingest_figures.py
+  MISS restore_figures.py
+  OK   serve_mcp.cmd
+$ Get-ChildItem D:\harness\rescue -Recurse -Filter <name>（4 个缺失项）
+  split_multippt.py / make_test_files.py / ingest_figures.py / restore_figures.py -> 0 命中
+$ 0 字节文件：tools/find_empty_figures.py, tools/verify_c0048_window.py（final/rec2 同为 0B）
+
+##############################################################################
+## 7. tools/run_figure_desc.py 断头（P1，发布白名单 R3 工具）
+##############################################################################
+$ 当前文件 2,228B；第一行 = `def main() -> None:`；全文无 import / 无 `if __name__` 尾部；
+  symtable 检测到未定义全局引用：argparse / Path / figures / config / time
+$ 恢复源 final/rec2/rec 同名文件均为 2,228B，md5=0F0B103BDECB18E5B4050CF4BB7E57EE（同一断头版）
+
+##############################################################################
+## 8. core/search.py（P1 重建缺口）
+##############################################################################
+真值函数 32，当前缺 13；字符串保留率 0.3269；当前 857 行 vs 真值末行 1355
+截断候选：[{"qualname": "_same_theme", "truth_span": 38, "cur_span": 15, "ratio": 0.39, "truth_line": 578, "cur_line": 736}, {"qualname": "expand_continuations", "truth_span": 182, "cur_span": 64, "ratio": 0.35, "truth_line": 618, "cur_line": 753}, {"qualname": "expand_neighbors", "truth_span": 195, "cur_span": 49, "ratio": 0.25, "truth_line": 802, "cur_line": 626}]
+缺失函数：["_is_figure_hit", "_base_of", "_path_parts", "_is_prefix", "expand_continuations.fetch", "expand_continuations.topic_candidates", "expand_neighbors.base_of", "expand_neighbors.group_of", "expand_neighbors.same_theme", "expand_neighbors.rows_near", "expand_neighbors.wrap", "expand_neighbors.expand_one", "_flag_confidence"]
+当前 search.py 顶层函数（ast）：["_like_escape", "build_cite", "_phrases", "_like_windows", "_fts_query", "_corpus_filter", "_normalize", "_keyword_search", "_heading_overlap", "_is_table_row", "search", "expand_neighbors", "get_chunk", "neighbors", "_same_theme", "expand_continuations", "doc_outline"]
+
+##############################################################################
+## 9. tools/serve_mcp.py 候选对比（详见 serve_mcp-analysis.md）
+##############################################################################
+候选            字节    行数  可编译  顶层def  说明
+current          23631   570  True   ['log', '_hit_brief', 'call_tool', 'handle', 'serve', 'selftest', 'main'] 候选来自恢复源/当前
+final            14575   330  False  None     候选来自恢复源/当前
+rec2             12651   284  False  None     候选来自恢复源/当前
+rec              12289   275  False  None     候选来自恢复源/当前
+manual           12289   275  False  None     候选来自恢复源/当前
+flat              4158    85  False  None     候选来自恢复源/当前
+v1.1 PYZ 内 serve_mcp.pyc：[]（不存在 ⇒ 无字节码真值）
+当前版本（HEAD d10941f）工具名：["kb_search", "kb_docs", "kb_outline", "kb_chunk", "kb_note_save", "kb_note_list", "kb_note_read", "kb_review_queue", "kb_review_grade", "kb_kp_add", "kb_kp_list", "kb_mistake_add", "kb_stats", "kb_ingest"]
+
+##############################################################################
+## 10. tools/dashboard.py 完整性
+##############################################################################
+行数 12821；v1.1 真值函数 169/169 齐全；字符串保留 0.9905；真值 67 路由 vs 当前 70（真值独有 /api/mistake 已更名为 /api/mistakes）
+INDEX_HTML：当前 280,085 字符 vs v1.1 274,587 字符；按行匹配 99.9%（新版新增内容，未回退）
+
+##############################################################################
+## 11. 其它恢复源/工具
+##############################################################################
+$ rglob("serve_mcp.pyc") in v1.1 PYZ -> []
+$ DSH 原始会话：C:\Users\Lenovo\.dsh\sessions\**\session.v4.jsonl.zstd（zstd 压缩）；本次未解压，作为逐字复原 search.py/serve_mcp.py 的最后备用路径。
+$ _work 既有报告（缺口清单.md 2026-10-14）中的 B1-B5 缺口：经本次检查，study.py/kp_batch/outline 的缺失函数与断裂均已修复（见 pyc-truth.json 函数缺失=0）。
