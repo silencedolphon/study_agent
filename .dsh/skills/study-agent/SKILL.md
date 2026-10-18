@@ -35,7 +35,10 @@ D:\study_agent\venv\Scripts\python.exe D:\study_agent\tools\study.py <命令>
 然后运行 `ingest`。**raw 只增不改**，助手不要删改里面的文件。
 
 支持：`.pdf` `.docx` `.pptx` `.md` `.txt` `.png` `.jpg` 等
-不支持：旧版 `.doc` `.ppt` `.xls`（需用户另存为新格式）
+旧版 `.doc` `.ppt` `.xls`：可直接入库——管线会调用本机 Microsoft Office
+自动转成 `.docx/.pptx/.xlsx` 再解析（转换要几秒到几十秒；源文件保留，
+转换产物与源文件同目录）。机器上没装 Office 时转换会失败并说明原因。
+不支持：看板不认识的扩展名（unknown 类）。
 
 ## 三个检索层（重要）
 

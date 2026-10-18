@@ -325,7 +325,10 @@ def plan_files(paths: list[str], *, force: bool = False,
     skip_total = 0
     for f in files:
         kind = extract.detect_kind(f)
-        supported = kind not in ("unknown", "legacy")
+        # 旧版 Office（.doc/.ppt/.xls）不是"不支持"：入库时会先由本机 Office
+        # 转成 OOXML 再按普通文件走（见 core/extract.py::ensure_ooxml）。
+        # 只有真正不认识的格式（unknown）才算不支持。
+        supported = kind != "unknown"
         try:
             st = f.stat()
         except OSError:
@@ -335,6 +338,24 @@ def plan_files(paths: list[str], *, force: bool = False,
         will_skip = bool(hit and not force
                          and hit.get("size_bytes") == st.st_size
                          and int(hit.get("n_chunks") or 0) > 0)
+        legacy_note = ""
+        if kind == "legacy":
+            # 转换产物与源文件同目录并存（.ppt + .pptx）。若产物已入库、
+            # 且不比源文件旧，这一份就无需再跑一遍转换。
+            dest = extract.legacy_dest(f)
+            dest_hit = (indexed.get(_norm_rel(ingest_mod._rel(dest)))
+                        if dest.is_file() else None)
+            if dest_hit and not force and int(dest_hit.get("n_chunks") or 0) > 0:
+                try:
+                    fresh = dest.stat().st_mtime >= st.st_mtime
+                except OSError:
+                    fresh = False
+                if fresh:
+                    will_skip = True
+                    legacy_note = f"已转换为 {dest.name} 并入库（源文件保留）"
+            if not legacy_note:
+                legacy_note = (f"旧格式：入库时自动转换为 {dest.name}"
+                               f"（需本机 Office；源文件保留）")
         pages = _quick_pages(f, kind) if supported else 0
         needs_fig = bool(with_figures and supported and kind in ("pdf", "pptx"))
         calls = pages if needs_fig else 0
@@ -345,6 +366,7 @@ def plan_files(paths: list[str], *, force: bool = False,
             "rel": rel, "name": f.name, "kind": kind, "supported": supported,
             "size": st.st_size, "pages": pages, "est_calls": calls,
             "est_cost_cny": round(cost, 4), "will_skip": will_skip,
+            "note": legacy_note,
         })
         if supported and not will_skip:
             pages_total += pages

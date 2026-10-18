@@ -2148,8 +2148,9 @@ let DZ_LAST = '';      // 上一次上传的结论：刷新列表会重建 DOM�
 let DZ_FLASH = false;  // 刷新后要把「批量入库」卡片标一下
 let DZ_BUSY = false;   // 一次只跑一批
 
-// 与后端 api_import_path 的 supported 判据逐字一致（kind 不是 unknown/legacy）。
-function dzKindOk(kind){ return !!kind && kind !== 'unknown' && kind !== 'legacy'; }
+// 与后端 api_import_path 的 supported 判据逐字一致（只有 unknown 不支持；
+// 旧版 Office 会由入库管线自动转换）。
+function dzKindOk(kind){ return !!kind && kind !== 'unknown'; }
 
 function dzFlashBatch(){
   const el = $('#batch-list') || $('#batch-progress');
@@ -2315,8 +2316,9 @@ function bindDropzone(){
     if (bad.length) say(`${bad.length} 个文件格式不入库管线：`
       + bad.map(s => `${esc(s.name)}（${esc(DZ_KIND[s.kind] || s.kind)}）`).join('、')
       + '。可入库的是 PDF / Word(.docx) / PPT(.pptx) / 图片 / 文本；'
-      + '`.doc/.ppt/.xls` 请先在 Office 里另存为 .docx/.pptx 再拖。'
-      + '这些文件仍然留在 raw\\ 里，只是入库时会自动跳过。', 'bad', true);
+      + '旧版 `.doc/.ppt/.xls` 也可以直接拖，入库时会用本机 Office 自动转换'
+      + '（转换需要几秒到几十秒，源文件保留）。'
+      + '这些文件仍然留在 raw\\ 里，只是不会进入入库队列。', 'bad', true);
 
     const auto = $('#dz-auto') && $('#dz-auto').checked;
     if (pend){
@@ -9121,8 +9123,9 @@ def api_raw_list(conn):
         # 且字节码字符串常量（_work/strings/dashboard.strings.txt 的
         # [api_raw_list._counts.<genexpr>] 四段）恰为 state×3 + new/changed/indexed
         # + supported，与下面逐字对齐（键名用的就是文件项自己的 'state'）。
-        # 「不支持」的真实语义 = extract.detect_kind() 判成 unknown / legacy，
-        # 即 info['supported'] 为假（见本函数上文 supported 的赋值），不是写死 0。
+        # 「不支持」的真实语义 = extract.detect_kind() 判成 unknown，即
+        # info['supported'] 为假（见本函数上文 supported 的赋值），不是写死 0。
+        # 旧版 Office（legacy）现在可入库（入库时自动转换），不再计入这一项。
         return {
             'new':         sum(1 for f in sub if f['state'] == 'new'),
             'changed':     sum(1 for f in sub if f['state'] == 'changed'),
@@ -9151,7 +9154,9 @@ def api_raw_list(conn):
                 'size': st.st_size,
                 'mtime': st.st_mtime,
                 'kind': kind,
-                'supported': kind not in ('unknown', 'legacy'),
+                # 旧版 Office（.doc/.ppt/.xls）可入库：入库时会先自动转成 OOXML
+                # （core/extract.py::ensure_ooxml）。只有 unknown 才是真正不支持。
+                'supported': kind != 'unknown',
                 'doc_id': None,
                 'state': 'new',
             }
@@ -9164,6 +9169,24 @@ def api_raw_list(conn):
                 except OSError:
                     same = False
                 info['state'] = 'indexed' if same else 'changed'
+            if kind == 'legacy':
+                # 旧格式的"入库结果"记在转换产物上：把源文件显示成已入库，
+                # 否则每次刷新都会提示它有文件待入库。
+                dest = extract.legacy_dest(f)
+                dest_rel = _rel_to_raw(dest) if dest.is_file() else ''
+                dhit = indexed.get(dest_rel) if dest_rel else None
+                try:
+                    fresh = bool(dhit) and dest.stat().st_mtime >= st.st_mtime
+                except OSError:
+                    fresh = False
+                if dhit and fresh:
+                    info['doc_id'] = dhit['id']
+                    info['n_chunks'] = dhit['n_chunks']
+                    info['state'] = 'indexed'
+                    info['note'] = f'已自动转换为 {dest.name} 并入库（源文件保留）'
+                else:
+                    info['note'] = (f'旧格式：入库时自动转换为 {dest.name}'
+                                    f'（需本机 Office；源文件保留）')
             files.append(info)
 
     on_disk = {f['rel'] for f in files}
@@ -9418,7 +9441,10 @@ def api_import_path(src, sub, recursive, dry_run):
             'name': f.name,
             'size': size,
             'kind': kind,
-            'supported': kind not in ('unknown', 'legacy'),
+            # 旧版 Office 可入库（导入后由入库管线自动转换），只有 unknown 不支持
+            'supported': kind != 'unknown',
+            'note': ('旧格式：入库时自动转换为 OOXML（需本机 Office）'
+                     if kind == 'legacy' else ''),
         })
 
     if dry_run:
