@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · 知识点窗口（改造后）· 卡 C-0091</title>
+<!--
+  卡 C-0091 原型之一：知识点窗口（mmRenderKp）改造后。
+  · 自包含：CSS/JS 全内联，零外部 CDN，零 @font-face，双击即可打开
+  · token 取自 G:\open-design\design-systems\linear-app\tokens.css（见 §5.3）
+  · 忠实还原 tools\dashboard.py:10499-10641 的真实结构，只改"收纳"与"文案"
+-->
+<style>
+:root{
+  /* ── linear-app 取值（本方案 §5.3）── */
+  --bg:#08090a; --panel:#191a1b; --panel2:#212223;
+  --line:rgba(255,255,255,.08); --line-soft:rgba(255,255,255,.05);
+  --fg:#f7f8f8; --fg2:#d0d6e0; --dim:#8a8f98; --meta:#62666d;
+  --accent:#5e6ad2; --accent-on:#fff; --accent-hover:#828fff;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  --radius-sm:6px; --radius:8px; --radius-lg:12px;
+  --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px;
+  --fs-xs:12px; --fs-sm:13px; --fs:14px; --fs-lg:16px;
+  --focus-ring:0 0 0 2px rgba(94,106,210,.42);
+  /* 中文交给系统栈：本项目外部 CDN 引用为 0，不下载字体 */
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs)/1.55 var(--font)}
+a{color:var(--accent-hover);text-decoration:none}
+
+/* ── 原型页壳 ── */
+.top{padding:14px var(--sp6);border-bottom:1px solid var(--line);display:flex;
+  align-items:center;gap:var(--sp3);flex-wrap:wrap;position:sticky;top:0;
+  background:rgba(8,9,10,.94);backdrop-filter:blur(8px);z-index:20}
+.top h1{font-size:var(--fs-lg);margin:0;font-weight:590;letter-spacing:-.01em}
+.top .tag{font-size:var(--fs-xs);color:var(--meta);border:1px solid var(--line);
+  border-radius:999px;padding:2px 10px}
+.spacer{flex:1}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+.seg button{background:transparent;border:0;color:var(--dim);font:var(--fs-sm) var(--font);
+  padding:6px 14px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accent-on);font-weight:560}
+.seg button:not(.on):hover{color:var(--fg);background:var(--panel2)}
+.ghost{background:var(--panel);color:var(--fg2);border:1px solid var(--line);
+  padding:6px 12px;border-radius:var(--radius-sm);cursor:pointer;font:var(--fs-sm) var(--font)}
+.ghost:hover{border-color:rgba(255,255,255,.2)}
+
+.wrap{max-width:1180px;margin:0 auto;padding:var(--sp6) var(--sp4) 80px}
+.note{color:var(--dim);font-size:var(--fs-sm);margin:0 0 var(--sp4)}
+.note b{color:var(--fg2);font-weight:560}
+
+/* ── 知识点窗口本体（还原 .evpop / .modal 的形状）── */
+.stage{display:flex;justify-content:center}
+.pop{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
+  width:100%;max-width:720px;box-shadow:0 2px 4px rgba(0,0,0,.4);overflow:hidden}
+.ph{display:flex;gap:var(--sp3);align-items:flex-start;
+  padding:var(--sp4) var(--sp4) var(--sp3);border-bottom:1px solid var(--line-soft)}
+.ph .loc{font-size:var(--fs-lg);font-weight:590;letter-spacing:-.01em;display:flex;
+  align-items:center;gap:var(--sp2);flex-wrap:wrap}
+.ph .hdg{color:var(--dim);font-size:var(--fs-xs);margin-top:4px}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;
+  border:1px solid var(--line);color:var(--dim);font-weight:400}
+.badge.ok{color:var(--ok);border-color:rgba(63,185,80,.3)}
+.badge.warn{color:var(--warn);border-color:rgba(210,153,34,.3)}
+.badge.mono{font-family:var(--mono);font-size:11px}
+.pclose{margin-left:auto;background:transparent;border:0;color:var(--meta);
+  font-size:16px;cursor:pointer;line-height:1;padding:4px 6px;border-radius:var(--radius-sm)}
+.pclose:hover{color:var(--fg);background:var(--panel2)}
+.pbody{padding:var(--sp3) var(--sp4) var(--sp4)}
+
+/* 出处行：改造后把内部 id 收进 tooltip，只留人看得懂的 */
+.src-line{font-size:var(--fs-xs);color:var(--dim);margin-bottom:10px;display:flex;
+  gap:var(--sp2);align-items:center;flex-wrap:wrap}
+.src-line .cid{font-family:var(--mono);color:var(--fg2);border-bottom:1px dotted var(--meta);
+  cursor:help}
+.merged{font-size:var(--fs-xs);color:var(--fg2);background:var(--panel2);
+  border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px}
+.merged .r{color:var(--warn)}
+
+.lkpsub{font-size:var(--fs-xs);color:var(--meta);text-transform:none;letter-spacing:.02em;
+  margin:var(--sp4) 0 var(--sp2);padding-top:var(--sp3);border-top:1px solid var(--line-soft)}
+.lkpsub.first{margin-top:0;padding-top:0;border-top:0}
+.lkppts{margin:0;padding-left:20px}
+.lkppts li{margin:5px 0;color:var(--fg2)}
+.lkppts li::marker{color:var(--meta)}
+
+/* ★ 收纳：默认折叠体（还原卡 C-0036 的 <details class="kpmore">） */
+details.kpmore{margin-top:var(--sp4);border-top:1px solid var(--line-soft);padding-top:var(--sp3)}
+details.kpmore summary{cursor:pointer;color:var(--dim);font-size:var(--fs-sm);
+  list-style:none;display:flex;align-items:center;gap:6px}
+details.kpmore summary::-webkit-details-marker{display:none}
+details.kpmore summary::before{content:"▸";color:var(--meta);transition:transform .15s}
+details.kpmore[open] summary::before{transform:rotate(90deg)}
+details.kpmore summary:hover{color:var(--fg)}
+.lkpsum{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:var(--sp3);color:var(--fg2);font-size:var(--fs-sm);margin-top:10px;white-space:pre-wrap}
+.lkpchain{color:var(--meta);font-size:var(--fs-xs);line-height:1.7}
+.lkpsrcs{display:flex;flex-direction:column;gap:4px}
+.lkpsrc{font-size:var(--fs-xs);color:var(--dim)}
+.lkpsrc .c{font-family:var(--mono);color:var(--fg2);border-bottom:1px dotted var(--meta);cursor:pointer}
+
+/* 底部按钮行（还原 .pf） */
+.pf{display:flex;gap:var(--sp2);align-items:center;flex-wrap:wrap;
+  padding:var(--sp3) var(--sp4);border-top:1px solid var(--line);background:var(--panel)}
+.pf .pmeta{font-size:var(--fs-xs);color:var(--meta)}
+.btn-ghost{background:var(--panel2);color:var(--fg2);border:1px solid var(--line);
+  padding:6px 11px;border-radius:var(--radius-sm);cursor:pointer;font:var(--fs-sm) var(--font)}
+.btn-ghost:hover{border-color:rgba(255,255,255,.2);color:var(--fg)}
+.btn-ghost[disabled]{opacity:.4;cursor:not-allowed}
+.btn-icon{background:transparent;color:var(--dim);border:1px solid transparent;
+  padding:6px 9px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px}
+.btn-icon:hover{color:var(--fg);background:var(--panel2)}
+
+/* ── 标注层（点"改动标注"才出现）── */
+body.annot .mark{outline:1px dashed rgba(94,106,210,.75);outline-offset:3px;position:relative}
+body.annot .mark::after{content:attr(data-m);position:absolute;right:0;top:-9px;
+  transform:translateY(-100%);background:var(--accent);color:var(--accent-on);
+  font-size:10px;padding:1px 7px;border-radius:999px;white-space:nowrap;z-index:5}
+.legend{margin-top:var(--sp6);border-top:1px solid var(--line);padding-top:var(--sp4)}
+.legend h2{font-size:var(--fs);font-weight:590;margin:0 0 var(--sp3)}
+.legend table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.legend th,.legend td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-soft);
+  vertical-align:top}
+.legend th{color:var(--meta);font-weight:500;font-size:var(--fs-xs)}
+.legend td:first-child{color:var(--fg2);white-space:nowrap}
+.legend .del{color:var(--bad)}
+.legend .keep{color:var(--ok)}
+.legend .fold{color:var(--accent-hover)}
+.before-only{display:none}
+body.mode-before .before-only{display:block}
+body.mode-before .after-only{display:none}
+.after-only{display:block}
+.warnline{background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.32);
+  border-radius:var(--radius-sm);padding:8px 10px;font-size:var(--fs-xs);color:var(--fg2);
+  margin-bottom:10px}
+.warnline b{color:var(--warn)}
+.kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font-family:var(--mono);font-size:11px;color:var(--fg2)}
+</style>
+</head>
+<body class="mode-after">
+
+<div class="top">
+  <h1>知识点窗口 · 改造原型</h1>
+  <span class="tag">卡 C-0091</span>
+  <span class="tag">token: linear-app</span>
+  <span class="spacer"></span>
+  <div class="seg">
+    <button id="b-before">改造前</button>
+    <button id="b-after" class="on">改造后</button>
+  </div>
+  <button class="ghost" id="b-annot">改动标注：关</button>
+</div>
+
+<div class="wrap">
+  <p class="note">
+    对照对象：<b>tools\dashboard.py:10499–10641</b>（<code>mmRenderKp</code>）。
+    这个窗口是全站<b>唯一已经把"收纳"做对</b>的地方（卡 C-0036 的成果：默认只留「出处一行 + 要点列表」，
+    正文/出处明细/生成链条收进 <code>&lt;details&gt;</code>）。
+    本原型<b>只做两件事</b>：① 把还没收干净的部分收干净 ② 把给错人的文字拿掉。
+  </p>
+
+  <div class="stage">
+    <div class="pop">
+
+      <!-- ══ 头部：改造前后一致（这部分现状就是对的）══ -->
+      <div class="ph">
+        <div class="src">
+          <div class="loc">
+            选择性α1受体阻断药哌唑嗪
+            <span class="badge mono">kp-3-2-1</span>
+            <span class="badge">末级 · 第 3 层</span>
+          </div>
+          <div class="hdg">7肾上腺素受体阻断药 › α受体阻断药 › 选择性α1受体阻断药</div>
+        </div>
+        <button class="pclose" title="关闭（Esc）">✕</button>
+      </div>
+
+      <div class="pbody">
+
+        <!-- ── 出处行 ── -->
+        <div class="before-only">
+          <div class="src-line">
+            出处：p.34-36 · doc#93 · 材料 5 块（正文 3 / 识图 2） / 1240 字
+          </div>
+        </div>
+        <div class="after-only">
+          <div class="src-line mark" data-m="内部 id 收进 tooltip">
+            出处 <span class="cid" title="doc#93 · 材料 5 块（正文 3 / 识图 2）· 1240 字">p.34-36 · 5 块材料</span>
+            <span class="badge ok">含图片理解</span>
+          </div>
+        </div>
+
+        <!-- ── 要点（默认可见，改造前后一致）── -->
+        <div class="lkpsub first">要点 4 条</div>
+        <ul class="lkppts">
+          <li>哌唑嗪为选择性 α1 受体阻断药，对 α1 的亲和力远高于 α2。</li>
+          <li>扩张动、静脉，降低外周阻力，降压时不引起反射性心动过速。</li>
+          <li>首剂现象：首次给药后 30~90 分钟可出现体位性低血压甚至晕厥。</li>
+          <li>用于高血压（尤其伴前列腺增生者）与慢性心力衰竭。</li>
+        </ul>
+
+        <!-- ══ 折叠区：改造前是纯文字 summary，改造后点明里面有什么 ══ -->
+        <details class="kpmore">
+          <summary class="before-only">总结正文 · 出处明细 · 生成链条</summary>
+          <summary class="after-only mark" data-m="折叠标签改为说明内容">
+            展开：一段理解 · 4 处出处 · 这条怎么来的
+          </summary>
+
+          <div class="lkpsum">哌唑嗪通过选择性阻断血管平滑肌突触后膜 α1 受体，使血管扩张、外周阻力下降而降压。
+由于不阻断突触前膜 α2 受体，去甲肾上腺素释放的负反馈调节保留，故降压时心率反射性增快不明显。
+其"首剂现象"与剂量和体位有关，首次给药宜从小剂量（0.5 mg）睡前服开始。</div>
+
+          <div class="lkpsub">出处（页 / chunk_id）</div>
+          <div class="lkpsrcs">
+            <div class="lkpsrc">p.34 · 含图片理解 · <span class="c">chunk 10412</span>、<span class="c">chunk 10413</span></div>
+            <div class="lkpsrc">p.35 · <span class="c">chunk 10421</span></div>
+            <div class="lkpsrc">p.36 · 含图片理解 · <span class="c">chunk 10430</span></div>
+          </div>
+
+          <!-- 生成链条：改造前把产物路径/成本/模型全摊出来；改造后分层 -->
+          <div class="lkpsub">这条总结是怎么来的</div>
+          <div class="before-only">
+            <div class="lkpchain">
+              材料 = 该节点覆盖页的正文块 + 识图块（图片理解），其中含图片理解的页：p.34、p.36；
+              由 deepseek-flash 提炼（产出卡 C-0052 · 提示词 提示词-知识点总结.md），
+              本条成本 CNY0.000412 · 2026-10-13T21:04:11。
+            </div>
+          </div>
+          <div class="after-only">
+            <div class="lkpchain mark" data-m="删卡号；路径/成本/时间收进二级折叠">
+              材料 = p.34、p.36 的正文块 + 识图块，由 deepseek-flash 提炼。
+              <details class="kpmore" style="margin-top:8px;border-top:0;padding-top:0">
+                <summary style="font-size:var(--fs-xs)">技术明细</summary>
+                <div class="lkpchain" style="margin-top:6px">
+                  产物：<span class="kbd">logs/knowledge/93-末级知识点总结.json</span>（不写数据库任何表）<br>
+                  本条成本 CNY0.000412 · 生成于 2026-10-13 21:04
+                </div>
+              </details>
+            </div>
+          </div>
+        </details>
+
+        <!-- ══ 课件页图区（默认收起，改造前后一致）══ -->
+        <div style="margin-top:var(--sp4)">
+          <button class="btn-ghost" id="t-deck">展开当页课件 ▾</button>
+          <div id="deck" style="display:none;margin-top:10px">
+            <div style="font-size:var(--fs-xs);color:var(--meta);margin-bottom:6px">
+              课件页图 · 7肾上腺素受体阻断药 · 本知识点覆盖 3 页，其中 2 页有图
+            </div>
+            <div style="display:flex;gap:6px">
+              <span class="badge ok" style="cursor:pointer">p.34</span>
+              <span class="badge" style="opacity:.45">p.35 无图</span>
+              <span class="badge ok" style="cursor:pointer">p.36</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 底部按钮行 ══ -->
+      <div class="pf">
+        <button class="btn-ghost">◀ 上一知识点</button>
+        <button class="btn-ghost">下一知识点 ▶</button>
+        <span class="pmeta">第 12 / 47 条</span>
+
+        <div class="before-only" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="pmeta">已绑定 0 条笔记 · 点【记入笔记】写第一条</span>
+          <span style="flex:1"></span>
+          <button class="btn-ghost">记入笔记</button>
+          <button class="btn-ghost">查看笔记</button>
+          <button class="btn-ghost">在资料库中检索此主题</button>
+          <button class="btn-ghost">展开当页课件</button>
+        </div>
+
+        <div class="after-only" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="pmeta" title="这条知识点绑定的笔记条数（与「查看笔记」列出的一致）">0 条笔记</span>
+          <span style="flex:1"></span>
+          <button class="btn-ghost">记入笔记</button>
+          <button class="btn-ghost">查看笔记</button>
+          <button class="btn-icon mark" data-m="文字按钮 → 图标 + tooltip"
+                  title="在资料库中检索「选择性α1受体阻断药哌唑嗪」">🔍</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── 改动清单 ── -->
+  <div class="legend">
+    <h2>本原型改了什么（逐条）</h2>
+    <table>
+      <thead><tr><th>位置</th><th>原文</th><th>处置</th><th>理由</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>出处行</td>
+          <td class="del">出处：p.34-36 · doc#93 · 材料 5 块（正文 3 / 识图 2） / 1240 字</td>
+          <td class="fold">收纳进 tooltip</td>
+          <td><code>doc#93</code> 是内部文档 id，用户看不懂；括号里的拆分是入库细节。<b>「p.34-36 · 5 块材料」是人真正要的</b>，其余悬停可见。</td>
+        </tr>
+        <tr>
+          <td>折叠标签</td>
+          <td>总结正文 · 出处明细 · 生成链条</td>
+          <td class="fold">改写为说人话</td>
+          <td>原标题是"我们内部管这三样叫什么"，不是"点开能看到什么"。改成<b>「一段理解 · 4 处出处 · 这条怎么来的」</b>并带上数量。</td>
+        </tr>
+        <tr>
+          <td>生成链条</td>
+          <td class="del">…由 deepseek-flash 提炼（<b>产出卡 C-0052</b> · 提示词 提示词-知识点总结.md），本条成本 CNY0.000412…</td>
+          <td class="del">删卡号</td>
+          <td><b>「卡 C-0052」是开发卡号，用户不需要知道</b>。同页还有「卡 C-0058 起是独立功能」直接写在 <code>&lt;h2&gt;</code> 副标题里（见 §1.3）。这是"文字给错了人"，不是"文字太多"。</td>
+        </tr>
+        <tr>
+          <td>生成链条</td>
+          <td>产物路径 / 成本 / 生成时间</td>
+          <td class="fold">下沉二级折叠</td>
+          <td>这些是<b>排障时才需要</b>的信息。<span class="keep">成本仍然保留</span>（花钱的事实要可查），只是不再默认铺开。</td>
+        </tr>
+        <tr>
+          <td>底部按钮行</td>
+          <td>「在资料库中检索此主题」文字按钮</td>
+          <td class="fold">降为图标 🔍 + tooltip</td>
+          <td>窗口内点它会<b>关窗跳走</b>（破坏性导航），不该给它和「记入笔记」同等的视觉权重。<b>功能一个不少</b>。</td>
+        </tr>
+        <tr>
+          <td>底部状态</td>
+          <td>"已绑定 0 条笔记 · 点【记入笔记】写第一条"</td>
+          <td class="fold">精简为「0 条笔记」</td>
+          <td>后半句是<b>操作指令常驻</b>，而按钮就在右边 20px 处。指令留在 tooltip。</td>
+        </tr>
+        <tr>
+          <td>要点 / 上一·下一 / 课件页图</td>
+          <td>—</td>
+          <td class="keep">原样保留</td>
+          <td>这三处现状已经做对：<b>默认只留要点</b>、导航对称、图按需展开。改造不许动它们。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin-top:var(--sp4)">
+      ⚠ 安全告知（本页涉及）：<b>「材料不足」徽章</b>与<b>「模型判定本页材料不足以概括」</b>属安全告知类，
+      收纳后仍必须在要点区原位可见 —— 它们告诉用户"这条知识点不可信"，藏起来就是误导。
+    </p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var seg = [document.getElementById('b-before'), document.getElementById('b-after')];
+  function mode(m){
+    document.body.className = 'mode-' + m + (document.body.classList.contains('annot') ? ' annot' : '');
+    seg[0].classList.toggle('on', m === 'before');
+    seg[1].classList.toggle('on', m === 'after');
+  }
+  seg[0].onclick = function(){ mode('before'); };
+  seg[1].onclick = function(){ mode('after'); };
+
+  var ab = document.getElementById('b-annot');
+  ab.onclick = function(){
+    document.body.classList.toggle('annot');
+    ab.textContent = '改动标注：' + (document.body.classList.contains('annot') ? '开' : '关');
+  };
+
+  document.getElementById('t-deck').onclick = function(){
+    var d = document.getElementById('deck');
+    var open = d.style.display !== 'none';
+    d.style.display = open ? 'none' : 'block';
+    this.textContent = open ? '展开当页课件 ▾' : '收起课件 ▴';
+  };
+  document.querySelector('.pclose').onclick = function(){
+    alert('原型示意：真实看板里这里调用 evPopClose()（Esc 亦可关闭）。');
+  };
+})();
+</script>
+</body>
+</html>

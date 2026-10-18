@@ -1,0 +1,422 @@
+{
+ "meta": {
+  "doc_id": 992,
+  "chapter": "文档 992",
+  "deck": "文档 992",
+  "source_card": "C-0058",
+  "pipeline": "C-0058 v4 知识点整理管线（core/kp_build.py）：只读库里的文本（chunks 正文 + 识图文本，按 source_ref 的页号组织）→ 模型生成思维导图结构（12 页/段、6000 字符/段双阈值 map-reduce，层级由模型判断）→ 一个结构叶节点一条知识点（页数不限、覆盖页由模型判断 + 管线仲裁）。**只出知识点**：名词解释已摘出为独立功能（core/kp_build.py::build_terms / tools/terms_build.py）",
+  "pipeline_version": "C-0058-v4",
+  "inputs": {
+   "read": [
+    "chunks.text",
+    "chunks.source_ref",
+    "chunks.ord",
+    "figure_desc.no_info",
+    "documents.title"
+   ],
+   "not_read": [
+    "logs/outline/<doc_id>.json",
+    "chunks.topic",
+    "chunks.heading_path",
+    "入库结构派生的任何字段"
+   ],
+   "outline_read": false,
+   "note": "整理管线只吃库里的文本；知识库的结构化数据只用于构建知识库（人拍板 2026-09-23）"
+  },
+  "structure_source": "model（本管线生成）",
+  "structure_reused": false,
+  "prompts": {
+   "structure": {
+    "path": "D:\\study_agent\\logs\\knowledge\\提示词-思维导图结构.md",
+    "sha256": "447a9039a725bae21f359d5560f02271dc2bf2b7b9d0377c343511c41a615055",
+    "chars": 2234
+   },
+   "knowledge": {
+    "path": "D:\\study_agent\\logs\\knowledge\\提示词-知识点总结-v2.md",
+    "sha256": "d28f1dc60ddcae07931cb905a933fa3c011c84ae7cafe3639069d2b358ab67aa",
+    "chars": 4196
+   }
+  },
+  "prompt_source": "D:\\study_agent\\logs\\knowledge\\提示词-知识点总结-v2.md",
+  "prompt_sha256": "d28f1dc60ddcae07931cb905a933fa3c011c84ae7cafe3639069d2b358ab67aa",
+  "model": "deepseek-flash",
+  "params": {
+   "thinking": true,
+   "reasoning_effort": "max",
+   "temperature": 0.3,
+   "temperature_note": "思考模式下 temperature 不生效（官方行为：传了不报错、被忽略），保留仅为不动调用签名",
+   "max_tokens": 65536,
+   "kp_span_pages": 0,
+   "kp_span_pages_note": "0 = 不限（人拍板 2026-09-27 解除 ≤3 页限制）：一个结构叶节点 = 一条知识点",
+   "kp_material_chars_max": 24000,
+   "structure": {
+    "temperature": 0.2,
+    "thinking": true,
+    "reasoning_effort": "max",
+    "max_tokens": 32768,
+    "seg_pages": 12,
+    "seg_chars": 6000,
+    "page_chars": 420,
+    "level_rule": "层级不设上限，由模型按内容判断（鼓励四到五级）"
+   }
+  },
+  "price_rule": "非高峰 $0.15/1M 入 + $0.60/1M 出，汇率 7.1（同 core/outline.py）；思考 token 计入 completion（出）",
+  "reasoning_rule": "推理模式已开：每次调用 payload 里 `thinking={type:enabled}` + `reasoning_effort=\"max\"`（core/chat.py::chat_once 原样透传）；思考 token 从 usage.completion_tokens_details.reasoning_tokens 取，逐次记在 meta.calls[].reasoning_tokens",
+  "kp_total": 1,
+  "kp_done": 0,
+  "kp_actual": 0,
+  "kp_insufficient": [],
+  "failed_kp_ids": [],
+  "pages_total": 12,
+  "pages_covered": [],
+  "pages_pending": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12
+  ],
+  "coverage": {
+   "rule": "口径：①页计数分母 = 1..max_page（max_page=12，取自 chunks.source_ref 的最大页号，**含中间无块的空页**）；分子 = 全部知识点 pages 的并集。②一条知识点 = 一个结构叶节点（页数由模型判断，管线仲裁；只有材料超过单次调用软上限 24000 字时才按连续页再切，见各条 split_reason）。③同一页只允许属于一条知识点（overlap_pages 必须为空）；④页的五类处理（模型声明/管线补入/剔除/显式排除/冲突丢弃）逐页留痕。",
+   "pages_total": 12,
+   "max_page": 12,
+   "pages_with_blocks": 12,
+   "pages_empty": [],
+   "n_kps": 0,
+   "n_kps_with_summary": 0,
+   "n_tasks": 1,
+   "covered": [],
+   "n_covered": 0,
+   "uncovered": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "uncovered_reasons": {
+    "1": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "2": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "3": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "4": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "5": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "6": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "7": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "8": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "9": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "10": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "11": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls",
+    "12": "任务 KP-N02-1 尚未生成（预算到线/失败停止），下次续跑会补上；逐次调用见 meta.calls"
+   },
+   "overlap_pages": [],
+   "page_owner": {},
+   "page_owner_expected": {
+    "1": "KP-N02-1",
+    "2": "KP-N02-1",
+    "3": "KP-N02-1",
+    "4": "KP-N02-1",
+    "5": "KP-N02-1",
+    "6": "KP-N02-1",
+    "7": "KP-N02-1",
+    "8": "KP-N02-1",
+    "9": "KP-N02-1",
+    "10": "KP-N02-1",
+    "11": "KP-N02-1",
+    "12": "KP-N02-1"
+   },
+   "structure_page_owner": {
+    "1": "N02",
+    "2": "N02",
+    "3": "N02",
+    "4": "N02",
+    "5": "N02",
+    "6": "N02",
+    "7": "N02",
+    "8": "N02",
+    "9": "N02",
+    "10": "N02",
+    "11": "N02",
+    "12": "N02"
+   },
+   "structure_conflicts": [],
+   "structure_filled": [],
+   "structure_fallback": null,
+   "structure_rule": "页归属来自**本管线生成的结构树**：叶节点先到先得占页（冲突记 structure_conflicts），模型漏掉的页按「就近」补入（记 structure_filled）；不读 logs/outline/<doc_id>.json",
+   "pages_rule": "覆盖页由模型判断（pages / excluded_pages），管线仲裁四步：越界剔除 → 显式排除尊重 → 与他人冲突先到先得 → 漏声明按结构归属补入",
+   "n_pages_from_model": 0,
+   "pages_filled": [],
+   "pages_rejected": [],
+   "pages_conflict_dropped": [],
+   "pages_excluded": []
+  },
+  "calls": [
+   {
+    "run": 1,
+    "kind": "structure.map",
+    "attempt": 1,
+    "note": "第 1/1 段（p.1~12）",
+    "model": "STUB",
+    "max_tokens": 32768,
+    "thinking": true,
+    "reasoning_effort": "max",
+    "chars_in": 1865,
+    "at": "2026-10-16T00:27:47",
+    "ok": true,
+    "elapsed_s": 0.0,
+    "tokens_in": 10,
+    "tokens_out": 5,
+    "reasoning_tokens": 0,
+    "cost_cny": 3.2e-05,
+    "raw_chars": 462,
+    "error": ""
+   }
+  ],
+  "runs": [
+   {
+    "run": 1,
+    "calls": 1,
+    "calls_failed": 0,
+    "tokens_in": 10,
+    "tokens_out": 5,
+    "reasoning_tokens": 0,
+    "cost_cny": 3.2e-05,
+    "first_at": "2026-10-16T00:27:47",
+    "last_at": "2026-10-16T00:27:47"
+   }
+  ],
+  "run_no": 1,
+  "cost_rule": "cost_cny = 每次调用的 (tokens_in/1e6*0.15 + tokens_out/1e6*0.60) * 7.1（思考 token 已在 completion 里）；失败轮 token 记 0，但**照样占一行**（meta.calls 逐次可查）。cost_cny/usage_total_this_run = 本次（第 1 轮）；cost_cny_all_calls/usage_total_all_calls = 这份产物从头到现在的累计",
+  "cost_cny": 3.2e-05,
+  "cost_cny_all_calls": 3.2e-05,
+  "usage_total_this_run": {
+   "calls": 1,
+   "calls_failed": 0,
+   "tokens_in": 10,
+   "tokens_out": 5,
+   "reasoning_tokens": 0,
+   "cost_cny": 3.2e-05,
+   "run": 1
+  },
+  "usage_total_all_calls": {
+   "calls": 1,
+   "calls_failed": 0,
+   "tokens_in": 10,
+   "tokens_out": 5,
+   "reasoning_tokens": 0
+  },
+  "budget_cny": 0.0,
+  "budget_policy": "unlimited（人拍板 2026-09-27：解除整理知识点的花费金额限制、预算无上限）：budget_cny 只记录调用方给的值、**不作为停止条件**；真实花费看 cost_cny_all_calls",
+  "budget_enforced": false,
+  "budget_ignored_value": 0.0,
+  "reasoning_tokens_this_run": 0,
+  "reasoning_token_share_this_run": 0.0,
+  "est_cost_cny": 0.305909,
+  "est_rule": "上界估算（含思考 token）：结构 1 次（1 段 + 0 次归并）按每页 ≤420 字符的材料算；知识点按**每页一条**的上界算（真实条数由结构树决定，一条 = 一个叶节点、页数不限，区间 1~12 条）；输入 token ≈ 字符/1.6；输出 = 思维链（输入 ×1.5，实测 1.19）+ 正文（结构 1200/次、知识点 450/条）；单价非高峰 $0.15/1M 入、$0.60/1M 出，汇率 7.1",
+  "structure_calls": 1,
+  "structural_notes": {
+   "structure": "结构由本管线生成：1 段 map + 本地合成根；页归属兜底见 coverage.structure_conflicts / structure_filled / structure_fallback",
+   "knowledge": "一条知识点 = 一个结构叶节点（v3 起页数不限、v4 沿用，覆盖页由模型判断）；页归属唯一（page_owner），同一页不会进两条知识点，仲裁过程见 coverage.pages_filled / pages_rejected / pages_excluded / pages_conflict_dropped",
+   "terms_moved_out": "卡 C-0058：名词解释已摘出本管线（人拍板 2026-09-29「取消知识点总结管线与名词解释功能的偶联」）；它的口径与账见 logs/knowledge/<doc_id>-名词解释.json"
+  },
+  "elapsed_s": 4.0,
+  "status": "failed",
+  "error": "★停滞：1 个在飞模型调用超过 4 秒没有任何返回（模型接口挂起；已完成的 0 条已落盘，剩余下次续跑；已回收 1 个滞留模型槽位）",
+  "generated_at": "2026-10-16T00:27:51",
+  "stages": [
+   "读取文本",
+   "生成结构",
+   "写知识点",
+   "写入产物"
+  ]
+ },
+ "structure": {
+  "source": "model",
+  "generated_by": "core/kp_build.py::gen_structure_v2（整理管线自己的模型调用）",
+  "outline_read": false,
+  "note": "这份结构**不复用**入库管线（core/outline.py）的成果，也不读 logs/outline/<doc_id>.json；输入只有库里的文本。",
+  "merged_by": "local",
+  "merge_note": "只有一段：本地把该段章节挂到课件名下（省一次归并调用）",
+  "params": {
+   "seg_pages": 12,
+   "seg_chars": 6000,
+   "page_chars": 420,
+   "temperature": 0.2,
+   "max_tokens": 32768,
+   "thinking": true,
+   "reasoning_effort": "max"
+  },
+  "segments": [
+   {
+    "index": 1,
+    "a": 1,
+    "b": 12,
+    "pages": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12
+    ]
+   }
+  ],
+  "n_nodes": 2,
+  "n_leaves": 1,
+  "max_level": 2,
+  "level_histogram": [
+   {
+    "level": 1,
+    "nodes": 1,
+    "leaves": 0,
+    "pages": 0
+   },
+   {
+    "level": 2,
+    "nodes": 1,
+    "leaves": 1,
+    "pages": 12
+   }
+  ],
+  "level_rule": "层级深浅由模型按内容判断（提示词已删掉“最多 3 级”的硬限制，鼓励四到五级）；管线侧没有层级常数，这里只统计、不裁剪",
+  "page_titles": {},
+  "segment_drafts": [
+   {
+    "segment": 1,
+    "a": 1,
+    "b": 12,
+    "n_sections": 0,
+    "sections": []
+   }
+  ],
+  "raw_root": {
+   "name": "文档 992",
+   "children": [
+    {
+     "name": "内容",
+     "children": [],
+     "pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+     ]
+    }
+   ]
+  },
+  "root": {
+   "id": "N01",
+   "name": "文档 992",
+   "pages": [],
+   "kp_ids": [],
+   "children": [
+    {
+     "id": "N02",
+     "name": "内容",
+     "pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+     ],
+     "kp_ids": []
+    }
+   ]
+  },
+  "nodes": [
+   {
+    "id": "N01",
+    "name": "文档 992",
+    "level": 1,
+    "path": [
+     "文档 992"
+    ],
+    "parent_id": "",
+    "children_ids": [
+     "N02"
+    ],
+    "is_leaf": false,
+    "pages": [],
+    "kp_ids": []
+   },
+   {
+    "id": "N02",
+    "name": "内容",
+    "level": 2,
+    "path": [
+     "文档 992",
+     "内容"
+    ],
+    "parent_id": "N01",
+    "children_ids": [],
+    "is_leaf": true,
+    "pages": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12
+    ],
+    "kp_ids": []
+   }
+  ],
+  "page_owner": {
+   "1": "N02",
+   "2": "N02",
+   "3": "N02",
+   "4": "N02",
+   "5": "N02",
+   "6": "N02",
+   "7": "N02",
+   "8": "N02",
+   "9": "N02",
+   "10": "N02",
+   "11": "N02",
+   "12": "N02"
+  },
+  "n_pages": 12
+ },
+ "knowledge_points": []
+}

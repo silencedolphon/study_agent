@@ -1,0 +1,330 @@
+# Copyright (c) 2026 潜声海豚 <2227663973@qq.com>. All rights reserved.
+# 本源码为著作权人私有作品（proprietary）：仅供经书面授权的测试使用；
+# 未经著作权人许可，不得复制、分发、公开、发布或用于任何商业用途。
+# Unauthorized copying, distribution or publication is strictly prohibited.
+# File-ID: SA-12-d2b90fe9   (project study_agent; keep this line)
+"""幻灯片**版面重排**：把 pptx 里按坐标散落的形状文字还原成视觉阅读顺序。
+
+## 为什么需要它（用户实测反馈的原问题）
+
+PPTX 里每个文本框、每个图形标签都是**独立形状**，`python-pptx` 只能按
+**文档（XML）顺序**吐出来，而那个顺序与眼睛看到的顺序**毫无关系**：
+一张示意图上几十个分子名/箭头标注，抽出来就是"一行一个词竖着堆"，
+正文里插着图注、图注里插着正文，切块之后语义全散。
+
+实测症状：问"这类药物的构效关系"时，检索到的块是
+`苯环`、`取代基`、`吸电子` 这种**孤零零一个词一块**，拼不成句子。
+
+所以入库前先按**坐标**把形状文字重排：从上到下、从左到右，
+同一视觉行的并列标签并成一行。
+
+## 一条铁律：**只重排，不删减**
+
+历史教训（写在这里防止再犯）：早期版本按"形状尺寸"把文字分成
+"正文框"与"图注框"，并把判定为图注的**整段丢掉**——理由是"图注不重要"。
+结果是实测某份课件 p6 的整页正文消失（那个正文框恰好又大又方，
+被尺寸规则误判成图注），而**入库是一条静默管线**：丢了的文字
+既不会报错也不会出现在任何日志里，直到有人提问才发现"这页怎么查不到"。
+
+因此本模块的契约是硬的：
+
+    `order_regions(regions, skip=…)` 返回的区域集合，
+    除 `skip` 显式排除的之外，**一个都不能少**（文本不丢、不截断）。
+
+调用方（`core/extract.py::extract_pptx`）据此放心地把输出直接变成
+`Block`，不需要再做"有没有丢东西"的二次校验。
+
+## 与调用方的接口契约（`core/extract.py` 用到的全部符号）
+
+| 符号 | 用途 |
+|---|---|
+| `Region` | 一个带坐标的文字区域，`text` + 英寸坐标 `x0/y0/x1/y1` |
+| `Region.w` / `Region.h` | 由坐标算出的宽高（**属性**，不是构造参数） |
+| `emu_to_inch(v)` | EMU → 英寸（python-pptx 的 `shape.left` 等单位是 EMU） |
+| `order_regions(regions, skip=…)` | 视觉顺序重排 + 同行合并；`skip` 里的对象**按身份**排除 |
+| `VERTICAL_TITLE_RATIO` | 竖排文本框判据（`h / w` 达到它就算"又高又窄"） |
+
+⚠ `skip` 必须按**对象身份**（`is`）比较，不能按下标：同行合并会改变
+下标与区域的对应关系，`core/extract.py::_guess_title` 的注释里
+记着这条踩坑记录（"用下标排除会排错"）。
+
+## 重建说明（卡 C-0117）
+
+本文件在 2026-10-14 的源码重建中**整份丢失**（同批的 `multippt.py` 完好），
+导致 `extract_pptx()` 在 `from . import layout` 处抛
+`ImportError: cannot import name 'layout' from 'core'`，
+**一切 PPTX/PPT 课件入库全部失败**（PDF 与文本不受影响，因为只有 pptx
+分支用这个模块）。丢失前的大小是 11,306 字节 / 284 行（见
+`dist/study_agent-0.1.0-audit.txt`），且全盘没有任何备份或 `.pyc` 可恢复。
+
+本版按上表的**调用契约**与 `docs/项目文件地图与管线全解.md` 的职责描述
+（"按坐标把形状文字还原成视觉阅读顺序。只重排不删减"）重写。
+阈值取的是保守值（宁可少合并、不可错合并），都写在常量旁边，
+改一个数就能调，不需要动逻辑。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+# ---------------------------------------------------------------- 单位
+# python-pptx 的 `shape.left/top/width/height` 单位是 EMU（English Metric Unit），
+# 1 英寸 = 914400 EMU。这是 OOXML 的固定换算，不是可调参数。
+EMU_PER_INCH = 914400.0
+
+
+def emu_to_inch(value) -> float:
+    """EMU → 英寸。
+
+    `None`（形状没有显式坐标，继承自占位符/版式）与任何取不到值的输入
+    一律当 0 处理：坐标只是排序用的线索，**缺坐标不该让整页解析失败**。
+    调用方还会把 `x0 + w` 当 `x1` 用，所以返回值必须是 `float`。
+    """
+    try:
+        return float(value) / EMU_PER_INCH
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# ---------------------------------------------------------------- 区域
+@dataclass(eq=False)
+class Region:
+    """一个带坐标的文字区域（英寸）。
+
+    `eq=False` 是**刻意的**：本模块与调用方都用**对象身份**判断"是不是
+    同一个区域"（`skip` 排除标题、合并时保留单元素原对象）。若用默认的
+    按字段比较，两个坐标完全相同的区域会被判成"同一个"，`skip` 就会
+    误伤同坐标的正文——而同一页里标题占位符与正文框坐标重合并不罕见
+    （实测 `_guess_title` 里专门有一段处理这种重合）。
+    `eq=False` 同时让 `Region` 保持可哈希（默认 `__hash__` 不被清掉）。
+
+    `nparas` 是区域里的段落数。当前调用方恒传 1；保留它是为了让
+    "这个区域是一整段还是一堆短标签"这个信息不丢失——**合并时求和**，
+    于是合并后的区域仍能如实报告自己由几段拼成。
+    """
+
+    text: str
+    x0: float = 0.0
+    y0: float = 0.0
+    x1: float = 0.0
+    y1: float = 0.0
+    nparas: int = 1
+
+    # 宽高一律由坐标算——不设成字段，是为了**不可能出现自相矛盾的区域**
+    # （字段可以写成 w=5 而 x1-x0=1，属性不会）。
+    @property
+    def w(self) -> float:
+        return max(0.0, self.x1 - self.x0)
+
+    @property
+    def h(self) -> float:
+        return max(0.0, self.y1 - self.y0)
+
+    @property
+    def x_center(self) -> float:
+        return (self.x0 + self.x1) / 2.0
+
+    @property
+    def y_center(self) -> float:
+        return (self.y0 + self.y1) / 2.0
+
+    def same_row_as(self, other: "Region") -> bool:
+        """两个区域是不是**同一视觉行**（判据见下，参数都是保守取值）。"""
+        return _same_row(self, other)
+
+
+# ---------------------------------------------------------------- 阈值
+# 同一视觉行的判据（三个都要过）。幻灯片高度 7.5 英寸、宽 10~13.33 英寸，
+# 正文字号 18~24pt（一节文字框高 0.3~0.5 英寸），下面这些容差就是按
+# 这个尺度定的；换到别的版式（比如一页印 6 张幻灯片的 A4）要重新看。
+#
+# 为什么取"保守"：**错合并比不合并更糟**。不合并只是顺序略乱（还能检索到），
+# 错合并会把两个不相干的段落粘成一段，语义直接坏掉。
+ROW_OVERLAP_RATIO = 0.5
+# 垂直重叠达到"较矮那个区域"的一半 → 同一行。
+# 用较矮者做分母，是为了让"一行小标签 + 一行大标题"这种高度不等的
+# 组合也能判对（小标签完全落在大标题的纵向范围内时重叠比是 1.0）。
+
+ROW_CENTER_RATIO = 0.5
+# 兜底：垂直中心距不超过"较矮那个区域"的一半 → 同一行。
+# 这一条管的是"两个都很矮、几乎不重叠但视觉上明明并排"的情况
+# （例如同一行的两个小标签，上边界差 0.1 英寸、各高 0.2 英寸：
+# 重叠比只有 0.5 勉强过线，中心距 0.1 ≤ 0.1 则是稳的）。
+
+ROW_MIN_HEIGHT_RATIO = 0.4
+# **高度差太大的两个区域不算同一行**。这条是给"整页内容框 + 角落小标签"
+# 这种组合兜底的：内容框能占满整页（实测续页判据里内容框占页高 62%~97%），
+# 它与页面上任何东西都纵向重叠，只按重叠判就会把整页正文和小标签粘成一行。
+# 取 0.4：字号差一档（12pt vs 28pt，高度比约 0.43）仍可合并，
+# 差到"内容框 vs 标签"（比例通常 < 0.2）就分开。
+
+ROW_SAME_TOP_TOL = 0.05
+# 高度取不到（为 0）时的退化判据：上边界相差不超过 0.05 英寸（≈3.6pt）算一行。
+# 正常路径用不到它，只在形状没有显式坐标（继承版式）时兜底。
+
+MERGE_SEP = " "
+# 同一行并列标签的拼接符。用单个空格：中文标签之间加空格不改变语义，
+# 而检索侧（FTS5 trigram + 向量）对空格不敏感，不会因此切碎短语。
+
+SAME_BOX_SEP = "\n"
+# **坐标完全相同**的两个区域之间的拼接符改回换行。
+#
+# 为什么必须分开看：`core/extract.py::add_region` 是**按段落**收集的
+# （遍历 `shape.text_frame.paragraphs`），而喂进来的坐标是**整个形状**的
+# 坐标——于是一个文本框里的 6 个段落会变成 6 个坐标一模一样的区域。
+# 它们在视觉上是**上下排的六行**，不是并列标签；用空格连起来会把
+# 六条要点糊成一长行。实测用户那份课件 p2 就是这么糊的：
+# `官能团分析 理化性质：大多数药物？ 化学稳定性，in vitro， in vivo …`
+# 一行 130 多字。
+# 判据：坐标四元组相同 ⇒ 同一个形状 ⇒ 段落之间保留换行，段落结构不丢；
+# 坐标不同而落在同一视觉行 ⇒ 才是真的"并列标签"，用空格连成一行。
+
+SAME_BOX_TOL = 1e-6
+# 判"坐标相同"的容差（英寸）。python-pptx 给的是整数 EMU 换算来的浮点数，
+# 同一个形状的各段落取到的是**同一个数**，所以 1e-6 已经宽得离谱又足够严。
+
+VERTICAL_TITLE_RATIO = 2.5
+# 竖排文本框判据：高 / 宽 ≥ 这个值就算"又高又窄"，几乎总是侧边标题
+# （`core/extract.py::_guess_title` 用它取代"最靠上的宽形状"，
+# 实测后者常取到页眉里的栏目名）。
+# 取 2.5 偏保守：竖排标题框实测比值远大于它（一个 0.3 英寸宽、
+# 3 英寸高的侧栏标题就是 10），而普通正文框是宽的（比值 < 1），
+# 阈值卡在两者中间，宁可漏判（退回兜底规则）也不错判
+# ——**页标题取错会让整页内容挂到错误的面包屑下**，代价比漏判大得多。
+
+__all__ = ["Region", "emu_to_inch", "order_regions", "VERTICAL_TITLE_RATIO"]
+
+
+# ---------------------------------------------------------------- 同行判定
+def _same_row(a: Region, b: Region) -> bool:
+    """`a` 与 `b` 是否属于同一视觉行（判据与理由见上面各阈值）。"""
+    ha, hb = a.h, b.h
+    if ha <= 0.0 or hb <= 0.0:
+        # 高度未知：只按上边界几乎相同判，不猜
+        return abs(a.y0 - b.y0) <= ROW_SAME_TOP_TOL
+    short, tall = (ha, hb) if ha <= hb else (hb, ha)
+    if short / tall < ROW_MIN_HEIGHT_RATIO:
+        return False
+    overlap = min(a.y1, b.y1) - max(a.y0, b.y0)
+    if overlap > 0.0 and (overlap / short) >= ROW_OVERLAP_RATIO:
+        return True
+    return abs(a.y_center - b.y_center) <= ROW_CENTER_RATIO * short
+
+
+def _cluster_rows(items: list[Region]) -> list[list[Region]]:
+    """把区域按视觉行聚类，返回按"从上到下"排好的若干行。
+
+    用并查集而不是"排序后顺序扫描"：同行关系**不满足传递性**的边界情况
+    是真实存在的（A 与 B 同行、B 与 C 同行，但 A 与 C 高度差过大），
+    顺序扫描会因为比较的先后不同给出不同结果，同一份课件两次入库
+    可能得到不同顺序——而**入库应当是可复现的**（内容哈希、切块 id
+    都指望这一点）。并查集把"谁和谁连通"这件事定死。
+    """
+    n = len(items)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]      # 路径压缩
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if not _same_row(items[i], items[j]):
+                continue
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[max(ri, rj)] = min(ri, rj)
+
+    groups: dict[int, list[Region]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(items[i])
+
+    rows = list(groups.values())
+    # 行序：按行内最靠上的上边界。用 min 而不是"第一个元素"——
+    # 并查集分组的内部顺序取决于遍历顺序，不能拿它当基准。
+    rows.sort(key=lambda row: min(r.y0 for r in row))
+    return rows
+
+
+def _same_box(a: Region, b: Region) -> bool:
+    """两个区域是不是**同一个形状**（坐标四元组相同，见 `SAME_BOX_SEP`）。"""
+    return (abs(a.x0 - b.x0) <= SAME_BOX_TOL and abs(a.y0 - b.y0) <= SAME_BOX_TOL
+            and abs(a.x1 - b.x1) <= SAME_BOX_TOL and abs(a.y1 - b.y1) <= SAME_BOX_TOL)
+
+
+def _merge_row(row: list[Region]) -> Region:
+    """把同一行的若干区域并成一个（**只加不改**：文本一个字符都不删）。
+
+    单个区域的行**原样返回该对象**（不新建）：调用方拿它做身份比较
+    （`skip` 排除标题），新建会让"排除标题"失效，页标题就会在正文里
+    再出现一次。
+
+    拼接符分两种（理由见 `SAME_BOX_SEP`）：同一个形状的段落用换行，
+    同一视觉行里的并列标签用空格。
+
+    排序用 `(x0, y0, 原下标)`：末位那个下标是**保序的兜底**——
+    同一形状的各段落 x0/y0 完全一样，此时唯一能定序的就是输入顺序
+    （＝文档顺序＝段落顺序）。不写它就只能依赖 Python 排序的稳定性，
+    而那是实现细节，不该被"顺序必须可复现"依赖。
+    """
+    if len(row) == 1:
+        return row[0]
+    ordered = [r for _, r in sorted(enumerate(row), key=lambda t: (t[1].x0, t[1].y0, t[0]))]
+    parts: list[str] = []
+    prev: Region | None = None
+    for r in ordered:
+        t = (r.text or "").strip()
+        if not t:
+            continue
+        if prev is not None:
+            parts.append(SAME_BOX_SEP if _same_box(prev, r) else MERGE_SEP)
+        parts.append(t)
+        prev = r
+    return Region(
+        text="".join(parts),
+        x0=min(r.x0 for r in ordered),
+        y0=min(r.y0 for r in ordered),
+        x1=max(r.x1 for r in ordered),
+        y1=max(r.y1 for r in ordered),
+        nparas=sum(max(0, r.nparas) for r in ordered),
+    )
+
+
+# ---------------------------------------------------------------- 主入口
+def order_regions(regions, skip=None) -> list[Region]:
+    """按**视觉顺序**重排一页里的文字区域，并合并同一行的并列标签。
+
+    参数：
+        regions: 一页里收集到的 `Region` 列表（顺序随意，通常是文档顺序）。
+        skip:    需要排除的区域（通常是标题，避免它在正文里再出现一次）。
+                 **按对象身份比较**，可以是 `None` / 空列表 / 元组。
+
+    返回：新列表，顺序＝从上到下、行内从左到右。
+
+    三条不可动摇的保证（调用方依赖它们，改动前先读模块 docstring 的"铁律"）：
+
+    1. **不丢内容**：除 `skip` 里的对象外，每个输入区域的 `text` 都会
+       出现在某个输出区域的 `text` 里（合并时用 `MERGE_SEP` /
+       `SAME_BOX_SEP` 连接，**不截断、不去重、不跳过空文本以外的任何东西**）；
+    2. **不改内容**：单个区域的文本逐字不动（连首尾空白都不动）；
+    3. **确定性**：同一组输入永远给出同一个输出顺序（见 `_cluster_rows`）。
+
+    ★ 还有一条**只对坐标相同的区域**成立的约定：它们之间的先后**原样跟随
+    输入顺序**（`core/extract.py` 是按 `shape → paragraph` 的文档顺序收集的，
+    所以那就是段落顺序）。一个文本框里的六段文字坐标完全一样，靠坐标分不出
+    先后——**此时唯一的真值是文档顺序**，不能被排序规则打乱。
+    """
+    items = [r for r in (regions or []) if r is not None]
+    if skip:
+        skip_ids = [id(s) for s in skip if s is not None]
+        if skip_ids:
+            items = [r for r in items if id(r) not in skip_ids]
+    if not items:
+        return []
+
+    out = [_merge_row(row) for row in _cluster_rows(items)]
+    # 行内已按 x 排好；这里再按 (上边界, 左边界) 排一次行序，
+    # 让"几乎同一高度但不满足同行判据"的两行也有稳定次序。
+    out.sort(key=lambda r: (r.y0, r.x0))
+    return out

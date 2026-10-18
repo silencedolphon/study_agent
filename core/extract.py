@@ -1,0 +1,1319 @@
+# Copyright (c) 2026 潜声海豚 <2227663973@qq.com>. All rights reserved.
+# 本源码为著作权人私有作品（proprietary）：仅供经书面授权的测试使用；
+# 未经著作权人许可，不得复制、分发、公开、发布或用于任何商业用途。
+# Unauthorized copying, distribution or publication is strictly prohibited.
+# File-ID: SA-07-0938b5aa   (project study_agent; keep this line)
+"""文档提取：把各种格式统一成带出处定位的文本块。
+
+统一中间结构 Block:
+    text  : 文本内容
+    page  : PDF 页码（1-based）或 PPT 幻灯片号，无则 0
+    para  : 段落在该页/节的序号，无则 0
+    kind  : body | heading | ocr
+    level : 若 kind == heading，标题层级
+
+出处（source_ref）由此生成，例如 "p.12" / "slide 5" / "para 3"。
+所有格式都必须给出可回链的定位，否则引用无从谈起。
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import config
+
+# 顶层文本容器；docx/pptx 缺失时给出可操作的安装提示
+_IMPORT_HINT = {
+    "docx": "python-docx（pip install python-docx）",
+    "pptx": "python-pptx（pip install python-pptx）",
+    "fitz": "PyMuPDF（pip install pymupdf）",
+}
+
+
+@dataclass
+class Block:
+    text: str
+    page: int = 0
+    para: int = 0
+    kind: str = "body"
+    level: int = 0
+    # 版面坐标（英寸，原点左上）。**二维排布必须靠它才能重建**：
+    # 幻灯片里图上的标签是几十个独立小形状，文档顺序与视觉顺序无关
+    # （实测 60 个形状的文字标签顺序是 Na+/NA/Ca2+/…，
+    # 而图上是从"酪氨酸"开始的一条通路），
+    # 不记坐标就只能按文档顺序竖着堆下来。
+    x0: float = 0.0
+    y0: float = 0.0
+    x1: float = 0.0
+    y1: float = 0.0
+    # 分组键：**不同组的块之间不合并、不相邻**。
+    #
+    # 用途是表格：一张 9 行的表若被切块器合并，会变成一整块 700+ 字，
+    # 检索粒度就没了（想要"某一种药的某一项"会捞回整张表）。
+    # 按行分组后每行自成一块，而每行都自带列名与行名，单独检索也能读懂。
+    #
+    # 为空时表示不参与分组（与旧行为完全一致）。
+    group: str = ""
+
+    def ref(self) -> str:
+        if self.page > 0:
+            return f"p.{self.page}"
+        if self.para > 0:
+            return f"para {self.para}"
+        return ""
+
+
+@dataclass
+class ExtractResult:
+    blocks: list[Block] = field(default_factory=list)
+    meta: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def char_count(self) -> int:
+        return sum(len(b.text) for b in self.blocks)
+
+
+class ExtractError(RuntimeError):
+    pass
+
+
+def _join_wrapped(text: str) -> str:
+    """合并硬折行，但保留段落边界。
+
+    PDF / PPT 的文本层会在版心处硬折行，有时正好断在词中间，例如
+    "则必有 n0 =\\nn2 + 1"。这样切出来的块里 "n0 = n2" 这个子串根本不存在，
+    检索与引用都会失效。
+
+    规则：单个换行（前后都是正文）合成为空格；连续换行视为段落边界并保留。
+    中文之间不留空格，中英之间也不加空格（中文排版里换行处本就没有空格）。
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    out: list[str] = []
+    buf = ""
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.append("")  # 空行 -> 段落边界
+            continue
+        if not buf:
+            buf = s
+            continue
+        # 判断是否需要空格：仅当两侧都是 ASCII 单词字符时才补空格
+        prev, nxt = buf[-1], s[0]
+        if prev.isascii() and nxt.isascii() and (prev.isalnum() and nxt.isalnum()):
+            buf += " " + s
+        else:
+            buf += s
+    if buf:
+        out.append(buf)
+    # 折叠连续空行
+    res: list[str] = []
+    for ln in out:
+        if ln == "" and res and res[-1] == "":
+            continue
+        res.append(ln)
+    return "\n".join(res).strip()
+
+
+def table_rows(table) -> list[str]:
+    """把表格展开成一行行文本，保留"哪一格属于哪一条"的对应关系。
+
+    为什么不能简单地把整行用 " | " 拼起来：药理/医学课件里的表格，
+    单元格内常是多行且**按位置对应**。例如"受体效应表"里
+
+        效应器: 窦房结 / 心房肌 / 房室结 / 希浦系统 / 心室肌
+        受体  : β1,β2  / β1,β2 / β1,β2  / β1,β2    / β1,β2
+        效应  : 心率↑  / 收缩性,传导速度↑ / 自律性,传导速度↑ / ...
+
+    简单拼接会拼出"窦房结 心房肌 房室结 …… β1,β2 β1,β2 …… 心率↑ ……"，
+    三组值之间的对应关系全丢了，检索到也读不懂。
+    所以按行号把各格的第 i 行对齐成一条，用 " → " 连接。
+    """
+    out: list[str] = []
+    for row in table.rows:
+        cells = [(c.text or "").strip() for c in row.cells]
+        if not any(cells):
+            continue
+        split = [c.split("\n") for c in cells]
+        depth = max((len(s) for s in split), default=0)
+        for i in range(depth):
+            parts = [s[i].strip() for s in split if i < len(s) and s[i].strip()]
+            # 去掉相邻重复：合并单元格会把同一内容重复给出
+            dedup: list[str] = []
+            for p in parts:
+                if not dedup or dedup[-1] != p:
+                    dedup.append(p)
+            if not dedup:
+                continue
+            # 行号对齐的失效情形：某一列只有一行（例如"受体"列整列只写了 M），
+            # 而别的列有很多行。此时第 2 行起会把 M 重复到每一条上，或反过来
+            # 让后续条目丢失归属。实测"受体效应表"第 6 条因此错位。
+            # 处理办法：单行单元格只在第一条里出现，后续条目不重复它。
+            if i > 0 and len(dedup) == 1 and depth > 1:
+                # 只含一个元素的孤行：可能有两种含义，别搞混。
+                #
+                # (a) 它是上一条的**续行**——例如"效应"列有 6 行而"受体"列
+                #     整列只写了 M，第 6 条"自律性, 心室起搏 速率↑"因此落单，
+                #     它其实属于上一条"窦房结"。
+                # (b) 它是一条**独立条目**——例如"心脏/窦房结/心房肌"三行
+                #     配"β1/β1"，心房肌那一行的受体与效应列恰好为空，
+                #     但它自己就是一条效应器。
+                #
+                # 区分办法：看这个值是否已经出现在上一条里。
+                # 续行的值必然与上一条的某个字段重复（都是从同一个多行单元格
+                # 的第 i 行取出来的）；独立条目则是新值。
+                # 早先只看"是否单元素"就合并，把心房肌错并进了窦房结那条。
+                if out and dedup[0] not in out[-1]:
+                    out[-1] = out[-1] + " " + dedup[0]
+                else:
+                    out.append(dedup[0])
+            else:
+                out.append(" → ".join(dedup))
+    return out
+
+
+def _table_blocks(table, page: int, start_para: int,
+                  rows_per_block: int = 6) -> list[Block]:
+    """把表格转成若干 Block，每个块容纳若干行，避免单行太碎。"""
+    rows = table_rows(table)
+    blocks: list[Block] = []
+    for i in range(0, len(rows), rows_per_block):
+        text = "\n".join(rows[i : i + rows_per_block])
+        if text.strip():
+            blocks.append(Block(text=text, page=page,
+                                para=start_para + len(blocks), kind="body"))
+    return blocks
+
+
+def _need(mod: str) -> None:
+    raise ExtractError(
+        f"缺少依赖 {mod}，请安装：{_IMPORT_HINT.get(mod, mod)}\n"
+        f"（本机请用 G:\\study_agent\\venv\\Scripts\\python.exe -m pip install ...）"
+    )
+
+
+# ---------------- PDF ----------------
+# 判定为"无文本层、疑似扫描件"的阈值
+_SCAN_MIN_CHARS_PER_PAGE = 30
+
+
+def _heading_level(text: str, max_size: float, heading_sizes: list[float],
+                   num_re, cn_re, bracket_re, cn_item_re, pua_re,
+                   axis_re) -> int:
+    """判断一段文本是不是标题，是则返回层级，否则返回 0。
+
+    这是经历了两个真实缺陷之后收紧的版本：
+
+    缺陷一（生死攸关的那条）：**长度保护写成了死代码。**
+    原先的顺序是"先按编号/字号定层级，再 if level and len(text) > 80: level = 0"。
+    但只有 `len(text) <= 60` 的文本才会走编号判断，字号判断又只在 level==0 时执行，
+    所以 level 非零时文本必然 ≤60，那个 80 字的保护永远不会触发。
+    实测一份幻灯片型 PDF 里，一段 80 字的受体分类正文被当成标题，
+    **整段内容因此从未进入任何切块**。
+
+    缺陷二：**幻灯片型 PDF 不能用字号当标题信号。**
+    这类 PDF 的"正文字号"本身就是 20pt 的大标题级别，
+    于是 `max_size >= 最小标题字号` 几乎恒真，把内容、项目符号行、
+    甚至图表的坐标轴刻度（"50 50"、"10 20 30 0 C"）全判成了标题。
+
+    所以要加三层保护：长度、内容形态、符号形态。
+    """
+    t = text.strip()
+    n = len(t)
+
+    # ---- 形态保护：这些一律不是标题 ----
+    if n < 2 or n > 60 or "\n" in t:
+        return 0
+    # PPT 导出的项目符号字符：Ø ß ü ý þ 等被当作字形嵌进了文本流。
+    # 带这种前缀的行是**项目符号条目**（正文），不是标题。
+    # 实测漏掉这一条会把"Ø胰岛素及一些生长因子的受体本身具有酪氨酸蛋白激酶的"
+    # 和"ß第一信使系指多肽类激素……"当成标题，整段内容因此不进切块正文。
+    if t[0] in "ØßüýþÿØ·•◦‣▪":
+        return 0
+    # 项目符号/图标字符（PPT 导出的私有区字形），同样是正文条目
+    if pua_re.search(t):
+        return 0
+    # 图表坐标轴刻度：整串只有数字、字母、运算符
+    if axis_re.match(t) and not any("\u4e00" <= c <= "\u9fff" for c in t):
+        return 0
+    # 整串是数字/符号（"50 50"、"3 30"）
+    core = re.sub(r"[\s\-–—_,.;:()\[\]%+*/=]", "", t)
+    if not core or core.isdigit():
+        return 0
+    # 占位符（"××"、"??"）：由同一种符号重复构成，没有词汇
+    if len(core) > 1 and len(set(core)) == 1 and not core.isalnum():
+        return 0
+    # 带句读的多是说明句，不是标题：标题即使带标点也只用顿号/括注，
+    # 分隔符很少。这里数**所有分隔符**（顿号、冒号、逗号、分号、句号），
+    # 超过 2 个就判为正文。
+    # 这条对"123."这样以编号开头的正文尤其重要——实测幻灯片里
+    # "（一）利尿药：氢氯噻嗪、吲达帕胺（二）钙通道阻滞药：硝苯地平…"
+    # 这种 51 字的内容块，因开头像编号而被当成了标题。
+    if re.search(r"[。；;]", t):
+        return 0
+    if len(re.findall(r"[、：:，,]", t)) >= 3:
+        return 0
+    if t[-1] in "。；;，,":
+        return 0
+    if t[0] in "•·-—‣▪◦" and n > 20:
+        return 0
+    # 以冒号结尾的多是"引导语"（"按信号转导机制可分为："），归正文更安全
+    if t[-1] in "：:":
+        return 0
+
+    # ---- 语义信号：编号大于一切 ----
+    # 但**纯数字不是标题**。幻灯片型 PDF 里每页都有页码（"14"、"51"），
+    # 它们与正文字号相同且长度很短，会被误判成标题。
+    # 后果不只是多几条噪声：页码每隔几页变一次，会把后面所有内容
+    # 变成它的子节点，整份资料的层级结构因此错乱
+    # （实测一份 33 块的 PDF 出现了 116 个标题）。
+    if core.isdigit():
+        return 0
+    # 去掉编号前缀后仍然很长的，是**带编号的正文条目**而不是标题。
+    # 幻灯片里常见"（一）利尿药：氢氯噻嗪…（二）钙通道阻滞药：硝苯地平…"
+    # 这种把整页要点串成一行的块，开头像编号但内容是正文。
+    # 真标题去掉编号后通常只剩几个字（"(一) 利尿药" -> "利尿药"）。
+    stripped = re.sub(
+        r"^\s*(?:[（(][^）)]{1,6}[）)]|[0-9]+(?:\.[0-9]+)*[.、]?|[一二三四五六七八九十]+[、.．])\s*",
+        "", t)
+    if len(stripped) > 24:
+        return 0
+    m = num_re.match(t)
+    if m:
+        return 1 + m.group(1).count(".")
+    if cn_re.search(t):
+        return 1
+    if bracket_re.match(t):
+        return 3
+    if cn_item_re.match(t):
+        return 3
+
+    # ---- 字号信号：只在文本确实像标题时采信 ----
+    # 关键取舍：**没有编号/结构词时，字号不足以判定标题。**
+    # 幻灯片型 PDF 的字号分层很弱（正文 20pt、标题 24pt），
+    # 单凭字号会把大量正文误判成标题，而标题不进切块正文——
+    # 实测这样丢掉了酪氨酸激酶受体、第二信使的整段说明。
+    # 所以无标记时只认**很短**的文本（标题通常就几个词），
+    # 宁可漏掉个别无编号标题，也不能把正文判成标题而丢掉内容。
+    if heading_sizes and max_size >= heading_sizes[-1] - 0.05:
+        if n <= 30 and not re.search(r"[。；;，,]", t):
+            return 2
+        # 略长的候选（30~60 字）只认标点极少的：
+        # 真标题最多一两个分隔符，而带箭头反应链、多个逗号的说明句是正文。
+        # 实测"（3）磷脂酰肌醇信号通路概念：反应链：胞外信号分子→G-蛋白偶联受体→…"
+        # 这类 40 字的流程说明曾被当成标题，整句不进切块正文。
+        if n <= 60 and len(re.findall(r"[。；;：:，,、]", t)) <= 1:
+            return 2
+    return 0
+
+
+def extract_pdf(path: Path) -> ExtractResult:
+    """PDF 提取，用 dict 结构做版面感知，而不是裸文本流。
+
+    为什么不能直接用 page.get_text("text") 按空行切段：
+    PDF 的文本流里页内通常**没有空行**，整页会被当成一个段落，
+    结果是标题识别不出来、每页挤成一个巨块、切块质量崩塌。
+    实测一份 3 页中文 PDF 只切出 1 块，检索完全失效。
+
+    这里改用 dict 输出，按 text block 分组，并用字号判断标题层级。
+    """
+    try:
+        import pymupdf  # type: ignore
+    except ImportError:
+        try:
+            import fitz as pymupdf  # type: ignore
+        except ImportError:
+            _need("fitz")
+
+    res = ExtractResult()
+    doc = pymupdf.open(str(path))
+    res.meta["pages"] = doc.page_count
+    res.meta["title"] = (doc.metadata or {}).get("title") or ""
+    res.meta["pdf_metadata"] = {k: v for k, v in (doc.metadata or {}).items() if v}
+
+    # 先扫一遍收集字号分布，用于判定"什么算标题"
+    size_hist: dict[float, int] = {}
+    page_blocks: list[tuple[int, list]] = []
+    for pno in range(doc.page_count):
+        page = doc.load_page(pno)
+        try:
+            data = page.get_text("dict")
+        except Exception:
+            data = {"blocks": []}
+        blocks = [b for b in data.get("blocks", []) if b.get("type") == 0]
+        page_blocks.append((pno + 1, blocks))
+        for b in blocks:
+            for line in b.get("lines", []):
+                for span in line.get("spans", []):
+                    if span.get("text", "").strip():
+                        sz = round(float(span.get("size", 0)), 1)
+                        size_hist[sz] = size_hist.get(sz, 0) + len(span["text"].strip())
+
+    if size_hist:
+        # 以"字数加权中位数"作为正文字号：最长的那批文字就是正文
+        total = sum(size_hist.values())
+        acc = 0
+        body_size = max(size_hist, key=lambda k: size_hist[k])
+        for sz in sorted(size_hist):
+            acc += size_hist[sz]
+            if acc >= total / 2:
+                body_size = sz
+                break
+    else:
+        body_size = 0.0
+    res.meta["body_font_size"] = body_size
+    heading_sizes = sorted({s for s in size_hist if s > body_size * 1.08}, reverse=True)
+
+    scanned: list[int] = []
+    # 章节编号是比字号更可靠的层级信号：多数字体里主标题与节标题同号，
+    # 只按字号排序会把 "5.1" 排到 "数据结构·第五章" 之下，面包屑就断了。
+    num_re = re.compile(r"^\s*([0-9]+(?:\.[0-9]+){0,3})[\s、.]")
+    # 章标题常带前缀书名，如"数据结构 · 第五章 树与二叉树"，
+    # 所以不能用 ^ 锚定，必须在串内搜索
+    cn_re = re.compile(r"第\s*[0-9一二三四五六七八九十]+\s*[章节讲部篇]")
+    bracket_re = re.compile(r"^\s*[（(][一二三四五六七八九十0-9]+[)）]")
+    # 中文序数小节标题："一、xxx" / "二、药物的治疗作用"
+    cn_item_re = re.compile(r"^\s*[一二三四五六七八九十]+\s*[、.．]")
+    # 字体私有区字符（PPT 导出的项目符号常映射到这里，如 \uf0ac \uf047）
+    pua_re = re.compile(r"[\ue000-\uf8ff]")
+    # 图表坐标轴刻度：连续的数字/字母/运算符，没有实际词汇
+    axis_re = re.compile(r"^[\s\d\w,.\-+*/=()%～~、;:]{0,28}$")
+
+    first_heading_done = False
+    for pno, blocks in page_blocks:
+        page_chars = 0
+        para_no = 0
+        for b in blocks:
+            # 一个 block 内的各 line 用换行拼接；块内不再拆，避免把一句话切开
+            lines_text: list[str] = []
+            max_size = 0.0
+            for line in b.get("lines", []):
+                spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
+                if not spans:
+                    continue
+                lines_text.append("".join(s["text"] for s in spans).strip())
+                max_size = max(max_size, max(float(s.get("size", 0)) for s in spans))
+            text = _join_wrapped("\n".join(t for t in lines_text if t))
+            if not text:
+                continue
+            page_chars += len(text)
+            para_no += 1
+
+            level = _heading_level(
+                text, max_size, heading_sizes, num_re, cn_re, bracket_re,
+                cn_item_re, pua_re, axis_re,
+            )
+            # 文档的第一个标题就是文档标题，拔到第 1 层。
+            # 否则会出现"5.1"与文档标题同为第 2 层、标题被同级覆盖而丢失的情况。
+            if level and not first_heading_done:
+                level = 1
+                first_heading_done = True
+
+            res.blocks.append(
+                Block(text=text, page=pno, para=para_no,
+                      kind="heading" if level else "body",
+                      level=min(level, 6))
+            )
+        if page_chars < _SCAN_MIN_CHARS_PER_PAGE:
+            scanned.append(pno)
+
+    res.meta["page_count"] = doc.page_count
+    res.meta["scanned_pages"] = scanned
+    if scanned:
+        res.warnings.append(
+            f"{len(scanned)}/{doc.page_count} 页几乎没有文本层（疑似扫描件），"
+            f"页码: {scanned[:12]}{' ...' if len(scanned) > 12 else ''}"
+        )
+    doc.close()
+    return res
+
+
+def ocr_pdf_pages(path: Path, pages: list[int], dpi: int | None = None) -> ExtractResult:
+    """对指定页做 OCR。依赖 rapidocr-onnxruntime；未安装则返回带警告的空结果。
+
+    dpi 默认取 config.OCR_DPI。这个参数直接决定整本书的处理时长
+    （实测 100dpi 16 秒/页、200dpi 22 秒/页，而识别率没有差别），
+    所以默认值刻意取低。
+
+    **表格页会按二维还原后再输出**（见 core/tables.py）。起因是一份课件
+    的"各种糖尿病药物比较"页：文字层只有 15 个字（标题+页码），
+    表格是一整张截图，OCR 出 90 个框被拉成一维序列
+    （`1.0~1.5 / 胰岛素促 / 格列奈类 / 轻度增 / …`），
+    每个词都识别对了，但**位置关系全丢**，于是"哪种药对体重的影响是增加"
+    这类问题无法回答。
+
+    还原失败时回退一维序列——表格还原是增强，不是必需路径。
+    **模块缺失、或它自身抛错时也走同一条回退**，只多记一条 warning：
+    表格模块的问题不该把 OCR 与入库一起掐断（两者是两件事）。
+    """
+    res = ExtractResult()
+    if dpi is None:
+        dpi = config.OCR_DPI
+    try:
+        import pymupdf  # type: ignore
+    except ImportError:
+        try:
+            import fitz as pymupdf  # type: ignore
+        except ImportError:
+            _need("fitz")
+
+    engine = _get_ocr()
+    if engine is None:
+        res.warnings.append(
+            "未安装 rapidocr-onnxruntime，跳过 OCR。"
+            "安装后可解析扫描版 PDF：pip install rapidocr-onnxruntime"
+        )
+        return res
+
+    # 表格还原是**增强**，不是必需路径，所以这里的 import 必须可降级：
+    # 早期实现是硬 import（`from . import tables as _tables`），模块一旦缺失就抛
+    # ImportError，被 core/ingest.py 记成"OCR 失败"⇒ 扫描件 100% 无法入库——
+    # OCR 本体、切块、嵌入全都正常，却被一个 import 掐断。
+    # 现在缺模块就退成一维序列，并留一条**看得懂**的 warning；
+    # 捕获范围刻意放宽到 Exception：模块文件本身有语法错/牵连 import 出错，
+    # 同样不该让整页扫描件作废。
+    try:
+        from . import tables as _tables
+    except Exception as e:  # noqa: BLE001
+        _tables = None
+        res.warnings.append(
+            f"表格还原模块不可用（{type(e).__name__}: {e}）；"
+            f"本次按一维序列输出（无表格还原），OCR 与入库不受影响。"
+            f"若要恢复二维还原，请修好 core/tables.py 后重新入库。")
+
+    doc = pymupdf.open(str(path))
+    # 两遍：先把各页 OCR 出来（顺带留下降采样后的整页图与结构化框），
+    # 再统一做表格还原。分两遍是为了让"表格还原"这一段能整块关掉，
+    # 出问题时用 config.OCR_TABLE 一键回到旧行为。
+    collected: list[tuple[int, object, list[tuple]]] = []
+    one_dim: dict[int, list[str]] = {}
+    for pno in pages:
+        if pno < 1 or pno > doc.page_count:
+            continue
+        page = doc.load_page(pno - 1)
+        pix = page.get_pixmap(dpi=dpi)
+        img = _pixmap_to_array(pix)
+        if img is None:
+            continue
+        boxes = _ocr_boxes(engine, img)
+        lines = _drop_ui_noise([b[4] for b in boxes])
+        if not lines:
+            continue
+        one_dim[pno] = lines
+        collected.append((pno, img, boxes))
+    doc.close()
+
+    recovered: dict[int, list[str]] = {}
+    if _tables is None:
+        # 降级路径：meta 形状保持不变（"没有表格页"），差别只在 warning 里写明。
+        res.meta["table_pages"] = []
+    elif getattr(config, "OCR_TABLE", 1) and collected:
+        try:
+            recovered = _tables.recover_pages(
+                collected, min_conf=getattr(config, "OCR_TABLE_MIN_CONF", 0.4),
+                header=path.stem[:24])
+        except Exception as e:  # noqa: BLE001
+            # 还原是增强：它自己抛错也只回退这一页的一维序列，不连累 OCR。
+            recovered = {}
+            res.warnings.append(
+                f"表格还原失败（{type(e).__name__}: {e}），本文件按一维序列输出。")
+        res.meta["table_pages"] = sorted(recovered)
+        # 概览块：跨行聚合类提问（"哪些药会明显降低体重"）需要一次看到整张表，
+        # 而逐行块各自只含一种药。两种粒度并存，见 tables.table_overview。
+        try:
+            overviews = _tables.recover_overviews(
+                collected, min_conf=getattr(config, "OCR_TABLE_MIN_CONF", 0.4),
+                header=path.stem[:24])
+        except Exception:  # noqa: BLE001
+            overviews = {}
+        res.meta["table_overviews"] = overviews
+
+    overviews: dict[int, str] = dict(res.meta.get("table_overviews") or {})
+    for pno in sorted(one_dim):
+        if pno in recovered:
+            # 表格按**行**分组：组名取行首标签（"二甲双胍"）。
+            # 这样每行自成一块（group 是块的边界，见 Block.group），
+            # 检索"某种药的某项"不会再捞回整张表。
+            for i, ln in enumerate(recovered[pno]):
+                label = ln.split("→", 1)[0].strip() if "→" in ln else ""
+                res.blocks.append(Block(
+                    text=ln, page=pno, para=i + 1, kind="table",
+                    group=f"tbl{pno}:{label}" if label else f"tbl{pno}:head"))
+            # 概览块排在逐行块**之后**，单独成组。
+            # 顺序上放后面：逐行块是精确答案，概览是兜底；
+            # 检索时两者都进候选，由排序决定用哪个。
+            if overviews.get(pno):
+                res.blocks.append(Block(
+                    text=overviews[pno], page=pno, para=900, kind="table",
+                    group=f"tbl{pno}:overview"))
+        else:
+            for i, ln in enumerate(one_dim[pno]):
+                res.blocks.append(Block(text=ln, page=pno, para=i + 1,
+                                        kind="ocr"))
+    if recovered:
+        res.warnings.append(
+            f"{len(recovered)} 页按表格还原（{'/'.join(str(p) for p in sorted(recovered))}）")
+    return res
+
+
+def _ocr_boxes(engine, img) -> list[tuple]:
+    """OCR 的**结构化**输出：[(y0, x0, x1, y1, text, conf)]。
+
+    为什么保留坐标：RapidOCR 每项本来就是 `[四点框, 文字, 置信度]`，
+    而早期实现只取了文字（`item[1]`），坐标直接扔掉——
+    于是表格的位置关系无从恢复。坐标一直都有，是提取层没接。
+    """
+    try:
+        result, _ = engine(img)
+    except Exception:
+        return []
+    out: list[tuple] = []
+    for item in (result or []):
+        if len(item) < 2:
+            continue
+        txt = str(item[1]).strip()
+        if not txt:
+            continue
+        box = item[0]
+        try:
+            xs = [float(p[0]) for p in box]
+            ys = [float(p[1]) for p in box]
+        except (TypeError, ValueError, IndexError):
+            continue
+        conf = float(item[2]) if len(item) > 2 else 0.0
+        out.append((min(ys), min(xs), max(xs), max(ys), txt, conf))
+    return out
+
+
+def _get_ocr():
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+    except ImportError:
+        return None
+    return RapidOCR()
+
+
+def _pixmap_to_array(pix):
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    arr = np.frombuffer(pix.samples, dtype=np.uint8)
+    arr = arr.reshape(pix.height, pix.width, pix.n)
+    if pix.n >= 3:
+        return arr[:, :, :3]
+    return arr[:, :, 0]
+
+
+def _ocr_lines(engine, img) -> list[str]:
+    """OCR 出的一维文字行（保留给不关心坐标的调用方）。
+
+    表格类调用请用 `_ocr_boxes`，它保留坐标，表格还原要靠它。
+    """
+    return _drop_ui_noise([b[4] for b in _ocr_boxes(engine, img)])
+
+
+def _drop_ui_noise(lines: list[str]) -> list[str]:
+    """整页噪声闸门：有些"无文本层"的页其实是**屏幕截图**（例如课件里嵌了一段
+    网络视频），OCR 出来的是播放器界面文字与识别乱码，不是课程内容。
+    实测一份 PDF 因此多了两块、约 1400 字符的垃圾，内容是
+    "点击查看源网页 / 02:12/03:01 / 心血管药物管什么用？毛驴拉车"。
+
+    判断放在**整页**层面而不是逐行：单行判噪声容易误杀正文，
+    而"这一页整体都是界面文字"是可靠得多的信号。
+    """
+    lines = [l for l in (lines or []) if l]
+    if _is_noise_ocr_page(lines):
+        return []
+    return lines
+
+
+# 播放器/浏览器界面文字特征。这些词不可能出现在药理课件正文里。
+_UI_NOISE = (
+    "点击查看源网页", "播放", "暂停", "全屏", "倍速", "弹幕",
+    "订阅", "收藏", "分享", "客户端", "扫码", "登录",
+)
+
+
+def _is_noise_ocr_page(lines: list[str]) -> bool:
+    """判断一页 OCR 结果是否整体是屏幕截图里的界面文字。"""
+    if not lines:
+        return False
+    joined = "".join(lines)
+    # 时间轴标记（"02:12/03:01"）：播放器进度条
+    timeline = len(re.findall(
+        r"\d{1,2}[:：]\d{2}\s*/\s*\d{1,2}[:：]\d{2}", joined))
+    ui_hits = sum(1 for w in _UI_NOISE if w in joined)
+    if timeline >= 1 and ui_hits >= 1:
+        return True
+    if ui_hits >= 3:
+        return True
+    # 界面文字的特征：行短、且整页几乎没有句末标点
+    if len(lines) >= 8 and ui_hits >= 1:
+        ends = sum(1 for l in lines if l and l[-1] in "。；;！？!?")
+        if ends == 0:
+            return True
+    return False
+
+
+def extract_image(path: Path) -> ExtractResult:
+    res = ExtractResult()
+    engine = _get_ocr()
+    if engine is None:
+        res.warnings.append(
+            "图片需要 OCR，但未安装 rapidocr-onnxruntime。"
+            "安装后可解析图片/截图/手写笔记：pip install rapidocr-onnxruntime"
+        )
+        return res
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError:
+        res.warnings.append("缺少 Pillow/numpy，无法读取图片")
+        return res
+
+    im = Image.open(str(path)).convert("RGB")
+    res.meta["image_size"] = f"{im.width}x{im.height}"
+    lines = _ocr_lines(engine, np.array(im))
+    for i, ln in enumerate(lines):
+        res.blocks.append(Block(text=ln, page=1, para=i + 1, kind="ocr"))
+    if not lines:
+        res.warnings.append("OCR 未识别出任何文字")
+    return res
+
+
+# ---------------- Word ----------------
+def extract_docx(path: Path) -> ExtractResult:
+    try:
+        import docx  # type: ignore
+    except ImportError:
+        _need("docx")
+
+    res = ExtractResult()
+    d = docx.Document(str(path))
+    para_no = 0
+    for p in d.paragraphs:
+        text = (p.text or "").strip()
+        if not text:
+            continue
+        para_no += 1
+        style = (getattr(p.style, "name", "") or "")
+        m = re.match(r"Heading (\d+)", style, re.I)
+        if m:
+            res.blocks.append(Block(text=text, para=para_no, kind="heading",
+                                    level=int(m.group(1))))
+        else:
+            res.blocks.append(Block(text=text, para=para_no))
+
+    for ti, table in enumerate(d.tables, start=1):
+        # 走统一的表格展开（按行号对齐多行单元格），
+        # 而不是简单用 " | " 拼接——后者会打乱"效应器→受体→效应"这类对应关系
+        res.blocks.extend(_table_blocks(table, page=0,
+                                        start_para=para_no + ti))
+
+    res.meta["paragraphs"] = para_no
+    res.meta["tables"] = len(d.tables)
+    return res
+
+
+# ---------------- PowerPoint ----------------
+def extract_pptx(path: Path) -> ExtractResult:
+    """PPT 提取。
+
+    幻灯片标题不能只靠"首段 + level==0"判断：正文第一行也常常是 level 0，
+    只看首段会把标题漏掉，让整套幻灯片的标题退化成普通正文。
+    这里改为：每张幻灯片的首个非空段落一律视为该页标题（level 2），
+    首张幻灯片的标题再拔到 level 1 作为整个课件的标题。
+    另外把课件标题补进面包屑，避免每页标题都变成互不相连的孤儿节点。
+
+    **形状按坐标重排**（见 core/layout.py）：图上的标签是几十个独立形状，
+    文档顺序与视觉顺序无关，按文档顺序抽出来就是"一行一个词竖着堆"。
+    所以先按尺寸把"图注"与"正文"分开，图注按视觉行聚类后输出。
+    """
+    try:
+        from pptx import Presentation  # type: ignore
+    except ImportError:
+        _need("pptx")
+
+    from . import layout as _layout
+
+    res = ExtractResult()
+    prs = Presentation(str(path))
+    deck_title = ""
+
+    for sno, slide in enumerate(prs.slides, start=1):
+        # 本页收集：带坐标的文字区域 + 表格块 + 无坐标的兜底文字
+        regions: list[_layout.Region] = []
+        table_blocks: list[Block] = []
+        plain: list[str] = []
+
+        def add_region(text: str, shape) -> None:
+            """把一段文字连同它所在形状的坐标收进来。"""
+            t = (text or "").strip()
+            if not t:
+                return
+            x0 = _layout.emu_to_inch(getattr(shape, "left", 0))
+            y0 = _layout.emu_to_inch(getattr(shape, "top", 0))
+            w = _layout.emu_to_inch(getattr(shape, "width", 0))
+            h = _layout.emu_to_inch(getattr(shape, "height", 0))
+            regions.append(_layout.Region(
+                text=t, x0=x0, y0=y0, x1=x0 + w, y1=y0 + h, nparas=1))
+
+        for shape in slide.shapes:
+            # 表格必须单独处理：它既不是 text_frame 也不是图片，
+            # 早期实现只认 has_text_frame，导致整张表格被静默丢弃。
+            # 实测一份课件的"受体效应表"（效应器/受体/效应三列对应）
+            # 整表消失，而那正是复习时最需要的速查内容。
+            if getattr(shape, "has_table", False) and shape.has_table:
+                rows = table_rows(shape.table)
+                if rows:
+                    table_blocks.extend(
+                        _table_blocks(shape.table, page=sno, start_para=1))
+                    add_region(rows[0][:60], shape)
+                continue
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            for p in shape.text_frame.paragraphs:
+                text = "".join(r.text for r in p.runs).strip()
+                if not text:
+                    continue
+                if getattr(shape, "left", None) is not None:
+                    add_region(text, shape)
+                else:
+                    plain.append(text)
+
+        # 判断本页标题：占位符 API > 竖排文本框 > 最靠上的宽形状。
+        #
+        # 为什么不能再用"文档顺序的第一个有文字形状"：实测会取到图注文本框，
+        # 一份课件的页标题因此变成 `Na+`、`Amine （胺类 ）`，面包屑全错。
+        #
+        # 返回 None 表示"续页"（没有自己的页主题）——此时发一个**空标题块**，
+        # 它的语义是"新的一页开始了，沿用上一页的主题"，
+        # 由切块器（`_Packer.add`）解释。这一步是跨页信息归属的关键，
+        # 详见 `_is_slide_continuation`。
+        title_text, title_region = _guess_title(
+            slide, prs, regions, _layout.emu_to_inch(prs.slide_height))
+
+        # ---- 统一按坐标重排 ----
+        #
+        # 这里**不做"图注/正文"的删减**，只改顺序，理由有二：
+        # 一是删减会丢内容——先前按尺寸把形状分流，正文本框被判成图注后
+        # 连"先取标题再取正文"的分支一起绕过，实测 p6 整页正文消失；
+        # 二是坐标排序本身对两类都成立：正文框在上、图注在下、
+        # 同行的并列标签合并成一行，这正是幻灯片的阅读顺序。
+        ordered = _layout.order_regions(
+            regions, skip=[title_region] if title_region else None)
+
+        if title_text:
+            res.blocks.append(Block(
+                text=title_text, page=sno, para=0, kind="heading",
+                level=1 if sno == 1 else 2))
+            if sno == 1:
+                deck_title = title_text
+        elif title_text is None:
+            # 续页：发一个**空标题块**。语义是"新的一页开始了，
+            # 本页没有自己的主题，沿用上一页的主题"。
+            # 切块器据此保持面包屑不变（而不是把上一页标题也留着当新标题）。
+            # 判据见 `_is_slide_continuation`。
+            res.blocks.append(Block(
+                text="", page=sno, para=0, kind="heading", level=2))
+
+        para = 0
+        for i, r in enumerate(ordered):
+            para += 1
+            res.blocks.append(Block(
+                text=r.text, page=sno, para=para, kind="body", level=0,
+                x0=r.x0, y0=r.y0, x1=r.x1, y1=r.y1))
+        for t in plain:
+            para += 1
+            res.blocks.append(Block(text=t, page=sno, para=para,
+                                    kind="body", level=0))
+        res.blocks.extend(table_blocks)
+
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
+            note = slide.notes_slide.notes_text_frame.text.strip()
+            if note:
+                res.blocks.append(Block(text=f"[备注] {note}", page=sno, para=99))
+
+    # 补一层文档标题，让每页标题挂在它下面而不是各自为政
+    if deck_title:
+        has_level1 = any(b.kind == "heading" and b.level == 1 for b in res.blocks)
+        if not has_level1:
+            res.blocks.insert(0, Block(text=deck_title, page=0, para=0,
+                                       kind="heading", level=1))
+    res.meta["slides"] = len(prs.slides)
+    res.meta["title"] = deck_title
+    return res
+
+
+def _same_line(a: str, b: str) -> bool:
+    """两段文字是不是同一个"行"——比较时忽略空白与换行。
+
+    标题在竖排文本框里可能是 `去甲肾上腺素能神经的突触传递\\n`，
+    而占位符里是同一串但没换行，必须归一化后比。
+    """
+    norm = lambda s: re.sub(r"\s+", "", s or "")  # noqa: E731
+    na, nb = norm(a), norm(b)
+    return bool(na) and na == nb
+
+
+def _is_slide_continuation(slide, regions, page_h: float) -> bool:
+    """这一页是不是"续页"——没有自己的页主题，内容是上一页主题的延续。
+
+    ## 为什么需要它（用户实测反馈）
+
+    > 有些页面的信息要上下好几页一起读。比如某一页写某类药物的总体药理作用，
+    > 下一页分写一条具体作用，再下一页又分写一条。
+    > 问"该类药物的药理作用"时，只返回写总体的那一页，**其他页丢失**。
+
+    根因是**页标题判定把内容框当成了标题**：续页按设计没有标题占位符，
+    而 `_guess_title` 的兜底规则（"最靠上的宽形状"）会给它硬凑一个标题，
+    于是那几页各自成了独立主题，面包屑里**丢掉了所属的类别**，
+    提问该类别时自然检索不到。
+
+    ## 判据（实测 12 份课件 / 572 页定出来的）
+
+    **没有标题占位符，且最靠上的文字区域占满整页** → 是内容框，不是标题。
+
+    实测 doc#64（镇静催眠抗焦虑药）：
+    - p.27 的「镇静、催眠」所在形状占页高 **89%**
+    - p.28 的「抗惊厥、抗癫痫：」占 **91%**
+    两者都是延续 p.26「药理作用与临床应用」的内容页。
+
+    全库扫描：572 页里 **108 页**符合这条（占依赖兜底那 362 页的三成），
+    抽看都是合理的内容框（`1.神经递质分类`、`交感神经`、`【贮存】`…）。
+
+    **保守**：只动"没有标题占位符"的页。有占位符的页一律尊重它的标题，
+    哪怕形状很大——那些是版式如此的真标题（实测有的占页高 0.52，
+    但只有 1 段，是标题而非内容）。
+    """
+    try:
+        tph = slide.shapes.title
+        if tph is not None and (tph.text or "").strip():
+            return False                    # 有真标题 → 不是续页
+    except Exception:  # noqa: BLE001
+        pass
+    if not regions or page_h <= 0:
+        return False
+    top = min(regions, key=lambda r: r.y0)
+    return (top.h / page_h) > _CONTINUATION_HEIGHT_RATIO
+
+
+# 续页判据的阈值：最靠上的文字区域占页高超过此比例 → 它是内容框而非标题。
+#
+# 实测分布是两档清楚的：内容框占 0.62~0.97，标题框占 0.08~0.3、
+# 个别版式化的真标题到 0.52。取 0.55 落在两档之间。
+_CONTINUATION_HEIGHT_RATIO = 0.55
+
+# 兜底标题的字数上限。真正的页标题没人写这么长；
+# 超过这个长度说明兜底规则取到的是内容框（实测 doc#64 p.8 取到整段正文）。
+_MAX_FALLBACK_TITLE_CHARS = 25
+
+
+def _guess_title(slide, prs, regions: list,
+                 page_h: float = 0.0) -> tuple[str | None, object]:
+    """判断这一页的标题，返回 (标题文字或 None, 用作标题的区域对象或 None)。
+
+    **返回 None 表示"本页没有页主题"**，与返回 `""`（判过了、确实取不到）
+    不同：调用方据此决定是否让本页内容**继承上一页的主题**
+    （见 `_is_slide_continuation` 的说明）。
+
+    区域对象用于让调用方把它从正文里排除，避免同一页重复两行标题。
+    返回**对象而不是下标**：`order_regions` 会把同一行的多个区域合并，
+    输出下标与输入下标不对应，用下标排除会排错（踩过）。
+
+    优先级：标题占位符 API > 竖排文本框 > 最靠上的宽形状。
+    取不到就返回空串——**宁可没有标题，也不要取错**：
+    先前按"文档顺序第一个有文字的形状"取，实测取到图注，
+    页标题变成 `Na+`、`Amine （胺类 ）`，面包屑跟着全错。
+    """
+    from . import layout as _layout
+
+    try:
+        tph = slide.shapes.title
+        if tph is not None:
+            t = (tph.text or "").strip().split("\n")[0].strip()
+            if t:
+                # 占位符文字同时也可能在 regions 里（同坐标），一并排除
+                hit = next((r for r in regions if _same_line(r.text, t)), None)
+                return t, hit
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 续页：没有页主题，让调用方继承上一页
+    if _is_slide_continuation(slide, regions, page_h):
+        return None, None
+
+    # 竖排文本框（又高又窄）几乎总是侧边标题。实测它写的就是本页主题，
+    # 比"最靠上的宽形状"可靠（后者常取到页眉里的栏目名）。
+    verts = [(len(r.text), r) for r in regions
+             if r.w > 0 and (r.h / r.w) >= _layout.VERTICAL_TITLE_RATIO
+             and len(r.text) >= 4]
+    if verts:
+        verts.sort(key=lambda x: -x[0])
+        return verts[0][1].text, verts[0][1]
+
+    # 最靠上的宽形状（标题总在顶部且较宽 **且较短**）
+    #
+    # 长度上限不能省：兜底规则会取到内容框，实测 doc#64 p.8 的"标题"
+    # 变成了整段正文 `焦虑(anxiety)是一种不愉快的紧张、担忧或不安和畏惧的
+    # 心理状态，是最常见的心理障碍。`——面包屑因此长到不可读，
+    # 而且它其实和 p.7 的「地西泮」是同一主题（续页）。
+    # 真正的页标题没人写这么长。
+    cands = [(r.y0, -r.w, r) for r in regions
+             if r.y0 < 1.2 and r.w >= 1.6
+             and 4 <= len(r.text) <= _MAX_FALLBACK_TITLE_CHARS
+             and "\n" not in r.text]
+    if cands:
+        cands.sort(key=lambda x: (x[0], x[1]))
+        return cands[0][2].text, cands[0][2]
+    return "", None
+
+
+# ---------------- 纯文本 / Markdown ----------------
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+
+
+def extract_text(path: Path) -> ExtractResult:
+    res = ExtractResult()
+    raw = _read_text(path)
+    lines = raw.splitlines()
+    in_code = False
+    buf: list[str] = []
+    para = 0
+
+    def flush() -> None:
+        nonlocal buf, para
+        text = "\n".join(buf).strip()
+        buf = []
+        if text:
+            para += 1
+            res.blocks.append(Block(text=text, para=para))
+
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            buf.append(line)
+            continue
+        m = _MD_HEADING.match(line) if not in_code else None
+        if m:
+            flush()
+            para += 1
+            res.blocks.append(Block(text=m.group(2).strip(), para=para,
+                                    kind="heading", level=len(m.group(1))))
+            continue
+        if not in_code and not line.strip():
+            flush()
+            continue
+        buf.append(line)
+    flush()
+    return res
+
+
+def _read_text(path: Path) -> str:
+    data = path.read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "gb18030", "utf-16", "latin-1"):
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+# ---------------- 路由 ----------------
+PDF_EXT = {".pdf"}
+DOCX_EXT = {".docx"}
+PPTX_EXT = {".pptx"}
+IMG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+TEXT_EXT = {".md", ".markdown", ".txt", ".text", ".rst", ".csv", ".json",
+            ".yaml", ".yml", ".tex", ".py", ".js", ".ts", ".c", ".cpp",
+            ".java", ".html", ".htm"}
+LEGACY_OFFICE = {".doc", ".ppt", ".xls"}
+
+SUPPORTED_EXT = PDF_EXT | DOCX_EXT | PPTX_EXT | IMG_EXT | TEXT_EXT
+
+
+def detect_kind(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in PDF_EXT:
+        return "pdf"
+    if ext in DOCX_EXT:
+        return "docx"
+    if ext in PPTX_EXT:
+        return "pptx"
+    if ext in IMG_EXT:
+        return "image"
+    if ext in TEXT_EXT:
+        return "text"
+    if ext in LEGACY_OFFICE:
+        return "legacy"
+    return "unknown"
+
+
+def extract(path: Path) -> ExtractResult:
+    kind = detect_kind(path)
+    if kind == "pdf":
+        return extract_pdf(path)
+    if kind == "docx":
+        return extract_docx(path)
+    if kind == "pptx":
+        return extract_pptx(path)
+    if kind == "image":
+        return extract_image(path)
+    if kind == "text":
+        return extract_text(path)
+    if kind == "legacy":
+        r = ExtractResult()
+        r.warnings.append(
+            f"旧版 Office 格式 {path.suffix} 不支持，"
+            f"请另存为 {path.suffix}x 后重新入库"
+        )
+        return r
+    r = ExtractResult()
+    r.warnings.append(f"不支持的文件类型: {path.suffix or '(无扩展名)'}")
+    return r
+
+
+# ---------------- 旧版 Office（.ppt/.doc/.xls）-> OOXML ----------------
+#
+# 这里的口径：**旧格式不是"不支持"，而是"先转一下再入库"**。
+#
+# 起因：旧版二进制格式没有可靠的纯 Python 解析器，提取链路只认 OOXML。
+# 于是用户把 13 份 `.ppt` 课件放进 `subjects/分析化学/raw/`（实测存量）
+# 点「入库」，得到的只是一句"不支持，请另存为 .pptx"——他得自己一份份
+# 打开另存。而本机 PowerPoint 的 COM 本来就做得到这件事
+# （`tools/convert_legacy.ps1`，实测 PowerPoint 16.0 可用）。
+#
+# 两条不能忘的约定（见 `core/ingest.py::ingest_file` 的 legacy 段）：
+#   1. **源文件绝不删除**——必须传 `-KeepOriginal`。脚本的默认行为是
+#      `Remove-Item` 删掉源文件，而 `.ppt` 删了就没了。
+#   2. 产物与源文件**同目录并存**（`Chapter1.ppt` + `Chapter1.pptx`），
+#      库里**只记录 `.pptx`**，原 `.ppt` 不留记录——否则下次全量重导入会把
+#      同一份资料索引两遍（与"一页多张幻灯片"的 `xxx_slides.pdf` 同一口径）。
+#
+# ⚠ `tools/convert_legacy.ps1` 必须保持 **ASCII-only**，那边一个中文都不能加：
+#   Windows PowerShell 5.1 在中文系统上按系统 ANSI（GBK）读 `.ps1`，
+#   UTF-8 的中文注释会被逐字节误解码并破坏解析。
+_LEGACY_OOXML = {".ppt": ".pptx", ".doc": ".docx", ".xls": ".xlsx"}
+
+# 转换脚本的**默认位置**。
+# ⚠ 这个名字必须保留：`tools/verify_c0065_legacy.py` 会读它、也会临时替换它
+#   （卡 C-0065 的降级验证就是这么模拟"脚本丢失"的）。改成函数会让那边
+#   AttributeError —— 卡 C-0069 的第一版就这么干了，已改回。
+_LEGACY_SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "convert_legacy.ps1"
+
+# `KB_LEGACY_SCRIPT` 可覆盖转换脚本的位置（诊断用；也为卡 C-0069 的降级验证
+# 提供注入点——不必真的去卸 Office 就能造出"这台机器没有 Office"）。
+LEGACY_ENV = "KB_LEGACY_SCRIPT"
+
+
+def _legacy_script() -> Path:
+    """本次实际要用的转换脚本：环境变量给了就用它，否则用 `_LEGACY_SCRIPT`。
+
+    不设环境变量时返回的就是 `_LEGACY_SCRIPT` 本身，行为与改造前逐字相同。
+    """
+    custom = os.environ.get(LEGACY_ENV, "").strip()
+    return Path(custom).expanduser() if custom else _LEGACY_SCRIPT
+
+# 转换必须**串行**（看板入库是线程池并发跑文件的，见 core/pipeline_pool._run_batch）。
+# 理由：脚本开的是 Office 的 COM 自动化单例（`New-Object -ComObject
+# PowerPoint.Application` 在同一用户会话里拿到的是同一个实例），
+# 多线程同时 `Presentations.Open` 会撞出 "Call was rejected by callee"
+# 这类 RPC 错误，表现为"随机某几份转换失败"——这种偶发失败最难查。
+# 加了这把锁，同一进程内的转换按顺序排队，跨进程/跨批次也不会互撞。
+_LEGACY_LOCK = threading.Lock()
+
+
+def legacy_dest(path: Path) -> Path:
+    """旧格式文件对应的 OOXML 目标路径（**同目录同名**）。
+
+    必须与 `tools/convert_legacy.ps1` 里的
+    `[System.IO.Path]::ChangeExtension($f.FullName, $ext + 'x')` 算出同一个文件，
+    否则 Python 侧"产物已存在就不用再转一次"的判断会看错文件。
+    """
+    ext = _LEGACY_OOXML.get(path.suffix.lower(), path.suffix.lower() + "x")
+    return path.with_suffix(ext)
+
+
+def _decode_any(raw: bytes) -> str:
+    """把子进程的原始字节解成文本。
+
+    PowerShell 往管道里写中文用的是**控制台输出编码**（中文 Windows 上是
+    GBK/cp936），不是 UTF-8。而脚本的 JSON 里全是中文路径
+    （`G:\\study_agent\\subjects\\分析化学\\raw\\…`），解错连"这一项是不是我要的
+    文件"都判不出来，所以两种编码都试（UTF-8 先，它在错解时几乎必然失败）。
+    """
+    for enc in ("utf-8", "gbk"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def _json_items_in(txt: str) -> list[dict]:
+    """从脚本输出里取出结果项（**单文件时输出的是对象，不是数组**）。
+
+    ⚠ 实测踩过：`tools/convert_legacy.ps1` 末尾是 `$results | ConvertTo-Json`，
+    而 Windows PowerShell 在管道里**只有一项时会把它折叠成单个对象**
+    （`{"src":…,"status":"converted"}`），不是 `[{…}]`。
+    只认数组的话，每一份单文件转换都会被判成"没返回结果"——
+    产物明明生成了，`status` 却只能靠兜底瞎猜。两种形态都要认。
+
+    另外不用正则穷举 `\\[.*\\]`：中文按 GBK 编码时双字节的**第二字节**可能正好是
+    `[` 或 `]`（0x5B/0x5D 都落在 GBK 尾字节范围内），按字节找边界会切错。
+    这里从每一个 `[` / `{` 起尝试解析一个**完整** JSON 值，解析成功才算数。
+    """
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(txt):
+        if ch not in "[{":
+            continue
+        try:
+            obj, _end = dec.raw_decode(txt[i:])
+        except ValueError:
+            continue
+        if isinstance(obj, list):
+            return [x for x in obj if isinstance(x, dict)]
+        if isinstance(obj, dict):
+            return [obj]
+    return []
+
+
+def _same_path(a, b) -> bool:
+    """两个路径字符串是不是同一个文件（相对/绝对、大小写都不敏感）。"""
+    try:
+        return Path(str(a)).resolve() == Path(str(b)).resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def convert_legacy(path: Path, *, timeout: int = 900,
+                   verbose: bool = False) -> dict:
+    """调 `tools/convert_legacy.ps1` 把一份旧格式文件转成 OOXML。
+
+    **源文件一定保留**（命令行写死 `-KeepOriginal`）。返回：
+        {"ok", "src", "dest", "status", "note", "elapsed", "converted"}
+    `ok=False` 时 `note` 是一句能直接给用户看的原因（脚本缺失 / 无法启动
+    PowerShell / COM 报错原文 / 超时），调用方据此降级，绝不静默跳过。
+
+    为什么要开一次 PowerShell 只转一个文件（而不是让它整个目录一次转完）：
+    入库是**逐文件**跑的（`ingest_paths` 一个文件一轮），整目录转换会把
+    用户还没打算入库的文件也一起转掉，且每份文件都要等全目录转完才有结果。
+    """
+    import subprocess
+    import time as _time
+
+    src = Path(path).resolve()
+    dest = legacy_dest(src)
+    out: dict = {"ok": False, "src": str(src), "dest": str(dest),
+                 "status": "failed", "note": "", "elapsed": 0.0,
+                 "converted": False}
+    if not _legacy_script().is_file():
+        out["note"] = (f"缺少转换脚本 {_legacy_script()}"
+                       f"（没有它就无法自动转换；通常是 tools/ 被裁剪或没装 Office）")
+        return out
+
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+           "-File", str(_legacy_script()),
+           # ★ `-KeepOriginal` 绝不能省：脚本默认 `Remove-Item` 删掉源文件。
+           "-Root", str(src), "-KeepOriginal"]
+    if verbose:
+        print(f"    转换 {src.name} -> {dest.name} ...", flush=True)
+    t0 = _time.time()
+    try:
+        with _LEGACY_LOCK:
+            # 等锁期间可能已经有别的线程把同一份转好了——再查一次，
+            # 不必再跑一遍 COM（实测 13 份课件里最长的一份要 28 秒）。
+            if dest.is_file() and dest.stat().st_size > 0:
+                out.update({"ok": True, "status": "skipped",
+                            "note": "目标已存在，直接复用"})
+                return out
+            # 用 -File 逐个传参（而不是 -Command 拼字符串）：文件名里的单引号
+            # （实测 `Chapter9'(上课用).ppt`）在 -Command 里要自己转义，极易出错。
+            proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        out["elapsed"] = round(_time.time() - t0, 1)
+        out["note"] = (f"转换超过 {timeout} 秒未完成"
+                       f"（PowerPoint 可能弹了对话框在等人点）")
+        return out
+    except OSError as e:
+        out["elapsed"] = round(_time.time() - t0, 1)
+        out["note"] = f"无法启动 PowerShell：{type(e).__name__}: {e}"
+        return out
+    out["elapsed"] = round(_time.time() - t0, 1)
+
+    items = _json_items_in(_decode_any(proc.stdout or b""))
+    item = next((it for it in items if _same_path(it.get("src"), src)), None)
+    # 单文件调用时只会返回它自己那一项；即使路径没匹配上（编码异常），
+    # 也不能因为对不上就当成"没结果"——产物是否生成才是最终判据。
+    if item is None and len(items) == 1:
+        item = items[0]
+    status = str((item or {}).get("status") or "")
+    note = str((item or {}).get("note") or "").strip()
+    if item is None:
+        err = _decode_any(proc.stderr or b"").strip()
+        note = err[:300] or (f"转换脚本没有返回 {src.name} 的结果"
+                             f"（PowerShell 退出码 {proc.returncode}）")
+
+    if dest.is_file() and dest.stat().st_size > 0:
+        out.update({"ok": True, "status": status or "converted", "note": note,
+                    "converted": True})
+        return out
+    # 产物没生成 = 失败。脚本原样报的 COM 错误是英文的，但里面有
+    # "受保护视图 / 文件被占用 / 格式不受支持"这类关键线索，比中文概述有用。
+    out["note"] = note or f"未生成 {dest.name}（PowerShell 退出码 {proc.returncode}）"
+    return out
+
+
+def ensure_ooxml(path: Path, *, timeout: int = 900,
+                 verbose: bool = False) -> dict:
+    """入库前的旧格式处理：OOXML 产物已存在就直接复用，否则调脚本转换。
+
+    返回与 `convert_legacy` 同结构（外加 `converted` 表示这次是否真跑了 COM）。
+    `ok=False` 时 `note` 说明为什么转不了，由入库层拼进 `status="failed"` 的
+    `reason`，用户看到的是"为什么"而不是一句干巴巴的"不支持"。
+    """
+    src = Path(path).resolve()
+    if detect_kind(src) != "legacy":
+        return {"ok": False, "src": str(src), "dest": str(src),
+                "status": "failed", "converted": False, "elapsed": 0.0,
+                "note": f"不是旧版 Office 格式：{src.suffix or '(无扩展名)'}"}
+
+    dest = legacy_dest(src)
+    if dest.is_file() and dest.stat().st_size > 0:
+        # 上次已经转过了（产物与源文件同目录并存）——直接复用，不再开 COM。
+        return {"ok": True, "src": str(src), "dest": str(dest),
+                "status": "skipped", "converted": False, "elapsed": 0.0,
+                "note": f"使用已转换好的 {dest.name}"}
+
+    r = convert_legacy(src, timeout=timeout, verbose=verbose)
+    if r.get("ok") and not src.exists():
+        # 红线自检：源文件必须还在（-KeepOriginal）。真丢了要立刻喊出来，
+        # 绝不能当作"转换成功"糊过去继续入库。
+        r["ok"] = False
+        r["note"] = (f"源文件在转换后消失了：{src}"
+                     f"（转换没有按 -KeepOriginal 保留源文件，请先检查该脚本）")
+    if not r.get("ok"):
+        # ★ 说清"两条路"（卡 C-0069）：这家机器上很可能就是没装 Office，
+        # 而 `convert_legacy` 报回来的是**脚本原文**（英文 COM 报错）。
+        # 用户需要知道的是"装什么"或者"怎么绕开"，不是 CLSID。
+        # 这句话最终会出现在入库报告的 `reason` 里（`core/ingest.py` 拼装）。
+        hint = (f"自动转换 {src.suffix} 失败：{r.get('note') or '未知原因'}；"
+                f"这条自动转换走本机 Office 的 COM，"
+                f"最可能的原因是这台机器上没有装 Microsoft Office。两条路："
+                f"1) 装好 Office（PowerPoint/Word/Excel 对应格式）后重新入库；"
+                f"2) 手动把这份文件**另存为 {legacy_dest(src).suffix}** 放回原处，"
+                f"入库会自动复用它、不再需要 Office。")
+        r["raw_note"] = r.get("note") or ""   # 原始报错留档，便于诊断
+        r["note"] = hint
+    return r

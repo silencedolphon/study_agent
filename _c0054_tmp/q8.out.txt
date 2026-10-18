@@ -1,0 +1,10 @@
+== extract_pages（整份骨架：标题 + 每页文本）==
+  deck='Chapter 12' 页数=24
+    p1 title='Chapter 12' body=29 字
+    p2 title='' body=197 字
+    p3 title='激发态分子返回至基态的途径' body=115 字
+
+== render_pages（整页 PNG，走 PowerPoint COM）==
+  render_pages 返回 24 页，目录内 slide_*.png = 24 张
+  耗时 26.81 秒，总体积 13.92 MB
+  页号范围 1~24；文件名样本 ['slide_01.png', 'slide_02.png', 'slide_03.png'] ... slide_24.png

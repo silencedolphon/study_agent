@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · 资料页（改造后）· 卡 C-0091</title>
+<!--
+  卡 C-0091 原型之二：资料页（viewDocs, tools\dashboard.py:7769-8065）改造后。
+  · 自包含：CSS/JS 全内联，零外部 CDN，零 @font-face，双击即可打开
+  · token 取自 G:\open-design\design-systems\linear-app\tokens.css（本方案 §5.3）
+  · 核心改动：① 四个导入入口 → 一行按钮 + 弹窗  ② 平级按钮 → 主 CTA + ⋯
+              ③ 行内 5 按钮 → 1 + ⋯  ④ 提示文字清出 70%
+-->
+<style>
+:root{
+  --bg:#08090a; --panel:#191a1b; --panel2:#212223;
+  --line:rgba(255,255,255,.08); --line-soft:rgba(255,255,255,.05);
+  --fg:#f7f8f8; --fg2:#d0d6e0; --dim:#8a8f98; --meta:#62666d;
+  --accent:#5e6ad2; --accent-on:#fff; --accent-hover:#828fff;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  --radius-sm:6px; --radius:8px; --radius-lg:12px;
+  --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px;
+  --fs-xs:12px; --fs-sm:13px; --fs:14px; --fs-lg:16px;
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs)/1.55 var(--font)}
+a{color:var(--accent-hover);text-decoration:none}
+h2{font-size:var(--fs);font-weight:590;margin:0;letter-spacing:-.005em}
+
+/* 原型页壳 */
+.top{padding:12px var(--sp6);border-bottom:1px solid var(--line);display:flex;
+  align-items:center;gap:var(--sp3);flex-wrap:wrap;position:sticky;top:0;
+  background:rgba(8,9,10,.94);backdrop-filter:blur(8px);z-index:40}
+.top h1{font-size:var(--fs-lg);margin:0;font-weight:590}
+.tag{font-size:var(--fs-xs);color:var(--meta);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.spacer{flex:1}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+.seg button{background:transparent;border:0;color:var(--dim);font:var(--fs-sm) var(--font);
+  padding:6px 14px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accent-on);font-weight:560}
+.seg button:not(.on):hover{color:var(--fg);background:var(--panel2)}
+
+/* 看板顶栏（模拟） */
+.hdr{padding:14px var(--sp6);border-bottom:1px solid var(--line);display:flex;
+  align-items:center;gap:var(--sp4);flex-wrap:wrap;background:var(--bg)}
+.hdr h1{font-size:var(--fs-lg);margin:0;font-weight:590}
+nav{display:flex;gap:2px;flex-wrap:wrap}
+nav button{background:transparent;border:1px solid transparent;color:var(--dim);
+  padding:6px 11px;border-radius:var(--radius-sm);cursor:pointer;font:var(--fs-sm) var(--font)}
+nav button:hover{color:var(--fg);background:var(--panel2)}
+nav button.on{color:var(--fg);background:var(--panel2);border-color:var(--line)}
+.search{background:var(--panel);border:1px solid var(--line);color:var(--fg2);
+  padding:7px 11px;border-radius:var(--radius-sm);font:var(--fs-sm) var(--font);width:180px}
+.ghost{background:var(--panel);color:var(--fg2);border:1px solid var(--line);
+  padding:6px 12px;border-radius:var(--radius-sm);cursor:pointer;font:var(--fs-sm) var(--font)}
+.ghost:hover{border-color:rgba(255,255,255,.2);color:var(--fg)}
+main{padding:var(--sp6) 0 100px;max-width:1180px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  padding:var(--sp4)}
+.card + .card{margin-top:var(--sp3)}
+.row{display:flex;gap:var(--sp2);align-items:center;flex-wrap:wrap}
+.sub{color:var(--dim);font-size:var(--fs-sm)}
+.muted{color:var(--meta)}
+.small{font-size:var(--fs-xs)}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;
+  border:1px solid var(--line);color:var(--dim)}
+.badge.ok{color:var(--ok);border-color:rgba(63,185,80,.3)}
+.badge.warn{color:var(--warn);border-color:rgba(210,153,34,.3)}
+.badge.bad{color:var(--bad);border-color:rgba(248,81,73,.3)}
+.btn{background:var(--accent);color:var(--accent-on);border:0;padding:7px 14px;
+  border-radius:var(--radius-sm);cursor:pointer;font:560 var(--fs-sm) var(--font)}
+.btn:hover{background:var(--accent-hover)}
+.btn-ghost{background:transparent;color:var(--fg2);border:1px solid var(--line);
+  padding:6px 12px;border-radius:var(--radius-sm);cursor:pointer;font:var(--fs-sm) var(--font)}
+.btn-ghost:hover{border-color:rgba(255,255,255,.2);color:var(--fg)}
+.btn-ghost.on{color:var(--fg);background:var(--panel2)}
+.btn-icon{background:transparent;color:var(--dim);border:1px solid transparent;
+  padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;line-height:1}
+.btn-icon:hover{color:var(--fg);background:var(--panel2)}
+.btn-danger{color:var(--bad)}
+
+/* 入口按钮行 */
+.entries{display:flex;gap:var(--sp2);flex-wrap:wrap;align-items:center}
+.entry{display:flex;align-items:center;gap:6px;background:var(--panel2);
+  border:1px solid var(--line);color:var(--fg2);padding:8px 14px;border-radius:var(--radius-sm);
+  cursor:pointer;font:var(--fs-sm) var(--font)}
+.entry:hover{border-color:var(--accent);color:var(--fg)}
+.entry .ic{font-size:14px;opacity:.9}
+.entry .n{color:var(--meta);font-size:11px;border:1px solid var(--line);border-radius:999px;
+  padding:0 6px;margin-left:2px}
+.entry .n.hot{color:var(--warn);border-color:rgba(210,153,34,.35)}
+
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+th{color:var(--meta);font-weight:500;font-size:var(--fs-xs);white-space:nowrap}
+tbody tr:hover{background:var(--panel2)}
+td.path{font-size:11px;color:var(--meta);font-family:var(--mono)}
+.cb{accent-color:var(--accent)}
+
+/* 选中后才出现的浮动操作条 */
+.selbar{display:none;align-items:center;gap:var(--sp2);background:var(--panel2);
+  border:1px solid var(--accent);border-radius:var(--radius-sm);padding:7px 12px;margin-bottom:10px}
+.selbar.on{display:flex}
+
+/* 下拉菜单 / 浮层 */
+.menu{position:absolute;z-index:60;background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--radius);padding:5px;min-width:180px;box-shadow:0 2px 4px rgba(0,0,0,.4);display:none}
+.menu.on{display:block}
+.menu button{display:block;width:100%;text-align:left;background:transparent;border:0;
+  color:var(--fg2);padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;
+  font:var(--fs-sm) var(--font)}
+.menu button:hover{background:var(--panel);color:var(--fg)}
+.menu button.danger{color:var(--bad)}
+.menu .sep{height:1px;background:var(--line);margin:4px 6px}
+
+/* 弹窗 */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;
+  align-items:flex-start;justify-content:center;padding:56px 16px;overflow:auto;z-index:80}
+.mask.on{display:flex}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
+  width:100%;max-width:640px;box-shadow:0 2px 4px rgba(0,0,0,.4)}
+.box .bh{display:flex;align-items:center;gap:var(--sp3);padding:var(--sp4);
+  border-bottom:1px solid var(--line-soft)}
+.box .bh h3{margin:0;font-size:var(--fs-lg);font-weight:590}
+.box .bh .x{margin-left:auto;background:transparent;border:0;color:var(--meta);
+  font-size:16px;cursor:pointer;padding:4px 6px;border-radius:var(--radius-sm)}
+.box .bh .x:hover{color:var(--fg);background:var(--panel2)}
+.box .bb{padding:var(--sp4)}
+.box .bf{display:flex;gap:var(--sp2);justify-content:flex-end;padding:var(--sp3) var(--sp4);
+  border-top:1px solid var(--line)}
+.inp{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+  padding:8px 11px;border-radius:var(--radius-sm);font:var(--fs-sm) var(--font);width:100%}
+.inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(94,106,210,.42)}
+label.ck{display:flex;gap:8px;align-items:flex-start;font-size:var(--fs-sm);color:var(--fg2);
+  cursor:pointer;margin-top:10px}
+.warnbox{background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.32);
+  border-radius:var(--radius-sm);padding:10px 12px;font-size:var(--fs-sm);color:var(--fg2);
+  margin-top:12px}
+.warnbox b{color:var(--warn)}
+.dangerbox{background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.32);
+  border-radius:var(--radius-sm);padding:10px 12px;font-size:var(--fs-sm);color:var(--fg2);margin-top:12px}
+.dangerbox b{color:var(--bad)}
+.dz{border:1px dashed rgba(255,255,255,.16);border-radius:var(--radius);padding:26px 16px;
+  text-align:center;color:var(--dim);font-size:var(--fs-sm);background:var(--panel2)}
+.kbd{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;font-family:var(--mono);font-size:11px;color:var(--fg2)}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--sp2);margin-top:12px}
+.mini{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px}
+.mini .k{font-size:11px;color:var(--meta)}
+.mini .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* 折叠的孤儿提示条 */
+.orphanbar{display:flex;align-items:center;gap:var(--sp2);background:var(--panel);
+  border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:var(--radius-sm);
+  padding:9px 12px;font-size:var(--fs-sm);color:var(--fg2);cursor:pointer;margin-top:var(--sp3)}
+.orphanbar:hover{background:var(--panel2)}
+
+/* 改造前视图 */
+.before-only{display:none}
+body.mode-before .before-only{display:block}
+body.mode-before .after-only{display:none}
+.after-only{display:block}
+.wall{border-left:2px solid var(--line);padding-left:12px;margin-top:10px}
+.wall .sub{margin:6px 0}
+.opts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+body.annot .mark{outline:1px dashed rgba(94,106,210,.75);outline-offset:3px;position:relative}
+body.annot .mark::after{content:attr(data-m);position:absolute;right:0;top:-8px;transform:translateY(-100%);
+  background:var(--accent);color:var(--accent-on);font-size:10px;padding:1px 7px;border-radius:999px;
+  white-space:nowrap;z-index:5}
+.legend{margin-top:var(--sp6);border-top:1px solid var(--line);padding-top:var(--sp4)}
+.legend table{font-size:var(--fs-sm)}
+.legend td:first-child{color:var(--fg2)}
+.legend .del{color:var(--bad)}.legend .keep{color:var(--ok)}.legend .fold{color:var(--accent-hover)}
+</style>
+</head>
+<body class="mode-after">
+
+<div class="top">
+  <h1>资料页 · 改造原型</h1>
+  <span class="tag">卡 C-0091</span>
+  <span class="tag">token: linear-app</span>
+  <span class="spacer"></span>
+  <div class="seg">
+    <button id="b-before">改造前</button>
+    <button id="b-after" class="on">改造后</button>
+  </div>
+  <button class="ghost" id="b-annot">改动标注：关</button>
+</div>
+
+<!-- ══════════ 看板顶栏（不属本卡改动范围，原样保留）══════════ -->
+<div class="hdr">
+  <h1>📚 学习看板</h1>
+  <nav>
+    <button>问答</button><button>总览</button><button>复习</button><button>图谱</button>
+    <button class="on">资料</button><button>知识点</button><button>错题</button><button>笔记</button>
+  </nav>
+  <span class="spacer"></span>
+  <input class="search" placeholder="搜资料…（回车）">
+  <button class="ghost">📚 药理学 ▼</button>
+  <button class="ghost">⚙ 设置</button>
+</div>
+
+<main>
+
+  <!-- ══════════ 二级页签（导航，原样保留）══════════ -->
+  <div class="card">
+    <div class="row">
+      <button class="btn-ghost on">教材与课件 <span class="badge warn" title="8 个文件待入库">8</span></button>
+      <button class="btn-ghost">题库与笔记</button>
+    </div>
+  </div>
+
+  <!-- ══════════ 添加资料：四入口收成一行 ══════════ -->
+  <div class="card">
+    <div class="row" style="margin-bottom:14px">
+      <h2>添加资料</h2>
+      <span class="spacer"></span>
+      <button class="btn-icon" title="刷新列表">↻</button>
+      <button class="btn-icon" id="more-main" title="更多">⋯</button>
+    </div>
+
+    <!-- ★ 改造后：一行四个入口 -->
+    <div class="after-only">
+      <div class="entries mark" data-m="4 个入口 → 一行按钮，点开才是各自的弹窗">
+        <button class="entry" data-modal="m-path"><span class="ic">＋</span>从路径导入</button>
+        <button class="entry" data-modal="m-drop"><span class="ic">⇪</span>拖拽 / 上传</button>
+        <button class="entry" data-modal="m-book"><span class="ic">📖</span>教材专线</button>
+        <button class="entry" data-modal="m-share"><span class="ic">📦</span>导入分享包</button>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn" id="ingest-all">入库全部待处理文件</button>
+        <span class="badge warn">8 个待入库</span>
+        <span class="spacer"></span>
+        <button class="btn-ghost" id="more-actions">⋯ 更多</button>
+      </div>
+    </div>
+
+    <!-- ☆ 改造前：文字墙（忠实复刻） -->
+    <div class="before-only">
+      <div class="wall">
+        <div class="sub"><b>方式一：从本机路径导入</b>（推荐，尤其适合大文件或整个文件夹）</div>
+        <div class="opts">
+          <input class="inp" style="flex:1;min-width:240px" placeholder="粘贴本机路径，如 D:\我的课件\第一讲.pdf">
+          <input class="inp" style="width:200px" placeholder="放到 raw\ 下的子文件夹（可留空）">
+          <button class="btn">导入</button>
+        </div>
+        <div class="sub">看板在本机运行，可以直接读磁盘——不走 HTTP，<b>没有大小限制、不吃内存</b>，
+          几百 MB 的 PDF 或几十个文件一次导入都没问题。</div>
+
+        <div class="sub" style="margin-top:14px"><b>拖拽入库</b>——把文件（可一次多个）直接拖进下面的框里松手</div>
+        <div class="dz" style="margin-top:8px">把文件拖到这里松手 → 上传进 <span class="kbd">raw\</span><br>
+          <span class="small">放到哪个子文件夹由上面「方式一」那一栏决定（留空＝raw\ 根目录）</span>
+          <div class="small" style="margin-top:10px">☐ 上传后立即入库（<b>要花识图钱</b>，默认关）</div>
+        </div>
+        <div class="sub">拖拽走的是浏览器上传（multipart），所以<b>单个几百 MB 的文件可能被浏览器自己掐断</b>
+          （实测 645MB 会 fail to fetch，服务端根本没收到）——那种文件请走上面的「方式一」。拖进来的文件
+          <b>只放进 raw\，不会自动入库</b>：入库要识图（约 25 秒/页且按页计费），勾选与提交仍由下面的
+          「批量入库」决定，与「方式一」逐字同义。</div>
+
+        <div class="sub" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+          <b>教材入库（专线）</b>——<b>教材只从这里进</b>，别用下面的「入库全部待处理文件」</div>
+        <div class="opts">
+          <input class="inp" style="flex:1;min-width:240px" placeholder="教材文件或文件夹的本机路径，如 D:\教材\药理学 第6版.pdf">
+          <button class="btn">选择教材并入库</button>
+        </div>
+        <div class="small muted" style="margin-top:8px">☐ 内容未变也重跑（会重建块的 id，引用它的知识点出处会失效）</div>
+        <div class="sub"><b>一条龙</b>，不问第二遍：文件先拷进 raw\教材\，再用<b>本地 OCR 识图</b>
+          （免费、不调视觉模型、约 2~16 秒/页），然后<b>按章切块</b>入库（章内仍按 700/1100 字切，只保证不跨章）。
+          这是<b>长任务、串行</b>的：几百页的教材要跑一两个小时，期间可以离开这一页。<br>
+          入库后这份资料会被打上 <b>chunk_scheme=textbook-v1</b> 标记，「入库全部待处理文件」与批量入库遇到它会
+          <b>跳过</b>——不会用旧切块把按章切块覆盖掉。<br>
+          跑完这里会列出<b>识别到的章（章号 + 章名 + 页范围）与块数变化</b>，供你事后核对；
+          章识别失败（少于 3 章）会如实标成"降级"，不假装成功。</div>
+
+        <div class="sub" style="margin-top:14px">这种方式只是把文件放进 raw\，<b>不会自动入库</b>——
+          方便你先确认放在哪里。之后点下面的「入库」才会解析并建立索引。也可以直接用资源管理器把文件拷进
+          G:\study_agent\raw，然后点刷新。</div>
+        <div class="opts">
+          <button class="btn">入库全部待处理文件</button>
+          <button class="btn-ghost">全部强制重建</button>
+          <button class="btn-ghost">清理无出处的记录</button>
+          <button class="btn-ghost">刷新列表</button>
+          <span class="badge warn">8 个待入库</span>
+        </div>
+        <div class="sub">「入库全部待处理文件」<b>两个库一起入</b>：一份资料进哪个库由它所在的<b>目录</b>决定，
+          不由此按钮决定，所以两个子页签下都显示它。</div>
+        <div class="sub">删掉资料后，以它为出处的知识点会失去支撑。删文档时已自动清理这类孤儿记录；
+          若之前留下的历史孤儿还在，点「清理无出处的记录」一并收拾。</div>
+
+        <div class="sub" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+          <b>方式二：导入分享包（.zip）</b>——别人用「导出」键打出来的课件包，里面<b>已经带着切块、向量与
+          知识点总结</b>：导入后立刻能检索、能问答，<b>不调用任何模型、不花一分钱接口费</b>。</div>
+        <div class="opts">
+          <input class="inp" style="flex:1;min-width:240px" placeholder="分享包完整路径，如 D:\下载\第一讲-share.zip">
+          <button class="btn">看包信息并导入</button>
+          <button class="btn-ghost">从 share\ 目录选一个</button>
+        </div>
+        <div class="sub">导入前会先核对整包（逐条 sha256）与向量模型：模型与本库不一致就<b>拒绝导入</b>
+          并告诉你该怎么办，绝不用"重算一遍"偷偷花掉接口费。</div>
+      </div>
+
+      <!-- 批量入库卡片（改造前：整张平铺） -->
+      <div class="wall" style="margin-top:18px">
+        <div class="sub"><b>批量入库</b> 勾多份 → 多管线并发跑</div>
+        <div class="sub">勾选本库的<b>待入库文件</b>，指定并发数，一次提交多份**同时**跑入库管线；
+          并发只决定"几份一起跑"，不改每份的处理过程（提取文字 → 识别图片 → 分析结构 → 切块嵌入 → 写入库）。<br>
+          某一份失败<b>不影响其他份</b>，失败原因逐条列出并可单独重试；<b>识图要花钱</b>（实测约 25 秒/页），
+          点开始前会先给出待处理数与预估开销。</div>
+        <div class="opts">
+          <button class="btn-ghost">全选待入库</button>
+          <button class="btn-ghost">全不选</button>
+          <span class="small muted">并发数 <select class="inp" style="width:60px"><option>2</option></select></span>
+          <button class="btn">开始批量入库</button>
+        </div>
+        <div class="sub">「入库全部待处理文件」仍是原来的**串行**入口（一次一份、跑完再跑下一份），
+          单份的「入库」「重建」按钮也照旧可用——走的是同一条管线。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 操作条：选中后才出现的浮动条 ══════════ -->
+  <div class="selbar" id="selbar">
+    <span class="small" id="selinfo">已选 0 份</span>
+    <button class="btn-ghost" id="sel-all">全选</button>
+    <button class="btn-ghost" id="sel-none">全不选</button>
+    <span class="spacer"></span>
+    <button class="btn-ghost btn-danger" id="batch-del">批量删除选中…</button>
+  </div>
+
+  <!-- ══════════ raw 文件表 ══════════ -->
+  <div class="card">
+    <div class="row" style="margin-bottom:10px">
+      <h2>raw\ 中的文件 · 5</h2>
+      <span class="small muted">未入库 3 · 已入库 2</span>
+      <span class="spacer"></span>
+      <button class="btn-ghost" data-modal="m-batch">批量入库 <span class="badge warn">3</span></button>
+    </div>
+    <table>
+      <thead><tr><th>文件</th><th>大小</th><th>状态</th><th style="width:90px">操作</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1-卢-抗高血压药 2025.pdf<div class="path">药理/1-卢-抗高血压药 2025.pdf</div></td>
+          <td class="small">3.4 M</td><td><span class="badge warn">未入库</span></td>
+          <td><button class="btn-ghost" style="padding:4px 10px">入库</button>
+              <button class="btn-icon row-more" title="更多">⋯</button></td>
+        </tr>
+        <tr>
+          <td>3-卢 调血脂药与抗动脉粥样硬化药--2025_slides.pdf<div class="path">药理/3-卢 调血脂药…_slides.pdf</div></td>
+          <td class="small">27.4 M</td><td><span class="badge warn">内容有变</span></td>
+          <td><button class="btn-ghost" style="padding:4px 10px">重建</button>
+              <button class="btn-icon row-more" title="更多">⋯</button></td>
+        </tr>
+        <tr>
+          <td>1中枢神经系统药理学概论.pptx<div class="path">药理/1中枢神经系统药理学概论.pptx</div></td>
+          <td class="small">32.0 M</td><td><span class="badge ok">已入库</span></td>
+          <td><button class="btn-ghost" style="padding:4px 10px">重建</button>
+              <button class="btn-icon row-more" title="更多">⋯</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="small muted" style="margin-top:10px">
+      表格是<b>示意</b>：真实看板此处有 46 行。改造后每行只留 1 个主按钮 + 1 个「⋯」，
+      原先「入库／重建／移除／改名／删文件」全部保留在「⋯」里。
+    </div>
+  </div>
+
+  <!-- ══════════ 已入库资料表 ══════════ -->
+  <div class="card">
+    <div class="row" style="margin-bottom:10px">
+      <h2>已入库资料 · 3</h2>
+      <span class="spacer"></span>
+      <span class="small muted">勾选任意行后，上方会出现批量操作条</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:30px"><input type="checkbox" class="cb" id="cb-all"></th>
+        <th>标题</th><th>类型</th><th>库</th><th>切块</th><th>入库时间</th><th style="width:90px">操作</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><input type="checkbox" class="cb row-cb"></td>
+          <td>7肾上腺素受体阻断药<div class="path">raw\药理\7肾上腺素受体阻断药-2025.pdf</div></td>
+          <td><span class="badge">pdf</span> <span class="badge ok">教材</span></td>
+          <td><span class="badge ok">主库</span></td><td class="small">152</td>
+          <td class="small muted">10-13 21:04</td>
+          <td><button class="btn-ghost" style="padding:4px 10px">重建</button>
+              <button class="btn-icon row-doc-more" title="更多">⋯</button></td>
+        </tr>
+        <tr>
+          <td><input type="checkbox" class="cb row-cb"></td>
+          <td>6肾上腺素受体激动药<div class="path">raw\药理\6肾上腺素受体激动药-2025.pdf</div></td>
+          <td><span class="badge">pdf</span> <span class="badge ok">教材</span></td>
+          <td><span class="badge ok">主库</span></td><td class="small">98</td>
+          <td class="small muted">10-13 20:51</td>
+          <td><button class="btn-ghost" style="padding:4px 10px">重建</button>
+              <button class="btn-icon row-doc-more" title="更多">⋯</button></td>
+        </tr>
+        <tr>
+          <td><input type="checkbox" class="cb row-cb"></td>
+          <td>药理学 第6版（教材）<div class="path">raw\教材\药理学 第6版.pdf</div></td>
+          <td><span class="badge">pdf</span> <span class="badge ok">教材</span></td>
+          <td><span class="badge ok">主库</span></td><td class="small">1204</td>
+          <td class="small muted">10-12 09:15</td>
+          <td><button class="btn-ghost" style="padding:4px 10px">重建</button>
+              <button class="btn-icon row-doc-more" title="更多">⋯</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════ 孤儿提示条（默认折叠成一行）══════════ -->
+  <div class="orphanbar" id="orphanbar">
+    <span>⚠</span><span>索引里有 2 个文件在 raw\ 里已找不到</span>
+    <span class="spacer"></span><span class="small muted">展开 ▾</span>
+  </div>
+  <div class="card after-only" id="orphancard" style="display:none">
+    <div class="small muted" style="margin-bottom:8px">手工把源文件移走或改名后留下的记录。移除后相关切块会一并删除。</div>
+    <table><tbody>
+      <tr><td class="path">raw\药理\已删除的旧课件.pdf</td><td class="small">37 块</td>
+          <td style="width:90px"><button class="btn-ghost btn-danger" style="padding:4px 10px">移除索引</button></td></tr>
+      <tr><td class="path">raw\药理\改名前的文件.pdf</td><td class="small">12 块</td>
+          <td><button class="btn-ghost btn-danger" style="padding:4px 10px">移除索引</button></td></tr>
+    </tbody></table>
+  </div>
+
+  <!-- ══════════ 改动清单 ══════════ -->
+  <div class="legend">
+    <h2 style="margin-bottom:12px">本原型改了什么（逐条）</h2>
+    <table>
+      <thead><tr><th>现在在哪</th><th>改后在哪</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td>4 个导入入口平铺（各带输入框 + 成段说明，共 13 段文字）</td>
+            <td class="fold">一行 4 个入口按钮 → 点谁开谁的弹窗，说明随入口进弹窗</td>
+            <td>四者语义完全并列，没有主路径——正因为并列才不该全摊开。<b>选哪个才看哪个的说明</b></td></tr>
+        <tr><td>「入库全部待处理文件／全部强制重建／清理无出处的记录／刷新列表」四个平级按钮</td>
+            <td class="fold">只留「入库全部待处理文件」当唯一主 CTA，其余进「⋯ 更多」</td>
+            <td>四个权重相同 → 每次都要重新判断该点哪个。实际只有第一个是日常动作</td></tr>
+        <tr><td>批量入库整张卡片常驻（含 5 个按钮 + 158 字说明）</td>
+            <td class="fold">收进「批量入库」弹窗，入口带待入库数角标</td>
+            <td>典型"偶尔做一次、一次操作很多"。常驻时与两张表抢注意力——<b>现状这一页同时有 3 张表</b></td></tr>
+        <tr><td>列表上方常驻「全选／全不选／批量删除选中…」</td>
+            <td class="fold">勾选任意行后才浮出操作条</td>
+            <td>一个都没选时这三个按钮毫无意义。<b>功能不减、噪声归零</b></td></tr>
+        <tr><td>每行 5 个按钮（重建／导出／改标题／改名／移除）</td>
+            <td class="fold">留 1 个主按钮 + 1 个「⋯」，5 个功能一个不少</td>
+            <td>34 行 × 5 = <b>170 个按钮</b>，是资料页 364 个按钮的最大来源</td></tr>
+        <tr><td>孤儿记录整张卡片常驻</td>
+            <td class="fold">折叠成一行提示条，点击展开</td>
+            <td>异常态，平时 0 个；出现时要显眼，但不必平时占版面</td></tr>
+        <tr><td>二级页签「教材与课件 8 待入库」</td><td class="keep">原地保留</td>
+            <td>它是<b>导航</b>不是操作。收纳导航 = 让人迷路</td></tr>
+        <tr><td>顶部 8 标签 + 学科切换 + ⚙设置</td><td class="keep">全部保留</td>
+            <td>同上。<b>设置中心本身就是收纳容器，是收纳的终点</b>，藏起来等于找不到填密钥的地方</td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="margin:20px 0 10px">⚠ 必须保留的安全告知（收纳但<b>不弄丢</b>）</h2>
+    <table>
+      <thead><tr><th>告知</th><th>改后位置</th><th>为什么不能删</th></tr></thead>
+      <tbody>
+        <tr><td class="keep">识图要花钱（约 25 秒/页，按页计费）</td>
+            <td>拖拽/上传弹窗 + 批量入库弹窗 + <span class="kbd">上传后立即入库</span>复选框旁</td>
+            <td>唯一会花钱的动作，必须在<b>触发前</b>看见</td></tr>
+        <tr><td class="keep">删除不可逆（真删库记录/切块/向量/知识点出处 + 四处产物）</td>
+            <td>批量删除<b>确认弹窗内</b>（点执行之前）</td>
+            <td>不可逆操作必须二次确认；现状有确认但说明放错了地方</td></tr>
+        <tr><td class="keep">模型不一致就拒绝导入，绝不"重算一遍"偷偷花接口费</td>
+            <td>分享包导入弹窗内</td>
+            <td>这是对用户的承诺，也是与"花钱"绑定的边界</td></tr>
+        <tr><td class="keep">单个几百 MB 的文件可能被浏览器掐断（实测 645MB 失败）</td>
+            <td>拖拽/上传弹窗内一行提示</td>
+            <td>不下这个告知，用户会以为文件已入库，<b>丢文件而不知</b></td></tr>
+        <tr><td class="keep">强制重跑会重建块的 id，知识点出处会失效</td>
+            <td>教材专线弹窗内，<b>紧跟复选框</b></td>
+            <td>这是"内容没变也重跑"的隐蔽代价。现状已写在标签里，<b>原样搬走、不许分离</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- ══════════ 下拉菜单 ══════════ -->
+<div class="menu" id="menu-main">
+  <button>全部强制重建<span class="small muted" style="float:right">危险</span></button>
+  <button>清理无出处的记录</button>
+  <div class="sep"></div>
+  <button>刷新列表</button>
+</div>
+
+<div class="menu" id="menu-row">
+  <button>改名…</button>
+  <button>改标题…</button>
+  <button>移除（只删索引）</button>
+  <button class="danger">删文件</button>
+</div>
+
+<div class="menu" id="menu-doc-row">
+  <button>导出分享包</button>
+  <button>改标题…</button>
+  <button>改名…</button>
+  <div class="sep"></div>
+  <button class="danger">移除…</button>
+</div>
+
+<!-- ══════════ 弹窗：四个导入入口 ══════════ -->
+<div class="mask" id="m-path"><div class="box">
+  <div class="bh"><h3>＋ 从本机路径导入</h3><button class="x">✕</button></div>
+  <div class="bb">
+    <input class="inp" placeholder="粘贴本机路径，如 D:\我的课件\第一讲.pdf">
+    <input class="inp" style="margin-top:8px" placeholder="放到 raw\ 下的子文件夹（可留空）">
+    <div class="small muted" style="margin-top:10px">
+      看板在本机运行，直接读磁盘、不走 HTTP：<b>没有大小限制、不吃内存</b>，几百 MB 的 PDF
+      或整个文件夹一次导入都可以。
+      <span class="small" style="color:var(--meta)">（这段原先常驻页面，现随入口进弹窗）</span>
+    </div>
+    <div class="small" style="margin-top:10px;color:var(--dim)">
+      ⓘ 导入只是把文件放进 <span class="kbd">raw\</span>，<b>不会自动入库</b>。入库请回到页面点「入库全部待处理文件」。
+    </div>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button><button class="btn">导入</button></div>
+</div></div>
+
+<div class="mask" id="m-drop"><div class="box">
+  <div class="bh"><h3>⇪ 拖拽 / 上传</h3><button class="x">✕</button></div>
+  <div class="bb">
+    <div class="dz">把文件拖到这里松手 → 上传进 <span class="kbd">raw\</span><br>
+      <span class="small">放到哪个子文件夹由「从路径导入」那一栏决定（留空＝raw\ 根目录）</span></div>
+    <div class="warnbox">
+      <b>⚠ 大文件请注意</b>：拖拽走的是浏览器上传（multipart），<b>单个几百 MB 的文件可能被浏览器自己掐断</b>
+      （实测 645MB 会 fail to fetch，服务端根本收不到）。这种文件请用「＋ 从路径导入」。
+    </div>
+    <label class="ck"><input type="checkbox" class="cb">
+      <span>上传后立即入库（<b style="color:var(--warn)">要花识图钱</b>，默认关）</span></label>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button><button class="btn">上传</button></div>
+</div></div>
+
+<div class="mask" id="m-book"><div class="box">
+  <div class="bh"><h3>📖 教材入库（专线）</h3><button class="x">✕</button></div>
+  <div class="bb">
+    <input class="inp" placeholder="教材文件或文件夹的本机路径，如 D:\教材\药理学 第6版.pdf">
+    <label class="ck"><input type="checkbox" class="cb">
+      <span>内容未变也重跑（<b style="color:var(--bad)">会重建块的 id，引用它的知识点出处会失效</b>）</span></label>
+    <div class="small muted" style="margin-top:12px">
+      <b>一条龙，不问第二遍</b>：拷进 <span class="kbd">raw\教材\</span> → 本地 OCR 识图
+      （免费、不调视觉模型、约 2~16 秒/页）→ 按章切块入库。
+      长任务、串行，几百页教材要跑一两个小时，期间可以离开这一页。
+    </div>
+    <details style="margin-top:10px">
+      <summary class="small" style="color:var(--dim);cursor:pointer">这会改动什么？（点开）</summary>
+      <div class="small muted" style="margin-top:8px;line-height:1.7">
+        入库后这份资料会被打上 <span class="kbd">chunk_scheme=textbook-v1</span> 标记，
+        「入库全部待处理文件」与批量入库遇到它会<b>跳过</b>——不会用旧切块把按章切块覆盖掉。<br>
+        跑完页面会列出<b>识别到的章（章号 + 章名 + 页范围）与块数变化</b>供你核对；
+        章识别失败（少于 3 章）会如实标成"降级"，不假装成功。
+      </div>
+    </details>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button><button class="btn">开始入库</button></div>
+</div></div>
+
+<div class="mask" id="m-share"><div class="box">
+  <div class="bh"><h3>📦 导入分享包（.zip）</h3><button class="x">✕</button></div>
+  <div class="bb">
+    <input class="inp" placeholder="分享包完整路径，如 D:\下载\第一讲-share.zip">
+    <div class="small muted" style="margin-top:10px">
+      别人用「导出」键打出来的课件包，里面<b>已经带着切块、向量与知识点总结</b>：
+      导入后立刻能检索、能问答，<b>不调用任何模型、不花一分钱接口费</b>。
+    </div>
+    <div class="warnbox">
+      <b>导入前会先核对整包</b>（逐条 sha256）与向量模型：模型与本库不一致就<b>拒绝导入</b>并告诉你该怎么办，
+      绝不用"重算一遍"偷偷花掉接口费。
+    </div>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button>
+    <button class="btn-ghost">从 share\ 目录选一个</button><button class="btn">看包信息并导入</button></div>
+</div></div>
+
+<!-- ══════════ 弹窗：批量入库 ══════════ -->
+<div class="mask" id="m-batch"><div class="box" style="max-width:720px">
+  <div class="bh"><h3>批量入库 <span class="small muted">勾多份 → 多管线并发跑</span></h3><button class="x">✕</button></div>
+  <div class="bb">
+    <div class="warnbox" style="margin-top:0">
+      <b>⚠ 识图要花钱</b>（实测约 25 秒/页）。点开始前会先给出待处理数与预估开销。
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn-ghost" id="bk-all">全选待入库</button>
+      <button class="btn-ghost" id="bk-none">全不选</button>
+      <span class="small muted">并发数
+        <select class="inp" style="width:64px;display:inline-block"><option>1</option><option selected>2</option><option>3</option><option>4</option></select>
+      </span>
+      <span class="spacer"></span>
+      <span class="small muted" id="bk-info">未选择</span>
+    </div>
+    <table style="margin-top:10px">
+      <thead><tr><th style="width:34px"></th><th>文件</th><th>大小</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td><input type="checkbox" class="cb bk-cb"></td>
+            <td>1-卢-抗高血压药 2025.pdf<div class="path">药理/1-卢-抗高血压药 2025.pdf</div></td>
+            <td class="small">3.4 M</td><td><span class="badge warn">未入库</span></td></tr>
+        <tr><td><input type="checkbox" class="cb bk-cb"></td>
+            <td>3-卢 调血脂药与抗动脉粥样硬化药--2025_slides.pdf<div class="path">药理/3-卢 调血脂药…_slides.pdf</div></td>
+            <td class="small">27.4 M</td><td><span class="badge warn">内容有变</span></td></tr>
+        <tr><td><input type="checkbox" class="cb bk-cb"></td>
+            <td>5-卢 作用于血液及造血器官的药物-2025_slides.pdf<div class="path">药理/5-卢 作用于血液…_slides.pdf</div></td>
+            <td class="small">14.8 M</td><td><span class="badge warn">未入库</span></td></tr>
+      </tbody>
+    </table>
+    <div class="small muted" style="margin-top:10px">
+      并发只决定"几份一起跑"，不改每份的处理过程。某一份失败<b>不影响其他份</b>，
+      失败原因逐条列出并可单独重试。<span class="small" style="color:var(--meta)">（这段原先常驻页面 158 字，现随入口进弹窗）</span>
+    </div>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button><button class="btn" id="bk-go">开始批量入库</button></div>
+</div></div>
+
+<!-- ══════════ 弹窗：批量删除确认（S2 安全告知所在）══════════ -->
+<div class="mask" id="m-del"><div class="box">
+  <div class="bh"><h3>批量删除 3 份资料</h3><button class="x">✕</button></div>
+  <div class="bb">
+    <div class="dangerbox" style="margin-top:0">
+      <b>⚠ 删除不可逆。</b>会整批删掉这 3 份的<b>库记录、切块与向量、知识点出处</b>，
+      以及四处整理产物（末级知识点总结 + 备份、名词解释、outline 缓存、页图目录）。
+    </div>
+    <div class="grid4">
+      <div class="mini"><div class="k">切块</div><div class="v">1 454</div></div>
+      <div class="mini"><div class="k">知识点</div><div class="v">128</div></div>
+      <div class="mini"><div class="k">连带复习记录</div><div class="v">96</div></div>
+      <div class="mini"><div class="k">笔记</div><div class="v">7</div></div>
+    </div>
+    <label class="ck"><input type="checkbox" class="cb">
+      <span>连 <span class="kbd">raw\</span> 里的<b>原文件一起删</b>（不勾＝只删索引，原文件保留）</span></label>
+  </div>
+  <div class="bf"><button class="btn-ghost mx">取消</button>
+    <button class="btn" style="background:var(--bad)">确认删除 3 份</button></div>
+</div></div>
+
+<script>
+(function(){
+  // ── 模式切换 ──
+  var seg=[document.getElementById('b-before'),document.getElementById('b-after')];
+  function mode(m){
+    document.body.className='mode-'+m+(document.body.classList.contains('annot')?' annot':'');
+    seg[0].classList.toggle('on',m==='before');
+    seg[1].classList.toggle('on',m==='after');
+  }
+  seg[0].onclick=function(){mode('before');};
+  seg[1].onclick=function(){mode('after');};
+  var ab=document.getElementById('b-annot');
+  ab.onclick=function(){
+    document.body.classList.toggle('annot');
+    ab.textContent='改动标注：'+(document.body.classList.contains('annot')?'开':'关');
+  };
+
+  // ── 弹窗 ──
+  function open(id){ var m=document.getElementById(id); if(m) m.classList.add('on'); }
+  function closeAll(){ document.querySelectorAll('.mask.on').forEach(function(m){m.classList.remove('on');}); }
+  document.querySelectorAll('[data-modal]').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation(); open(b.dataset.modal); };
+  });
+  document.querySelectorAll('.mask').forEach(function(m){
+    m.onclick=function(e){ if(e.target===m) m.classList.remove('on'); };
+  });
+  document.querySelectorAll('.mask .x, .mask .mx').forEach(function(b){
+    b.onclick=closeAll;
+  });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ closeAll(); closeMenus(); } });
+
+  // ── 菜单 ──
+  var menus=['menu-main','menu-row','menu-doc-row'];
+  function closeMenus(){ menus.forEach(function(id){ document.getElementById(id).classList.remove('on'); }); }
+  function place(menuId,el,align){
+    closeMenus();
+    var m=document.getElementById(menuId), r=el.getBoundingClientRect();
+    m.classList.add('on');
+    var w=m.offsetWidth||180;
+    m.style.top=(r.bottom+window.scrollY+6)+'px';
+    m.style.left=((align==='right'? r.right-w : r.left)+window.scrollX)+'px';
+  }
+  document.getElementById('more-main').onclick=function(e){ e.stopPropagation(); place('menu-main',this,'right'); };
+  document.getElementById('more-actions').onclick=function(e){ e.stopPropagation(); place('menu-main',this,'right'); };
+  document.querySelectorAll('.row-more').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation(); place('menu-row',this,'right'); };
+  });
+  document.querySelectorAll('.row-doc-more').forEach(function(b){
+    b.onclick=function(e){ e.stopPropagation(); place('menu-doc-row',this,'right'); };
+  });
+  document.addEventListener('click',closeMenus);
+  document.querySelectorAll('.menu button').forEach(function(b){
+    b.onclick=function(){ closeMenus(); };
+  });
+
+  // ── 选中 → 浮动操作条 ──
+  var cbs=function(){ return Array.prototype.slice.call(document.querySelectorAll('.row-cb')); };
+  function syncSel(){
+    var n=cbs().filter(function(c){return c.checked;}).length;
+    var bar=document.getElementById('selbar');
+    bar.classList.toggle('on',n>0);
+    document.getElementById('selinfo').textContent='已选 '+n+' 份';
+    var all=document.getElementById('cb-all');
+    all.checked = n>0 && n===cbs().length;
+  }
+  document.querySelectorAll('.row-cb').forEach(function(c){ c.onchange=syncSel; });
+  document.getElementById('cb-all').onchange=function(){
+    var v=this.checked; cbs().forEach(function(c){c.checked=v;}); syncSel();
+  };
+  document.getElementById('sel-all').onclick=function(){ cbs().forEach(function(c){c.checked=true;}); syncSel(); };
+  document.getElementById('sel-none').onclick=function(){ cbs().forEach(function(c){c.checked=false;}); syncSel(); };
+  document.getElementById('batch-del').onclick=function(){ open('m-del'); };
+
+  // ── 批量入库弹窗内的全选 ──
+  function bks(){ return Array.prototype.slice.call(document.querySelectorAll('.bk-cb')); }
+  function bkSync(){
+    var n=bks().filter(function(c){return c.checked;}).length;
+    document.getElementById('bk-info').textContent = n? ('已选 '+n+' 份') : '未选择';
+  }
+  bks().forEach(function(c){ c.onchange=bkSync; });
+  document.getElementById('bk-all').onclick=function(){ bks().forEach(function(c){c.checked=true;}); bkSync(); };
+  document.getElementById('bk-none').onclick=function(){ bks().forEach(function(c){c.checked=false;}); bkSync(); };
+  document.getElementById('bk-go').onclick=function(){
+    var n=bks().filter(function(c){return c.checked;}).length;
+    if(!n){ alert('原型示意：真实看板这里会提示「先勾选要入库的文件」。'); return; }
+    alert('原型示意：将先给出待处理数与预估开销（识图要花钱），确认后才开始。');
+  };
+
+  // ── 孤儿提示条展开 ──
+  document.getElementById('orphanbar').onclick=function(){
+    var c=document.getElementById('orphancard');
+    var open=c.style.display!=='none';
+    c.style.display=open?'none':'block';
+    this.querySelector('.small').textContent=open?'展开 ▾':'收起 ▴';
+  };
+
+  document.getElementById('ingest-all').onclick=function(){
+    alert('原型示意：真实看板这里会给出待处理数与预估开销，确认后跑串行入库。');
+  };
+})();
+</script>
+</body>
+</html>

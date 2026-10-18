@@ -1,0 +1,56 @@
+# Secrets and credentials -- never commit
+.env
+.env.local
+*.key
+credentials*.yaml
+.credentials.yaml
+
+# 卡 C-0059：页面右上角「设置」窗口把用户改过的模型 / 密钥 / 开关写在这里。
+# 它**只应存在于本机**，绝不入库；仓库里给的是 .env.example（纯占位符）。
+config.local.json
+config.local.json.tmp
+
+# Large data and local artifacts
+# 卡 C-0067：subjects/ 是用户的课件与学科库（每个学科自带 raw/index/logs），
+# 与 raw/ index/ 同级对待——里面是真实课件与隐私数据，绝不入库。
+# （此前漏了这一行，`git status` 里整个 subjects/ 一直显示为未跟踪。）
+subjects/
+raw/
+index/*.db
+index/*.db-wal
+index/*.db-shm
+models/
+logs/
+venv/
+_smoke_fixtures/
+_*_probe/
+
+# The whole index/ directory holds local data artifacts only: the live
+# study.db plus the study.db.bak-before-* rollback backups. The index/*.db*
+# rules above do not match names like study.db.bak-before-reimport-<epoch>,
+# so ignore the directory as a whole. This supersedes the local-only entry in
+# .git/info/exclude, which is not distributed with the repository.
+index/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# My temporary test renders
+logs/insulin_pages/
+logs/vision_out/
+logs/cns_img/
+
+# 卡验证留下的临时数据根（C-0066 起累积 12 个 _tmp_c0xxx/）：
+# 都是各卡验证时自建的临时库 / 上传文件 / 截图，**不是源码、也不是用户数据**；
+# 打包（白名单）不会带上它们，但会让 git status 变脏。第 9 任 2026-10-12 补。
+_tmp_*/
+
+# Release artifacts produced by tools/release_pack.py (卡 C-0067):
+# the zip is a build output, not source -- never commit it.
+dist/
+
+# 灾后恢复 / 审计 / 验证工作区（AI 开发过程产物，不入库）
+_recovery/
+_work/

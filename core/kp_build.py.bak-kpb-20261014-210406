@@ -1,0 +1,3917 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2026 潜声海豚 <2227663973@qq.com>. All rights reserved.
+# 本源码为著作权人私有作品（proprietary）：仅供经书面授权的测试使用；
+# 未经著作权人许可，不得复制、分发、公开、发布或用于任何商业用途。
+# Unauthorized copying, distribution or publication is strictly prohibited.
+# File-ID: SA-11-560d9719   (project study_agent; keep this line)
+"""末级知识点整理管线（卡 C-0035）——看板按钮与命令行共用这一条。
+
+一件事：**把一份课件的末级节点整理成知识点总结**，落成
+`logs/knowledge/<doc_id>-末级知识点总结.json`，供看板导图弹窗按节点读取。
+
+与卡 C-0031/C-0032/C-0034 那套「一页 = 一个末级节点」的批量脚本相比，这里有三处
+**升级**（逐条对应人提的要求，提示词真源见 `logs/knowledge/提示词-知识点总结.md`）：
+
+1. **选择性合并**：调用时给模型「当前页 + 后续至多 2 页」的**窗口**，由模型判断
+   从当前页起连续几页属于同一个末级节点（依据信息密度低 + 主题连续，上限 3 页）。
+   返回的 `pages` 由本模块**逐条校验**（升序、连续、含当前页、≤3 页、不越窗口），
+   不合法就降级为单页并记 `merge.rejected_reason`——**绝不静默接受**。
+2. **全中文 + 专有名词附英文**、**要点按结构/概念/过程/原因/结果五类精简**：
+   都写在提示词里，本模块只负责把提示词逐字提取出来用（不存在"文档写一套、
+   实际跑另一套"）。
+3. **可被看板一键调用**：`build()` 用 `core/progress.py` 上报进度（**自己一组阶段名**，
+   与入库的五个阶段不混），`start_background()` 起后台线程，`progress_snapshot()`
+   给 `/api/kp-build/progress` 轮询；同一时刻只允许一个整理任务。
+
+硬约束（本模块自己守，不靠调用方）：
+- **只读真库**（`mode=ro`），只写 `logs/knowledge/` 下的产物文件，**不写任何表**。
+- **不重新调用视觉模型**：识图文本直接用库里已有的识图块。
+- **断点续跑**：每完成一条就原子落盘一次；重跑时跳过已覆盖的页。
+  ⚠ 只有**本版**（`meta.pipeline_version == PIPELINE_VERSION`）的产物才参与续跑：
+  C-0034 的旧产物是"一页一条"的口径，拿它续跑会把整份课件误判成"已完成"。
+- **成本上限**：`max_cost`（人民币）到了就停，剩余页留到下次续跑。
+
+用法::
+
+    from core import kp_build
+    kp_build.estimate(103)                    # dry-run：清单 + 预估成本，不调模型
+    kp_build.build(103, dry_run=True)         # 同上（命令行走这个）
+    kp_build.build(103, max_cost=0.8)         # 真跑（会调模型）
+    kp_build.start_background(103)            # 看板：后台线程 + 进度
+"""
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import threading
+import time
+from concurrent import futures as _cf
+from pathlib import Path
+
+from . import config, outline as outline_mod, progress
+
+# ---------------------------------------------------------------- 常量
+# 【卡 C-0049：整理管线不再读入库结构，两代管线的版本号如下】
+#
+#   v1 = `C-0045-v1`：读 `logs/outline/<doc_id>.json`（入库管线的成果）拿"页 → 节点路径"，
+#        据此分末级页/父节点页、把父节点页**下放**给一个末级宿主页，再按窗口调模型。
+#        这条路的产物**全部保留**（人拍板：保留旧文件、页签不显示、按需逐份重整理），
+#        代码也留着（`estimate_v1()` / `build_v1()` / `prev_info_v1()`），可随时对照。
+#
+#   v2 = `C-0049-v2`（**当前默认**）：只读库里的**文本**（chunks 的正文 + 识图文本，
+#        按 source_ref 的页号组织），**不读** `logs/outline/*.json`，也**不读**
+#        `chunks.topic` / `chunks.heading_path` 这类入库结构派生的字段。
+#        思维导图结构改由本管线**自己的模型调用**生成（`gen_structure_v2()`，map-reduce），
+#        每条知识点再挂到结构树的叶节点上。
+#
+# 的大模型来生成，不再复用知识库的成果。」
+# 不再用于整理知识点……当整理知识点要生成思维导图结构时，应该由整理知识点管线
+# 的大模型来生成，不再复用知识库的成果。」
+PIPELINE_VERSION_V1 = "C-0045-v1"
+PIPELINE_VERSION_V2 = "C-0049-v2"
+#   v3 = `C-0052-v3`（**当前默认**）：v2 的骨架（只读文本 + 自生成结构）不动，
+#        按人拍板（2026-09-27）改五处：
+#          ① **开推理模式**：结构/知识点两步都 `thinking=True` +
+#             `reasoning_effort="max"`（官方最高档），`max_tokens` 相应放大；
+#          ② **换角色**：从"医药学/化学课件助手"改成"资深教师 + 广大专业学生"；
+#          ③ **解除花费上限**：`BUDGET_UNLIMITED=True`，`max_cost` 只记录、不拦停；
+#          ④ **解除页数上限**：不再"每条 ≤3 页"，覆盖页由模型判断 + 管线仲裁留痕；
+#          ⑤ **新增 `terms`**：重点名词 + 英文 + 中文解释 + 首次出现的知识点 id。
+#        版本号从 v2 升到 v3 是**必须的**：提示词 sha256 变了、产物字段也变了，
+#        看板按 `meta.pipeline_version` 分流显示，旧 v2 产物**照旧可读**（不缺字段就崩不了：
+#        新字段一律用 `.get()` 读，见 `build_v2()` 的续跑判断与 `prev_info_v2()`）。
+PIPELINE_VERSION_V3 = "C-0052-v3"
+#   v4 = `C-0058-v4`（**当前默认**）：v3 的骨架与提示词口径**一字未改**，只做一件事——
+#        按人拍板（2026-09-29）「取消知识点总结管线与名词解释功能的偶联
+#        （因为总结出的知识点太多了）」，把名词那两块**整块摘出去**：
+#          ① `gen_kp_v2()` 不再从模型输出里读 `terms`、rec 里不再有
+#             `terms` / `terms_rejected` / `quality_terms` 三个字段
+#             （提示词真源 `PROMPT-SYS` 里那段 terms 要求也一并删掉）；
+#          ② `build_v2()` 末尾不再有"汇总去重 + 一次全局筛选"，产物**不再有顶层 `terms` 键**、
+#             `meta` 里不再有 `n_terms` / `terms_filter` / `params.terms_max_tokens`。
+#        名词解释**功能保留**，但改成**按课件单独触发**的独立功能：
+#          入口 `build_terms()` / `tools/terms_build.py --doc <id>`，
+#          提示词真源 `logs/knowledge/提示词-名词解释.md`（新的 `TERMS_PROMPT_NAME`），
+#          产物 `logs/knowledge/<doc_id>-名词解释.json`（`{"meta", "terms"}`，
+#          `terms[]` 字段与 v3 的顶层 terms 逐个同构）。
+#        为什么要升版本号：产物**少了一个顶层键**、提示词 sha256 也变了，
+#        看板按 `meta.pipeline_version` 分流；旧 v2 / v3 产物**照旧可读**
+#        （`tools/dashboard.py::_KP_READABLE_VERSIONS` 白名单三代都在册，
+#        名词解释栏读不到 `terms` 时会去读独立产物）。
+#        为什么这么改（实测依据，见卡 C-0058 方案报告）：逐条提炼曾占掉每条知识点
+#        **26.40%** 的输出字符额度（doc#5：24 条 rec 里 terms 字段 28136/106565 字符），
+#        末尾那次筛选占该产物全部花费的 **9.29%**（CNY0.1404 / CNY1.5117）。
+#        ⚠ 知识点**条数**不会因此变少：v3/v4 都是"一个结构叶节点 = 一条知识点"，
+#        条数由结构树（另一次调用、其提示词一个 terms 字都没有）决定。
+PIPELINE_VERSION_V4 = "C-0058-v4"
+# 模块级的"当前版本"：看板/批量整理用它判"这份产物是不是本版"（`prev_info()`）。
+PIPELINE_VERSION = PIPELINE_VERSION_V4
+KP_SUFFIX = "-末级知识点总结.json"
+
+# 整理自己的阶段名（**不要**用入库那五个：`core/progress.py::STAGES` 是入库的，
+# 而且 `progress.stage()` 只认它自己的 STAGES，所以进度快照里的 stages/stage_index
+# 由本模块覆盖成这一组，见 `progress_snapshot()`）。
+#
+# ⚠ 卡 C-0049 改了名字（原为"读取结构/构建材料/调用模型/写入产物"）：v2 的第一步是
+# **读库里的文本**、第二步是**生成结构**（调模型）、第三步才是写知识点。阶段**个数
+# 保持 4 个**（看板的进度条按 `len(KP_STAGES)` 算百分比，个数变了会错位）。
+KP_STAGES = ("读取文本", "生成结构", "写知识点", "写入产物")
+
+MAX_MERGE = 3            # 最多合并 3 页（上限的理由写在提示词里，不是拍脑袋）
+# 卡 C-0045：`MAX_MERGE` 现在限的是**末级页**的额度（合并判断与压缩比口径不变）；
+# 窗口里「下放给当前末级页的上级节点页」**不占**这个额度，但受本兜底上限约束——
+# 某页前面若挂了一长串上级页，一次调用的材料不能无限膨胀。
+MAX_WINDOW_PAGES = 6
+MODEL = "deepseek-flash"
+MAX_TOKENS = 2048
+TEMPERATURE = 0.3
+THINKING = False
+TIMEOUT = 300
+RETRY = 2
+
+# 卡 C-0052：整理管线（v2/v3）两步都开推理模式、强度拉满。
+#   - `reasoning_effort` 由 `core/chat.py::chat_once()` **原样透传**成 payload 字段，
+#     官方取值 none/low/high/max（默认 high），"max" 就是人要求的最高档；
+#   - ⚠ **思考 token 也算 completion token**：实测（2026-09-27）doc#5 的 8 页材料
+#     一条知识点 = `completion_tokens=11196`，其中 `reasoning_tokens=10638`。
+#     所以 `max_tokens` 必须放大（见 v2/v3 常量区的 `KP_MAX_TOKENS` /
+#     `STRUCT_MAX_TOKENS`），否则正文被思维链挤爆（旧的 2048 连思维链都装不下）。
+#   - ⚠ 思考模式下 `temperature` **不生效**（传了不报错、被服务端忽略）。
+#   - 上面的 `THINKING`/`MAX_TOKENS`/`TEMPERATURE` 三个模块级常量**只服务 v1**
+#     （`build_v1`/`_gen_one`），v2/v3 走下面那组自己的常量，避免动旧管线。
+THINKING_V2 = True
+REASONING_EFFORT = "max"
+# 花费上限：人拍板（2026-09-27）「解除整理知识点时花费金额和页数的限制……
+# 预算无上限」。为 True 时 `max_cost` 只写进 `meta.budget_cny` 供核对，
+# **不再作为停止条件**；要恢复旧的硬上限行为，显式传 `budget_unlimited=False`
+# （CLI 是 `--enforce-budget`）。
+BUDGET_UNLIMITED = True
+
+# 计价：与 `core/outline.py` 同一口径（非高峰 $0.15/1M 入、$0.60/1M 出，汇率 7.1）
+PRICE_IN = 0.15
+PRICE_OUT = 0.60
+FX = 7.1
+# 中文 token 估算：实测 doc#103 单页材料 ≈ 2338 token（含约 1000 token 提示词），
+# 按 1.6 字符/token 估足够准，只用于 dry-run 的预估值，不参与记账。
+CHARS_PER_TOKEN = 1.6
+EST_OUT_TOKENS = 350
+
+# 提示词**真源**（卡 C-0039 起是函数，不再是模块级常量）。
+#
+# 为什么必须动态取：`config.LOG_DIR` 会被切库改掉，模块级常量在 import 时
+# 就固化了，切到新学科后仍指向老学科的路径。默认学科下取值与原来**逐字相同**。
+#
+# 为什么要"本学科优先、根目录兜底"：提示词真源是**管线资产**，不是学科数据。
+# 新学科一出生，自己的 `logs/knowledge/` 里只有产物 json、没有这个 md；
+# 若只认 `LOG_DIR`，新学科一整理就 `FileNotFoundError`——那"管线复用"就成了空话。
+# 所以：本学科放一份就优先用它（允许单学科自定义提示词），没有就用项目根那份，
+# 保证"真源仍然只有一份"（`load_prompts()` 的既定原则）。
+_PROMPT_NAME = "提示词-知识点总结.md"
+
+
+def default_prompt_file() -> Path:
+    own = config.LOG_DIR / "knowledge" / _PROMPT_NAME
+    if own.exists():
+        return own
+    root = config.ROOT / "logs" / "knowledge" / _PROMPT_NAME
+    if root.exists():
+        return root
+    # 卡 C-0073（exe 路线）：打包后随包分发的真源在**解包目录**里
+    # （`sys._MEIPASS`，一目录形态是 `<exe目录>\_internal`），这一级是保底——
+    # 用户把 exe 同级的 `logs/knowledge/` 整份删掉，管线也不至于直接不可用。
+    # 源码模式下 `config.BUNDLE_ROOT` 与 `config.ROOT` 是同一个目录，
+    # 上面一行已经返回，走不到这里 ⇒ **源码模式行为逐字不变**。
+    return config.BUNDLE_ROOT / "logs" / "knowledge" / _PROMPT_NAME
+
+_REF_RE = re.compile(r"^p\.(\d+)(?:-(\d+))?(\s*图)?$")
+
+
+def _parse_ref(ref: str):
+    """解析 `source_ref` → (起始页, 结束页, 是否识图块)；认不出来返回 None。
+
+    三种写法都要认（`chunks` 表**没有 page 列**，页码只能从这里来）：
+      - `p.3`      单页正文块
+      - `p.3 图`   单页识图块（图片理解）
+      - `p.1-2`    **跨页块**：内容是这几页共有的，同时属于区间内的每一页
+                   （C-0031 §2 的既定口径）。实测有课件带这种块，
+                   不认它就会把整份课件拒跑。
+    """
+    m = _REF_RE.match((ref or "").strip())
+    if not m:
+        return None
+    a = int(m.group(1))
+    b = int(m.group(2) or a)
+    if b < a:
+        a, b = b, a
+    return a, b, bool(m.group(3))
+
+
+# ---------------------------------------------------------------- 提示词
+def prompt_file(path: str | os.PathLike | None = None) -> Path:
+    return Path(path) if path else default_prompt_file()
+
+
+def _grab(md: str, tag: str, path: Path) -> str:
+    m = re.search(r"<!-- %s-BEGIN -->\s*```text\n(.*?)\n```\s*<!-- %s-END -->"
+                  % (tag, tag), md, re.S)
+    if not m:
+        raise SystemExit("提示词真源里找不到 %s 代码块：%s" % (tag, path))
+    return m.group(1)
+
+
+def _grab_opt(md: str, tag: str) -> str:
+    """**可选**提示词块：找不到就返回空串，不 raise。
+
+    卡 C-0052 曾用它取知识点真源里的 terms 两个块；卡 C-0058 把名词摘出后，
+    知识点这条管线已经没有可选块了（`load_kp_prompts_v2()` 只取 SYS/USER）。
+    这个函数**保留**：独立的名词解释功能将来若要扩可选块可以直接用，
+    而且删掉它会让"可选块"这条既有契约从代码里消失。
+    """
+    try:
+        return _grab(md, tag, Path("(optional)"))
+    except SystemExit:
+        return ""
+
+
+def load_prompts(path: str | os.PathLike | None = None) -> dict:
+    """从提示词真源逐字提取 SYS/USER，并算出文件 sha256（记进产物 meta）。
+
+    真源是唯一的一份：改提示词只改那个 md，本模块不做任何"内置默认提示词"，
+    否则就会出现"文档写一套、实际跑另一套"。
+    """
+    p = prompt_file(path)
+    blob = p.read_bytes()
+    md = blob.decode("utf-8")
+    sys_p = _grab(md, "PROMPT-SYS", p)
+    user_p = _grab(md, "PROMPT-USER", p)
+    return {"sys": sys_p, "user": user_p, "sha256": hashlib.sha256(blob).hexdigest(),
+            "path": str(p), "chars": len(sys_p) + len(user_p)}
+
+
+# ---------------------------------------------------------------- 结构（末级节点）
+def _outline_pages_from_cache(d: dict) -> dict:
+    """退化成只读 `path`（`_load_pages` 万一改了私有接口时的兜底）。"""
+    out: dict[int, list[str]] = {}
+    for k, v in (d.get("pages") or {}).items():
+        try:
+            pno = int(k)
+        except (TypeError, ValueError):
+            continue
+        path = v.get("path") if isinstance(v, dict) else v
+        if isinstance(path, list):
+            names = [str(x).strip() for x in path if str(x or "").strip()]
+            if names:
+                out[pno] = names
+    return out
+
+
+def outline_pages(doc_id: int, outline_path: str | os.PathLike | None = None) -> dict:
+    """读一份 outline 缓存，返回 {页号: 路径}。
+
+    **与看板逐字同源**（`tools/dashboard.py::_outline_pages`）：
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    try:
+        out = outline_mod._load_pages(d)   # noqa: SLF001（与看板用的是同一个私有接口）
+    except Exception:                      # noqa: BLE001
+            # 宿主在下放页之前（甚至没有宿主）：不硬塞，逐组记录待交代
+            unplaced.append({"pages": list(group), "host": int(host or 0),
+                             "reason": ("找不到位于它之后的末级宿主页"
+                                        if not host else "只有更靠前的末级页，材料顺序会倒挂")})
+            for p in group:
+                owner[int(p)] = 0
+            continue
+        handoff[host].extend(group)
+        for p in group:
+            owner[int(p)] = host
+    for k in handoff:
+        handoff[k] = sorted(set(handoff[k]))
+    return handoff, owner, unplaced
+
+
+# ---------------------------------------------------------------- 真库（只读）
+def read_chunks(doc_id: int, db_path: str | os.PathLike | None = None) -> dict:
+    """读该文档的块与识图记录（**只读**）。
+
+    返回 {body, fig, texts, figrows, cover}：
+      body[page] = [(ord, chunk_id)]   正文块（按 `source_ref` 的**起始页**归档）
+      fig[page]  = [(ord, chunk_id)]   识图块（图片理解），同样按起始页归档
+      texts[cid] = 块原文
+      figrows[page] = figure_desc 那一行（no_info 用来给材料加提示）
+      cover[page]   = 覆盖该页的全部块 id（跨页块 `p.12-16` 会落在 12..16 每一页上）
+
+    `chunks` 表**没有 page 列**：页码一律从 `source_ref`（`p.3` / `p.3 图` /
+    `p.12-16`）解析；解析不出来的行**直接报错**，绝不静默丢块。
+    """
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        texts: dict = {}
+        body: dict = {}
+        fig: dict = {}
+        cover: dict = {}
+        span: dict = {}
+        bad = []
+        for r in conn.execute("SELECT id, ord, source_ref, text FROM chunks "
+                              "WHERE doc_id=? ORDER BY ord, id", (int(doc_id),)):
+            cid = int(r["id"])
+            ref = (r["source_ref"] or "").strip()
+            parsed = _parse_ref(ref)
+            if parsed is None:
+                bad.append((cid, ref))
+                continue
+            a, b, is_fig = parsed
+            texts[cid] = r["text"] or ""
+            span[cid] = (a, b)
+            for p in range(a, b + 1):
+                cover.setdefault(p, set()).add(cid)
+            (fig if is_fig else body).setdefault(a, []).append(
+                (int(r["ord"] or 0), cid))
+        figrows: dict = {}
+        for r in conn.execute("SELECT page, page_title, description, no_info, n_chunks "
+                              "FROM figure_desc WHERE doc_id=?", (int(doc_id),)):
+            figrows[int(r["page"])] = dict(r)
+    finally:
+        conn.close()
+    if bad:
+        raise RuntimeError("有 %d 个块的 source_ref 解析不出页码（拒绝静默丢块）：%s"
+                           % (len(bad), bad[:5]))
+    return {"body": body, "fig": fig, "texts": texts, "figrows": figrows,
+            "cover": cover, "span": span}
+
+
+def _page_stats(doc_id: int, db_path: str | os.PathLike | None = None) -> dict:
+    """每页有多少块、多少字——**只算不看正文**，dry-run / 预估专用。
+
+    与 `read_chunks()` 同一口径（块按 `source_ref` 起始页归档，跨页块区间内
+    每页都算被覆盖），只是不把 `text` 取回来：全库 9217 块、240 万字，把正文
+    读回来只为了数长度，会让看板「整理知识点」弹窗的预估慢到十几秒。
+    """
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT source_ref, COUNT(*) AS n, SUM(LENGTH(text)) AS c FROM chunks "
+            "WHERE doc_id=? GROUP BY source_ref", (int(doc_id),)).fetchall()
+    finally:
+        conn.close()
+    per: dict = {}
+    cover: dict = {}
+    bad = []
+    total = 0
+    n_blocks = 0
+    for ref, n, c in rows:
+        parsed = _parse_ref(ref or "")
+        if parsed is None:
+            bad.append(ref)
+            continue
+        a, b, is_fig = parsed
+        d = per.setdefault(a, {"chars": 0, "n_body": 0, "n_fig": 0})
+        d["chars"] += int(c or 0)
+        d["n_fig" if is_fig else "n_body"] += int(n or 0)
+        total += int(c or 0)
+        n_blocks += int(n or 0)
+
+    # —— 卡 C-0048：宿主没能进入窗口（下放页与它之间被别的条目的页阻断）——————
+    inv: list = []
+    for p in win:
+        lines.append("===== 第 %d 页 =====" % p)
+        path = pages.get(p) or []
+        lines.append("【本页在导图中的节点路径】%s" % " > ".join(path))
+        if p in pp:
+            lines.append("（注：本页是**上级节点页**「%s」——它在导图里还有下级节点、"
+                         "自己不成条；它的内容必须**并入本条知识点**，"
+                         "并在 pages 里带上第 %d 页。）"
+                         % (path[-1] if path else "p.%d" % p, p))
+        elif cur is not None and p != cur and p < cur:
+            lines.append("（注：本页在导图里是末级节点页，先于当前页 p.%d 出现。）" % cur)
+        rows_fig = fig.get(p) or []
+        n_blocks += int(n or 0)
+        for p in range(a, b + 1):
+            cover.setdefault(p, 0)
+            cover[p] += int(n or 0)
+    return {"per_page": per, "cover_n": cover, "bad": bad,
+            "total_chars": total, "n_blocks": n_blocks}
+
+
+def doc_title(doc_id: int, conn=None) -> str:
+    """课件标题：优先库里 documents.title，其次 outline 的 deck，最后兜底。"""
+    raw = load_outline(doc_id)
+    title = str(raw.get("deck") or "").strip()
+    try:
+        own = conn is None
+        if own:
+            db = Path(config.DB_PATH)
+            conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        row = conn.execute("SELECT title FROM documents WHERE id=?",
+                           (int(doc_id),)).fetchone()
+        if row and (row["title"] or "").strip():
+            title = str(row["title"]).strip()
+        if own:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return title or ("文档 %d" % int(doc_id))
+
+
+# ---------------------------------------------------------------- 材料
+def window_of(page: int, leaf_set: set, handoff: dict | None = None,
+              owner: dict | None = None) -> list:
+    """从 page 起的**连续窗口**：下放给它的上级节点页 + 本页 + 后续末级页。
+
+    卡 C-0045 起，窗口不再"只从当前页开始"：
+      - **起点** = `min(下放给 page 的上级页 ∪ {page})`——上级页的内容跟它后面
+        那一小节本来就是连着的，拆开就丢（这正是 doc#5 丢 11 页 / 42% 正文的原因）；
+      - **额度**：窗口内**末级页**最多 `MAX_MERGE` 个（合并判断与压缩比口径不变），
+        前置的上级页不占这个额度，但总页数受 `MAX_WINDOW_PAGES` 兜底；
+      - **不越界**：遇到"归**别的**宿主的页"就停——否则同一页会进两条知识点，
+        重复计数就发生在这一步。
+
+    不传 `handoff`/`owner` 时退化为旧口径（从当前页起的连续末级页，≤ `MAX_MERGE` 页），
+    方便单独调用与回归对比。
+
+    ⚠ **卡 C-0048：宿主被阻断时不再静默丢下放页**。旧版在"下放页与宿主之间隔着
+    别的条目的页"时（实测 doc#3 的 p.5 下放给 p.19，相距 14 页）会落到"只取宿主"
+    的兜底，下放页**悄悄消失**（覆盖 30/31）。现在这种情形改走"显式携带"：
+    优先在原窗口里给下放页排一个位置（下放页与宿主之间的缺口页**不算进窗口**，
+    模型仍按页面块读到连续内容），配额实在不够时返回 `[]`——由调用方（`estimate()`
+    → `meta.coverage.window_unclaimed`）逐页登记"没被任何窗口认领"。
+    常规情形（宿主与下放页相邻/可同窗）的行为逐字不变。
+    """
+    back = sorted(int(x) for x in ((handoff or {}).get(page) or []))
+    owner = owner or {}
+    if not back:
+        win = [page]
+        nxt = page + 1
+        while len(win) < MAX_MERGE and nxt in leaf_set:
+            win.append(nxt)
+            nxt += 1
+    return seq, "；".join(bad)
+
+
+def cost_of(usage: dict) -> float:
+    ti = int(usage.get("prompt_tokens") or 0)
+    to = int(usage.get("completion_tokens") or 0)
+    return round((ti / 1e6) * PRICE_IN * FX + (to / 1e6) * PRICE_OUT * FX, 6)
+
+
+def parse_json(raw: str) -> dict:
+    """剥代码块 + 截取最外层 {}（与 `core/outline.py::_parse` 同一套路）。"""
+    s = (raw or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.S)
+    if m:
+        s = m.group(1).strip()
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        s = s[i:j + 1]
+    try:
+        return json.loads(s)
+    except Exception as e:  # noqa: BLE001
+        return {"_parse_error": "%s: %s" % (type(e).__name__, e), "_raw": raw}
+
+
+# 照抄判定：与 C-0031/C-0032/C-0034 **同一判据**
+COPY_ABS = 40
+COPY_RATIO = 0.60
+_SENT_RE = re.compile(r"[^。！？；\n]+[。！？；]?")
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+_EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-\.]{1,}")
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", "", s or "")
+
+
+def lcs_len(a: str, b: str) -> int:
+    """最长公共**子串**长度（二分 + 集合）。"""
+    if not a or not b or not (set(a) & set(b)):
+        return 0
+    if cur not in keep:
+        keep = [cur]
+    # 以当前页为中心向两侧取最长连续段（win 本身连续，只需看断号）
+    i = keep.index(cur)
+    lo = i
+    while lo - 1 >= 0 and keep[lo - 1] == keep[lo] - 1:
+        lo -= 1
+    hi = i
+    while hi + 1 < len(keep) and keep[hi + 1] == keep[hi] + 1:
+        hi += 1
+    seq = keep[lo:hi + 1]
+    if len(seq) < len(keep):
+        bad.append("pages %s 不连续，以当前页 p.%d 为中心只取连续段 %s" % (keep, cur, seq))
+    if len(seq) > len(win):
+        bad.append("一次覆盖 %d 页，超过窗口上限 %d 页，只取 %s"
+                   % (len(seq), len(win), seq[:len(win)]))
+        seq = seq[:len(win)] if cur in seq[:len(win)] else seq[-len(win):]
+    return seq, "；".join(bad)
+
+
+def cost_of(usage: dict) -> float:
+    ti = int(usage.get("prompt_tokens") or 0)
+    to = int(usage.get("completion_tokens") or 0)
+    return round((ti / 1e6) * PRICE_IN * FX + (to / 1e6) * PRICE_OUT * FX, 6)
+
+
+def parse_json(raw: str) -> dict:
+    """剥代码块 + 截取最外层 {}（与 `core/outline.py::_parse` 同一套路）。"""
+    s = (raw or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.S)
+    if m:
+        s = m.group(1).strip()
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        s = s[i:j + 1]
+    try:
+        return json.loads(s)
+    except Exception as e:  # noqa: BLE001
+        return {"_parse_error": "%s: %s" % (type(e).__name__, e), "_raw": raw}
+
+COPY_ABS = 40
+COPY_RATIO = 0.60
+_SENT_RE = re.compile(r"[^。！？；\n]+[。！？；]?")
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+_EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-\.]{1,}")
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", "", s or "")
+
+        seq = seq[:len(win)] if cur in seq[:len(win)] else seq[-len(win):]
+    return seq, "；".join(bad)
+
+
+def cost_of(usage: dict) -> float:
+    ti = int(usage.get("prompt_tokens") or 0)
+    to = int(usage.get("completion_tokens") or 0)
+    return round((ti / 1e6) * PRICE_IN * FX + (to / 1e6) * PRICE_OUT * FX, 6)
+
+
+def parse_json(raw: str) -> dict:
+    """剥代码块 + 截取最外层 {}（与 `core/outline.py::_parse` 同一套路）。"""
+    s = (raw or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.S)
+    if m:
+        s = m.group(1).strip()
+    i, j = s.find("{"), s.rfind("}")
+    if i >= 0 and j > i:
+        s = s[i:j + 1]
+    try:
+        return json.loads(s)
+    except Exception as e:  # noqa: BLE001
+        return {"_parse_error": "%s: %s" % (type(e).__name__, e), "_raw": raw}
+
+
+# 照抄判定：与 C-0031/C-0032/C-0034 **同一判据**
+COPY_ABS = 40
+COPY_RATIO = 0.60
+_SENT_RE = re.compile(r"[^。！？；\n]+[。！？；]?")
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+_EN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-\.]{1,}")
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", "", s or "")
+
+
+def lcs_len(a: str, b: str) -> int:
+    """最长公共**子串**长度（二分 + 集合）。"""
+    if not a or not b or not (set(a) & set(b)):
+        "pages_total": int(meta.get("pages_total") or 0),
+        "cost_cny": float(meta.get("cost_cny_all_calls") or 0.0),
+        "generated_at": str(meta.get("generated_at") or ""),
+        "source_card": str(meta.get("source_card") or ""),
+    }
+
+
+def estimate(doc_id: int, *, outline_path=None, prompt_path=None,
+             db_path=None) -> dict:
+    """dry-run：列出末级页/窗口/材料规模与**预估**条数、成本，**不调模型**。
+    掉的页）。若两条的 `pages` 有交集，说明这份产物出自有缺陷的中间版本
+    （实测有过：合并后没跳过已覆盖页，跑出 [4,5,6] 后面又跟着 [5,6,7]）。
+    这种产物**一条都不续**——宁可重花钱，也不把脏数据当基线往下接。
+    """
+    meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    if str(meta.get("pipeline_version") or "") != PIPELINE_VERSION_V1:
+        return set()
+    done: set = set()
+    seen: dict = {}
+    for r in (prev.get("knowledge_points") or []):
+        if not isinstance(r, dict) or not str(r.get("summary") or "").strip():
+            continue
+        for p in (r.get("pages") or []):
+            try:
+                n = int(p)
+            n += 1
+    return n
+
+
+# ---------------------------------------------------------------- 成本预估
+def _load_prev(out: Path) -> dict:
+    try:
+        d = json.loads(out.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def resume_set(prev: dict) -> set:
+    """能从旧产物续跑的页集合。
+
+    ⚠ **只认本版产物**：C-0034 的旧文件是"一页一条、没有合并"的口径，
+    拿它当"已完成"会把整份课件误判成跑完了（那就等于什么都没做）。
+    判据是 `meta.pipeline_version`，旧文件缺这个字段 → 返回空集合（重跑）。
+
+    ⚠ **重叠即整份作废**：正常产物里每页最多属于一条知识点（游标会跳过被合并
+    掉的页）。若两条的 `pages` 有交集，说明这份产物出自有缺陷的中间版本
+    （实测有过：合并后没跳过已覆盖页，跑出 [4,5,6] 后面又跟着 [5,6,7]）。
+    这种产物**一条都不续**——宁可重花钱，也不把脏数据当基线往下接。
+    """
+    meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    if str(meta.get("pipeline_version") or "") != PIPELINE_VERSION_V1:
+        return set()
+    done: set = set()
+    seen: dict = {}
+    for r in (prev.get("knowledge_points") or []):
+        if not isinstance(r, dict) or not str(r.get("summary") or "").strip():
+            continue
+        for p in (r.get("pages") or []):
+            try:
+                n = int(p)
+            except (TypeError, ValueError):
+                continue
+            if n in seen and seen[n] != r.get("id"):
+                return set()      # 重叠 → 整份产物不可信
+            seen[n] = r.get("id")
+            done.add(n)
+    return done
+
+
+def out_file(doc_id: int, out_path: str | os.PathLike | None = None) -> Path:
+    if out_path:
+        return Path(out_path)
+    return config.LOG_DIR / "knowledge" / ("%d%s" % (int(doc_id), KP_SUFFIX))
+
+
+def prev_info_v1(doc_id: int, out_path: str | os.PathLike | None = None) -> dict:
+    """已有产物的状态（给看板判断"要不要先备份、能不能续跑"）。
+
+    看板点「开始」前必须知道三件事：产物在不在、是不是本版（本版才能续跑）、
+    里面已经有多少条。旧版产物（如 C-0034 的"一页一条"）**会被整份重写**，
+    所以调用方要先备份——这个判断只有这里算得准，不要在前端猜。
+
+    ⚠ 卡 C-0049：本函数是 **v1（读 outline）那代**的口径，保留供对照；
+    对外入口 `prev_info()` 现在走 v2。
+    """
+    out = out_file(doc_id, out_path)
+    prev = _load_prev(out)
+    meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    ver = str(meta.get("pipeline_version") or "")
+    kps = [r for r in (prev.get("knowledge_points") or []) if isinstance(r, dict)]
+    done = resume_set(prev)
+    return {
+        "exists": out.exists(),
+        "path": str(out),
+        "windows": {str(p): w for p, w in zip(leaf, windows)},
+        # 条数：合并后 ≤ 末级页数、≥ ceil(末级页数/3)
+        "kp_max": len(leaf),
+        "kp_min": (len(leaf) + MAX_MERGE - 1) // MAX_MERGE,
+        "max_merge_pages": MAX_MERGE,
+        "material_chars_total": mat_chars,
+        "window_chars_total": win_chars,
+        "pages": per_all,
+        "est_calls": calls,
+        "est_tokens_in": est_in,
+        "est_tokens_out": est_out,
+        "est_cost_cny": est_cost,
+        "est_rule": ("上界估算：按每页一条（不合并）算调用数；"
+                     "输入 token ≈ (提示词 + 窗口材料字符)/%.1f；"
+                     "输出按每条 %d token；单价非高峰 $%.2f/1M 入、$%.2f/1M 出，汇率 %.1f"
+def progress_snapshot() -> dict:
+    """给 `/api/kp-build/progress` 的快照：字段与 `/api/ingest/progress` 同构，
+    模块级 `_STATE` 是"单份任务"的全局位，N 份并发时谁写谁覆盖；
+    批量任务有自己的 per-task 进度（`core/kp_batch.py`），走 `on_event` 回调。
+    """
+    if not on:
+        return
+    with _STATE_LOCK:
+        _STATE["stage_index"] = max(0, min(i, len(KP_STAGES) - 1))
+    progress.stage(KP_STAGES[i], note)
+
+
+def _emit(on_event, ev: dict) -> None:
+    """把进度事件交给调用方（批量整理用）。
+
+    **回调的异常绝不许打断管线**：进度是"看得见的糖"，整理本身才是正事；
+    回调里写错一个字段不该让一整份课件的模型调用白花。
+    """
+    if on_event is None:
+        return
+    try:
+        on_event(ev)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def progress_snapshot() -> dict:
+    """给 `/api/kp-build/progress` 的快照：字段与 `/api/ingest/progress` 同构，
+    前端可以直接复用同一个进度条渲染函数。
+
+    为什么要把 `stages` / `stage_index` / `percent` 覆盖掉：`core/progress.py`
+    的五个阶段是**入库**的，`stage()` 也只认它自己的阶段名。这里用同一份状态
+    （label/stage/note/elapsed/error 都来自它），但阶段表换成整理自己的四个，
+    百分比按"阶段序号 + 阶段内完成度"重算——**不改 core/progress.py 一个字**。
+    """
+    s = progress.snapshot()
+    with _STATE_LOCK:
+        idx = int(_STATE["stage_index"])
+        s["stages"] = list(KP_STAGES)
+        s["stage_index"] = idx
+        s["kind"] = "kp_build"
+        s["doc_id"] = int(_STATE["doc_id"])
+        s["kp_done"] = int(_STATE["kp_done"])
+        s["kp_total"] = int(_STATE["kp_total"])
+        s["cost_cny"] = round(float(_STATE["cost_cny"]), 6)
+    frac = (s["done"] / s["total"]) if s.get("total") else 0.0
+    frac = min(1.0, max(0.0, frac))
+    n = len(KP_STAGES)
+    s["percent"] = (int(((idx + frac) * 100) / n) if s.get("active")
+                    else (100 if s.get("status") == "done" else 0))
+    return s
+
+
+def is_running() -> bool:
+    with _STATE_LOCK:
+        return bool(_STATE["running"])
+
+
+# ---------------------------------------------------------------- 落盘
+_SAVE_LOCK = threading.Lock()
+
+
+def _save(doc: dict, out: Path) -> None:
+    """原子落盘：先写 .tmp 再 replace，中断不会留下半截 JSON。"""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, out)
+
+
+# ---------------------------------------------------------------- 主流程
+def _coverage_block(est: dict, recs: list) -> dict:
+    """覆盖审计（卡 C-0045）：全部页 → **唯一**知识点 id，重复收录必须为 0。
+
+    为什么单列一节：下放之后"某一页被谁收录"不再自明（父节点页归子条目），
+    光看 `pages_covered` 看不出有没有一页被两条各写了一遍。`overlap_pages`
+    是这个改法的机器判据，也是"避免重复计数"这条要求的落地。
+    """
+    owner_est = {int(k): int(v) for k, v in (est.get("page_owner") or {}).items()}
+    seen: dict = {}
+    overlap: list = []
+    for r in recs:
+        rid = r.get("id")
+        for p in (r.get("pages") or []):
+            try:
+                n = int(p)
+            except (TypeError, ValueError):
+                continue
+            if n in seen and seen[n] != rid:
+                overlap.append(n)
+            seen[n] = rid
+    pages_all = sorted(owner_est) or sorted(seen)
+    unclaimed = est.get("window_unclaimed") or []
+    return {
+        # C-0045：父节点页下放的**覆盖审计**与**父节点概括索引**
+        "coverage": _coverage_block(est, recs),
+        # C-0048：丢页留痕的顶层快捷入口（看板/人不必翻进 coverage 才看得到）。
+        # **旧产物没有这两个字段**，读的一律按"空数组"处理，渲染不受影响。
+        "unclaimed_pages": est.get("window_unclaimed") or [],
+        "excluded_unplaced_pages": est.get("handoff_unplaced") or [],
+        "parent_nodes": _parent_nodes(est, recs),
+        # 合并决策汇总（哪些页合并了、哪些没合并）——明细在顶层 merge_decisions
+        "merge_summary": {
+            "max_merge_pages": MAX_MERGE,
+            "n_kps": len(recs),
+            "n_merged_kps": len(merged),
+            "n_single_kps": len(not_merged),
+            "merged_groups": groups,
+            "merged_pages_total": sum(len(g) for g in groups),
+            "pages_saved": sum(len(g) - 1 for g in groups),
+            "single_pages": [int((r.get("pages") or [0])[0]) for r in not_merged],
+        },
+        "copy_check": {
+            "rule": ("整句照抄＝与材料连续相同 ≥%d 字 且 占该句 ≥%.0f%%；"
+                     "数字/专名＝输出里每个数字串与英文 token 必须能在材料里找到"
+                     % (COPY_ABS, COPY_RATIO * 100)),
+            "checked": len(recs),
+            "passed": len(recs) - len(copy_failed),
+            "failed_ids": copy_failed,
+        },
+        "cost_budget_note": "硬上限由调用方（CLI --max-cost / 看板）传入，见 budget_cny",
+        "budget_cny": float(est.get("budget_cny") or 0.0),
+        "cost_cny": cost,
+        "usage_total": {"calls": len(recs), "tokens_in": ti, "tokens_out": to},
+        "usage_extra": dict(ex, note="重试/失败等未留在产物里的调用"),
+        "cost_cny_all_calls": round(cost + float(ex.get("cost_cny") or 0), 6),
+        "usage_total_all_calls": {
+            "calls": len(recs) + int(ex.get("calls") or 0),
+            "tokens_in": ti + int(ex.get("tokens_in") or 0),
+            "tokens_out": to + int(ex.get("tokens_out") or 0)},
+        "est_cost_cny": est.get("est_cost_cny"),
+        "elapsed_s": round(time.perf_counter() - started, 1),
+        "status": status,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "note": ("每条知识点 = 一段**连续页**：下放给它的上级节点页（若有）+ 当前末级页 "
+                 "+ 后续至多 %d 个末级页（由模型按信息密度与主题连续性判断合并，"
+                 "本模块逐条校验 pages，并把下放的上级页强制并入）；材料 = 覆盖页的"
+                 "全部正文块 + 识图块（图片理解），不重新调用视觉模型；总结为提炼后的"
+                 "中文正文与结构/概念/过程/原因/结果类要点，不贴原文。"
+                 "material 逐条列出实际注入的块。" % (MAX_MERGE - 1)),
+        "stages": list(KP_STAGES),
+    }
+
+
+        progress.begin("整理知识点：%s（doc#%d）" % (est.get("title") or "", doc_id),
+                       files_total=1)
+        _stage(0, note="读取 logs/outline 与真库块")
+        with _STATE_LOCK:
+            _STATE.update({"running": True, "doc_id": int(doc_id), "kp_done": len(recs),
+                           "kp_total": len(leaf), "cost_cny": 0.0})
+    else:
+        # 批量整理（卡 C-0038）：**不碰任何全局状态**，进度只走回调，
+        # 由 `core/kp_batch.py` 按 doc_id 分别记账，N 份并发互不覆盖。
+        _emit(on_event, {"ev": "stage", "stage": KP_STAGES[0], "stage_index": 0,
+                         "note": "读取 logs/outline 与真库块"})
+        _emit(on_event, {"ev": "begin", "kp_done": len(recs), "kp_total": len(leaf)})
+    _stage(1, note="构建窗口材料（%d 页待整理）" % len(todo), on=progress_on)
+    _emit(on_event, {"ev": "stage", "stage": KP_STAGES[1], "stage_index": 1,
+                     "note": "构建窗口材料（%d 页待整理）" % len(todo)})
+
+    extra = {"calls": 0, "tokens_in": 0, "tokens_out": 0, "cost_cny": 0.0}
+    spent = 0.0
+    status = "done"
+    err = ""
+
+    def persist() -> None:
+        doc = {"meta": _meta(est, prompt, recs, extra, status, started, excluded_note),
+               "knowledge_points": sorted(recs, key=lambda r: (r.get("pages") or [0])[0]),
+               "merge_decisions": merge_decisions(recs, est, ch)}
+        with _SAVE_LOCK:
+            _save(doc, out)
+
+    try:
+        made = 0
+            "single_pages": [int((r.get("pages") or [0])[0]) for r in not_merged],
+        },
+        "copy_check": {
+            "rule": ("整句照抄＝与材料连续相同 ≥%d 字 且 占该句 ≥%.0f%%；"
+                     "数字/专名＝输出里每个数字串与英文 token 必须能在材料里找到"
+                     % (COPY_ABS, COPY_RATIO * 100)),
+            "checked": len(recs),
+            "passed": len(recs) - len(copy_failed),
+            "failed_ids": copy_failed,
+        },
+        "cost_budget_note": "硬上限由调用方（CLI --max-cost / 看板）传入，见 budget_cny",
+        "budget_cny": float(est.get("budget_cny") or 0.0),
+        "cost_cny": cost,
+        "usage_total": {"calls": len(recs), "tokens_in": ti, "tokens_out": to},
+        "usage_extra": dict(ex, note="重试/失败等未留在产物里的调用"),
+        "cost_cny_all_calls": round(cost + float(ex.get("cost_cny") or 0), 6),
+        "usage_total_all_calls": {
+            "calls": len(recs) + int(ex.get("calls") or 0),
+            "tokens_in": ti + int(ex.get("tokens_in") or 0),
+            "tokens_out": to + int(ex.get("tokens_out") or 0)},
+        "est_cost_cny": est.get("est_cost_cny"),
+        "elapsed_s": round(time.perf_counter() - started, 1),
+            # 本条窗口里**的那些上级页（`carry`）。
+            # ② 是 C-0048 实测出的第二种丢页：doc#12 的 p.46 挂在 p.48 名下，而
+            # p.48 是 p.47 的合并后继（游标跳过它）；doc#14 的 p.3 挂在 p.5 名下，
+            # 而 p.5 落在 p.4 的窗口里——两种都是"宿主不再单独成条，下放页就再也
+            # 没人写"。这里把它们一并拉进材料，最终是否补入由 `_gen_one` 按本条
+            # 实际 pages 决定：**宿主没被本条覆盖就不补**，所以不会重复计数。
+            own = sorted({int(x) for x in (handoff.get(p) or [])})
+            carry = sorted({pg for h in win if h != p
+                            for pg in (handoff.get(h) or [])} - set(own))
+            render_win = sorted(set(win) | set(carry) | set(own))
+            if carry:
+                log("承接候选：p.%s 的窗口含宿主页 %s，其下放页 %s 一并进材料"
+                    % (p, "、".join("p.%d" % q for q in win if q != p
+                                   and handoff.get(q)),
+                       "、".join("p.%d" % x for x in carry)))
+            materials, inv = render_materials(render_win, pages, ch, cur=p,
+# "不读结构"这条要求是可以用 grep 直接验证的（见 `tools/verify_c0049_v2_pipeline.py`）。
+#
+# 三步走：
+#   ① `read_text_pages()`    只读文本 → 按 source_ref 的页号组织
+#   ② `gen_structure_v2()`   模型生成结构树（map 分段 + reduce 归并）→ `normalize_structure_v2()` 兜底成"全页唯一归属"
+#   ③ `gen_kp_v2()`          逐结构叶节点切片写知识点（每片 ≤ KP_SPAN_PAGES 页），挂回结构节点
+#
+# 产物的三个顶层键：`meta` / `structure` / `knowledge_points`。
+
+STRUCT_PROMPT_NAME = "提示词-思维导图结构.md"
+KP_PROMPT_NAME_V2 = "提示词-知识点总结-v2.md"
+
+# 结构生成的分块参数（双阈值：谁先到就切段）。理由写在提示词真源 §0.1：
+# 90~100 页课件实测 1.3~1.8 万字，按 6000 字符切恒为 3~4 段 → 结构调用 4~5 次，与页数无关地有上界。
+STRUCT_SEG_PAGES = 12
+STRUCT_SEG_CHARS = 6000
+# 喂给结构模型的**每页字符预算**。做层级判断不需要全文（`core/outline.py` 用的是 220/260），
+# 这里给得宽一些（420）是因为 v2 还要给每页起短标题。
+STRUCT_PAGE_CHARS = 420
+STRUCT_MAX_TOKENS = 3000
+STRUCT_RETRY = 1
+STRUCT_TEMPERATURE = 0.2
+# 一条知识点最多覆盖几页（连续）。v1 的 MAX_MERGE=3 是"模型可合并的上限"，
+# v2 里它变成**管线的切片长度**：页归属由结构树唯一决定，模型不再判断合并。
+KP_SPAN_PAGES = 3
+
+
+def _prompt_path_v2(name: str, path: str | os.PathLike | None = None) -> Path:
+    """v2 提示词真源的路径：显式给定 > 本学科 `logs/knowledge/` > 项目根 `logs/knowledge/`。
+
+    # 整个窗口，但产物必须与 `pages` 对齐，窗口口径另存 merge.window_*。
+    _apply_material(rec, cover_material(inv, kp_pages), inv)
+    return rec
+
+
+# ================================================================ 卡 C-0049：v2 管线
+#
+# v2 与 v1 的根本差别只有一条，但影响整条管线：
+#
+#     v1 读 `logs/outline/<doc_id>.json`（入库管线的结构成果）来决定"哪几页是一条知识点"；
+#     v2 **只读库里的文本**，结构由本管线**自己的模型调用**生成。
+#
+# 因此 v2 段落里**不出现** outline 路径、也不 SELECT `chunks.topic` / `chunks.heading_path`：
+# "不读结构"这条要求是可以用 grep 直接验证的（见 `tools/verify_c0049_v2_pipeline.py`）。
+#
+# 三步走（卡 C-0052 起是四步，多了一步名词筛选）：
+#   ① `read_text_pages()`    只读文本 → 按 source_ref 的页号组织
+#   ② `gen_structure_v2()`   模型生成结构树（map 分段 + reduce 归并）→ `normalize_structure_v2()` 兜底成"全页唯一归属"
+#   ③ `gen_kp_v2()`          逐结构叶节点写知识点（**一个叶节点一条，页数不限**；覆盖页由模型判断、
+#                            管线仲裁留痕），挂回结构节点；每条顺带提炼 `terms`
+#   ④ `filter_terms_v2()`    名词汇总去重后做一次全局筛选（只保留该考名词解释的）
+#
+# 产物的四个顶层键：`meta` / `structure` / `terms` / `knowledge_points`。
+# （`terms` 是卡 C-0052 新增的；旧 v2 产物没有这个键，读它一律用 `.get("terms") or []`，
+#  所以新旧产物可以共存、看板按 `meta.pipeline_version` 分流。）
+
+STRUCT_PROMPT_NAME = "提示词-思维导图结构.md"
+KP_PROMPT_NAME_V2 = "提示词-知识点总结-v2.md"
+
+# 结构生成的分块参数（双阈值：谁先到就切段）。理由写在提示词真源 §0.1：
+# 90~100 页课件实测 1.3~1.8 万字，按 6000 字符切恒为 3~4 段 → 结构调用 4~5 次，与页数无关地有上界。
+STRUCT_SEG_PAGES = 12
+STRUCT_SEG_CHARS = 6000
+# 喂给结构模型的**每页字符预算**。做层级判断不需要全文（`core/outline.py` 用的是 220/260），
+# 这里给得宽一些（420）是因为 v2 还要给每页起短标题。
+STRUCT_PAGE_CHARS = 420
+STRUCT_MAX_TOKENS = 32768
+STRUCT_RETRY = 1
+STRUCT_TEMPERATURE = 0.2
+# 一条知识点最多覆盖几页（连续）。
+#   - v1 的 `MAX_MERGE=3` 是"模型可合并的上限"；
+#   - v2 里它变成**管线的切片长度**（页归属由结构树唯一决定）；
+#   - **v3（卡 C-0052）取消这个上限**：人拍板「不用强制要求每个知识点对应的 PPT 页数
+#     必须不大于三张，让 AI 自己去做判断」。所以这里置 0 = **不限**：
+#     一个结构叶节点 = 一条知识点（页数由结构那一步的模型判断）。
+# 产物的三个顶层键：`meta` / `structure` / `knowledge_points`。
+# ⚠ 卡 C-0058：顶层 `terms` **已摘出**（v3 有、v4 没有）——名词解释成了独立功能，
+#   见本文件末尾的"名词解释（独立功能）"段与 `logs/knowledge/提示词-名词解释.md`。
+#   旧 v2/v3 产物照旧可读：读 `terms` 一律用 `.get("terms") or []`，跨版本共存，
+#   看板按 `meta.pipeline_version` 分流。
+
+STRUCT_PROMPT_NAME = "提示词-思维导图结构.md"
+KP_PROMPT_NAME_V2 = "提示词-知识点总结-v2.md"
+
+# 结构生成的分块参数（双阈值：谁先到就切段）。理由写在提示词真源 §0.1：
+# 90~100 页课件实测 1.3~1.8 万字，按 6000 字符切恒为 3~4 段 → 结构调用 4~5 次，与页数无关地有上界。
+STRUCT_SEG_PAGES = 12
+STRUCT_SEG_CHARS = 6000
+# 喂给结构模型的**每页字符预算**。做层级判断不需要全文（`core/outline.py` 用的是 220/260），
+# 这里给得宽一些（420）是因为 v2 还要给每页起短标题。
+STRUCT_PAGE_CHARS = 420
+STRUCT_MAX_TOKENS = 32768
+STRUCT_RETRY = 1
+STRUCT_TEMPERATURE = 0.2
+# 一条知识点最多覆盖几页（连续）。
+#   - v1 的 `MAX_MERGE=3` 是"模型可合并的上限"；
+#   - v2 里它变成**管线的切片长度**（页归属由结构树唯一决定）；
+#   - **v3（卡 C-0052）取消这个上限**：人拍板「不用强制要求每个知识点对应的 PPT 页数
+#     必须不大于三张，让 AI 自己去做判断」。所以这里置 0 = **不限**：
+#     一个结构叶节点 = 一条知识点（页数由结构那一步的模型判断）。
+#     仅保留一个**调用可行性软上限** `KP_MATERIAL_CHARS_MAX`：材料超过它时按连续页
+#     再切（逐条记 `split_reason`）——这不是"页数限制"，是防单次调用炸上下文。
+KP_SPAN_PAGES = 0
+# 单条知识点注入材料的字符软上限（约 15000 token）。doc#5 实测整份 34 页材料 ≈ 4.0 万字，
+# 单叶节点远小于这个数；只有模型把一整门课塞进一个叶节点时才会触发切分。
+KP_MATERIAL_CHARS_MAX = 24000
+# 写知识点的 max_tokens：思考链要占大头（实测 8 页一条用掉 10638 个 reasoning token），
+# 65536 给正文留足余量；它是上限不是预留用量，花多少按实际生成算。
+# 写知识点的 max_tokens：思考链要占大头（实测 8 页一条用掉 10638 个 reasoning token），
+# 65536 给正文留足余量；它是上限不是预留用量，花多少按实际生成算。
+KP_MAX_TOKENS = 65536
+# 名词筛选的 max_tokens：输入只有名词清单，输出只有 keep 名单。
+# ⚠ 卡 C-0052 实测踩坑：**思考模式下 8192 不够**。doc#5 试点第一次跑，75 个候选名词
+# （输入 4721 token）的两次调用都把 8192 全用在思维链上（reasoning_tokens=8192、
+# 正文 raw_chars=0）→ JSON 解析失败 → 筛选降级为"保留全部 75 个"。
+# 所以这里给到 32768，并在 `filter_terms_v2()` 里加了"被打满就加倍重试一次"的兜底。
+# 卡 C-0058 起这个常量**只服务独立的名词解释功能**（提炼与筛选两步都用它），
+# 知识点总结管线已经不用了。
+TERMS_MAX_TOKENS = 32768
+# dry-run 的思考 token 上界系数：思维链 token ≈ 该次输入 token 的这个倍数。
+# 实测（2026-09-27）8 页材料一条：入 8937 → reasoning 10638（≈1.19 倍），
+# 上界取 1.5 留余量。它只服务 `estimate_v2()` 的预估，不参与真实记账。
+REASON_RATIO = 1.5
+
+
+def _prompt_path_v2(name: str, path: str | os.PathLike | None = None) -> Path:
+    """v2 提示词真源的路径：显式给定 > 本学科 `logs/knowledge/` > 项目根 `logs/knowledge/`。
+
+# 实测（2026-09-27）8 页材料一条：入 8937 → reasoning 10638（≈1.19 倍），
+# 上界取 1.5 留余量。它只服务 `estimate_v2()` 的预估，不参与真实记账。
+REASON_RATIO = 1.5
+
+
+def _prompt_path_v2(name: str, path: str | os.PathLike | None = None) -> Path:
+    """v2 提示词真源的路径：显式给定 > 本学科 `logs/knowledge/`
+    > 项目根 `logs/knowledge/` > **随包分发的资源目录**（卡 C-0073）。
+
+    与 `default_prompt_file()` 同一套"本学科优先、根目录兜底"的规矩：提示词是**管线资产**，
+    新学科一出生自己的 `logs/knowledge/` 里没有它，不能因此就跑不动。
+
+    最后那一级只在**打包后**才有区别：exe 同级那份被用户删了，
+    就从 `config.BUNDLE_ROOT`（`sys._MEIPASS`）里读随包带的那份。
+    源码模式下两个根相同，行为逐字不变。
+    """
+    if path:
+        return Path(path)
+# ⚠ 卡 C-0052 实测踩坑：**思考模式下 8192 不够**。doc#5 试点第一次跑，75 个候选名词
+# （输入 4721 token）的两次调用都把 8192 全用在思维链上（reasoning_tokens=8192、
+# 正文 raw_chars=0）→ JSON 解析失败 → 筛选降级为"保留全部 75 个"。
+# 所以这里给到 32768，并在 `filter_terms_v2()` 里加了"被打满就加倍重试一次"的兜底。
+# 卡 C-0058 起这个常量**只服务独立的名词解释功能**（提炼与筛选两步都用它），
+# 知识点总结管线已经不用了。
+TERMS_MAX_TOKENS = 32768
+# dry-run 的思考 token 上界系数：思维链 token ≈ 该次输入 token 的这个倍数。
+# 实测（2026-09-27）8 页材料一条：入 8937 → reasoning 10638（≈1.19 倍），
+# 上界取 1.5 留余量。它只服务 `estimate_v2()` 的预估，不参与真实记账。
+REASON_RATIO = 1.5
+
+
+def _prompt_path_v2(name: str, path: str | os.PathLike | None = None) -> Path:
+    """v2 提示词真源的路径：显式给定 > 本学科 `logs/knowledge/`
+    > 项目根 `logs/knowledge/` > **随包分发的资源目录**（卡 C-0073）。
+
+    与 `default_prompt_file()` 同一套"本学科优先、根目录兜底"的规矩：提示词是**管线资产**，
+    新学科一出生自己的 `logs/knowledge/` 里没有它，不能因此就跑不动。
+
+    最后那一级只在**打包后**才有区别：exe 同级那份被用户删了，
+    就从 `config.BUNDLE_ROOT`（`sys._MEIPASS`）里读随包带的那份。
+    源码模式下两个根相同，行为逐字不变。
+    """
+    if path:
+        return Path(path)
+    own = config.LOG_DIR / "knowledge" / name
+    if own.exists():
+        return own
+    root = config.ROOT / "logs" / "knowledge" / name
+    if root.exists():
+        return root
+    return config.BUNDLE_ROOT / "logs" / "knowledge" / name
+
+
+def default_struct_prompt_file() -> Path:
+    return _prompt_path_v2(STRUCT_PROMPT_NAME)
+
+
+def default_kp_prompt_file_v2() -> Path:
+    return _prompt_path_v2(KP_PROMPT_NAME_V2)
+
+
+def _load_md_prompts(path: Path, tags: list, optional: list = ()) -> dict:
+    """从一个提示词真源里逐字提取若干代码块，并算出文件 sha256。
+
+    `optional` 里的块找不到时给空串（见 `_grab_opt`）。
+    """
+    blob = path.read_bytes()
+    md = blob.decode("utf-8")
+    out: dict = {"path": str(path), "sha256": hashlib.sha256(blob).hexdigest()}
+    for tag, key in tags:
+        out[key] = _grab(md, tag, path)
+    for tag, key in optional:
+        out[key] = _grab_opt(md, tag)
+    out["chars"] = sum(len(out[k]) for _t, k in tags)
+    out["optional_chars"] = sum(len(out[k]) for _t, k in optional)
+    return out
+
+
+def load_struct_prompts(path: str | os.PathLike | None = None) -> dict:
+    """结构生成的四个提示词块（map 的 sys/user + reduce 的 sys/user）。"""
+    p = _prompt_path_v2(STRUCT_PROMPT_NAME, path)
+    return _load_md_prompts(p, [("PROMPT-STRUCT-SYS", "sys"),
+                                ("PROMPT-STRUCT-USER", "user"),
+                                ("PROMPT-STRUCT-MERGE-SYS", "merge_sys"),
+                                ("PROMPT-STRUCT-MERGE-USER", "merge_user")])
+
+
+def load_kp_prompts_v2(path: str | os.PathLike | None = None) -> dict:
+    """知识点生成的提示词块（继承 v1 的 SYS/USER 标签名，便于两边逐字比对）。
+
+    卡 C-0052 曾经在这里追加两个**可选**块（`PROMPT-TERMS-SYS` / `PROMPT-TERMS-USER`）。
+    卡 C-0058 把它们**摘出**了：真源里已不存在这两个块，这里也不再有 `optional=`
+    ——这条管线**只出知识点**。名词那两块现在由 `load_terms_prompts()` 从
+    `提示词-名词解释.md` 里取（独立功能，见文件末尾那一段）。
+    """
+    p = _prompt_path_v2(KP_PROMPT_NAME_V2, path)
+    return _load_md_prompts(p, [("PROMPT-SYS", "sys"), ("PROMPT-USER", "user")])
+
+        blocks: dict = {}
+def doc_title_v2(doc_id: int, db_path: str | os.PathLike | None = None) -> str:
+    """v2 的课件名：**只查库里的 `documents.title`**（不读 outline）。
+
+    ⚠ 卡 C-0049 实测踩到过：v1 的 `doc_title()` 会先读 `logs/outline/<id>.json` 取
+    `deck` 兜底——v2 若直接复用它，就仍然依赖入库结构（离线守卫反证当场抓到）。
+    所以 v2 另起一个：读库读不到就用 `文档 <id>`，绝不回头找 outline。
+    """
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    title = ""
+    try:
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT title FROM documents WHERE id=?",
+                               (int(doc_id),)).fetchone()
+            title = str(row[0] or "").strip() if row else ""
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        title = ""
+    return title or ("文档 %d" % int(doc_id))
+
+
+# ---------------------------------------------------------------- 只读文本
+def read_text_pages(doc_id: int, db_path: str | os.PathLike | None = None) -> dict:
+    """读这份课件的**文本**，按 `source_ref` 的页号组织。**v2 的唯一数据入口。**
+
+    ⚠ 卡 C-0049 的硬要求，这个 SQL 是判据：只 SELECT `id / ord / source_ref / text`——
+    `chunks.topic`、`chunks.heading_path` 是入库结构派生的字段，一个字都不读。
+    `logs/outline/<doc_id>.json` 也不读（本函数根本不知道它的存在）。
+
+    返回：
+      blocks[page] = [块…]（**按起始页归档**，与 v1 `read_chunks()` 同口径）
+        块 = {chunk_id, ord, kind, ref, page, pages, chars, text}
+      cover[page]   = 覆盖该页的块 id（跨页块 `p.12-16` 会落在 12..16 每一页上）
+      figrows[page] = {no_info}
+      pages_all     = [1..max_page]，**含中间没有块的空页**（覆盖率的分母就是这个）
+
+    `source_ref` 解析不出页码的块**直接报错**，绝不静默丢块（同 v1）。
+    """
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        blocks: dict = {}
+        cover: dict = {}
+        bad = []
+        n_blocks = 0
+        for r in conn.execute("SELECT id, ord, source_ref, text FROM chunks "
+                              "WHERE doc_id=? ORDER BY ord, id", (int(doc_id),)):
+            cid = int(r["id"])
+            ref = (r["source_ref"] or "").strip()
+            parsed = _parse_ref(ref)
+            if parsed is None:
+                bad.append((cid, ref))
+                continue
+            a, b, is_fig = parsed
+            t = r["text"] or ""
+            blocks.setdefault(a, []).append({
+                "chunk_id": cid, "ord": int(r["ord"] or 0),
+                "kind": "图片理解" if is_fig else "正文块",
+                "ref": ("p.%d" % a if a == b else "p.%d-%d" % (a, b))
+                       + (" 图" if is_fig else ""),
+                "page": a, "pages": list(range(a, b + 1)),
+                "chars": len(t), "text": t})
+            for p in range(a, b + 1):
+                cover.setdefault(p, []).append(cid)
+            n_blocks += 1
+        figrows: dict = {}
+        for r in _figure_rows(conn, doc_id, "page, no_info"):
+            figrows[int(r["page"])] = {"no_info": int(r["no_info"] or 0)}
+    finally:
+        conn.close()
+    if bad:
+        raise RuntimeError("有 %d 个块的 source_ref 解析不出页码（拒绝静默丢块）：%s"
+                           % (len(bad), bad[:5]))
+    max_page = max(cover) if cover else 0
+    return {"blocks": blocks, "cover": cover, "figrows": figrows,
+            "max_page": max_page, "n_blocks": n_blocks,
+            "pages_all": list(range(1, max_page + 1))}
+
+
+def page_text_for_structure(p: int, ch: dict, cap: int = STRUCT_PAGE_CHARS) -> str:
+    """该页喂给**结构模型**的文本（截断到 `cap` 字符，截断处标 `……`）。"""
+    bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
+    parts = []
+    for b in bs:
+        t = re.sub(r"\s+", " ", b["text"] or "").strip()
+        if t:
+            parts.append("〔%s〕%s" % (b["kind"], t))
+    s = " ".join(parts)
+    if len(s) > cap:
+        s = s[:cap] + "……"
+    return s
+
+
+def plan_structure_segments(ch: dict) -> list:
+    """把全页切成若干段（map 的输入）：**页数与字符数双阈值，谁先到就切**。
+
+    - 字符数按"该段各页喂给结构模型的文本"算（每页先截断到 `STRUCT_PAGE_CHARS`）；
+    - 空页（没有块）也占一个页位，字符按 0 算——它同样是"这一段的第几页"；
+    - 单页自身就超阈值时它独占一段（段长 1），不会出现空段或死循环。
+
+    返回 [{index, a, b, pages, chars}]（升序、无缝覆盖 `pages_all`）。
+    """
+    pages = list(ch["pages_all"])
+    if not pages:
+        return []
+    segs: list = []
+    cur: list = []
+    cur_chars = 0
+    for p in pages:
+        t = page_text_for_structure(p, ch)
+        n = len(t)
+        if cur and (len(cur) >= STRUCT_SEG_PAGES
+                    or cur_chars + n > STRUCT_SEG_CHARS):
+            segs.append(cur)
+            cur, cur_chars = [], 0
+        cur.append(p)
+        cur_chars += n
+    if cur:
+        segs.append(cur)
+    return [{"index": i + 1, "a": s[0], "b": s[-1], "pages": list(s),
+             "chars": sum(len(page_text_for_structure(p, ch)) for p in s)}
+            for i, s in enumerate(segs)]
+
+
+def render_struct_material(seg: dict, ch: dict) -> str:
+    figrows = ch["figrows"]
+    lines = []
+    for p in seg["pages"]:
+        lines.append("===== 第 %d 页 =====" % p)
+        if (figrows.get(p) or {}).get("no_info"):
+            lines.append("（注：本页图片已被判定为\u201c无知识性图示\u201d，"
+                         "下面的图片理解只是占位，不含知识内容）")
+        t = page_text_for_structure(p, ch)
+        lines.append(t or "（本页没有文本）")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def render_struct_titles(pages: list, titles: dict, ch: dict) -> str:
+    out = []
+    for p in pages:
+        out.append("p.%-3d %s" % (p, titles.get(p) or ("（第 %d 页）" % p)))
+    return "\n".join(out)
+
+
+def render_struct_drafts(drafts: list) -> str:
+    out = []
+    for d in drafts:
+        out.append("〔第 %d~%d 页〕" % (d["a"], d["b"]))
+        for sec in d["sections"]:
+            out.append("- %s" % sec["name"])
+            for kid in (sec.get("children") or []):
+                out.append("  · %s (p.%s)" % (kid["name"], _pages_label(kid.get("pages"))))
+        if not d["sections"]:
+            out.append("- （这一段没有给出章节草稿）")
+    return "\n".join(out)
+
+
+def _pages_label(pages) -> str:
+    """页列表 → `1-3、7` 这样的紧凑标签（只看连续性，不改顺序）。"""
+    ps = sorted({int(x) for x in (pages or [])})
+    if not ps:
+        return ""
+    out, a, b = [], ps[0], ps[0]
+    for x in ps[1:]:
+        if x == b + 1:
+            b = x
+            continue
+        out.append(str(a) if a == b else "%d-%d" % (a, b))
+        a = b = x
+    out.append(str(a) if a == b else "%d-%d" % (a, b))
+    return "、".join(out)
+
+
+# ---------------------------------------------------------------- 并发闸门（卡 C-0063）
+#
+# 卡 C-0063（2026-10-08）按人拍板「课件入库和总结知识点的用时太久了」做**单份整理
+# 管线内部并发**（C-0062 报告 §9.1 第一步）。并发的上限不能只看本管线自己：
+#   - `core/pipeline_pool.py`（多份之间·**入库**）默认 2、上限 4；
+#   - `core/kp_batch.py`（多份之间·**整理**）默认 2、上限 4；
+#   - 本管线（单份内部）默认 4、可配 1~8。
+# 三者是**乘法叠加**（C-0062 报告 §6.3：`kp_batch=4 × 单份内部=4 = 16 路`，
+# 正好压在实测边界线上）。所以这里放的是**进程级共享闸门**：
+#
+#   `_MODEL_GATE` 是一把 `threading.BoundedSemaphore`，单位 = **一次在飞的模型调用**。
+#     - `_v2_call()` 每次真调用前后 acquire/release（**调用级**，最细的粒度）；
+#     - `core/pipeline_pool.py::_run_one()` 每份入库任务持有一个（**份级**：逐页识图
+#       的调用在 `core/figures.py` 里，那是另一张卡的范围，本卡不动那个文件）；
+#     - `core/kp_batch.py::start()` 把份数夹到不超过闸门值（份 × 份内线程全挤在
+#       同一把闸门前排队没有意义，只会让进度条长时间不动）。
+#   三者**指向同一个对象**，所以"进程内在飞的模型调用数 ≤ 闸门值"永远成立
+#   （证据：`model_gate_stats()["peak_inflight"] <= ["limit"]`）。
+#
+# ⚠ **不存在"持槽等槽"的死锁**：入库那层持槽时内部**不再取槽**（figures 不经过
+# 闸门），整理那层只在调用级取槽、份级不持槽——取槽的嵌套深度恒为 1。
+#
+# 环境变量（与 `core/pipeline_pool.py::KB_INGEST_WORKERS` 的既有做法对齐）：
+#   - `KP_INNER_WORKERS`：单份课件**内部**并发数，默认 4，夹到 1..8；
+#   - `KP_MODEL_GATE`：进程级总闸门值；**不设时取 `KP_INNER_WORKERS`**（默认也是 4），
+#     夹到 1..8。想单独控制总闸门时用它。
+INNER_WORKERS_ENV = "KP_INNER_WORKERS"
+MODEL_GATE_ENV = "KP_MODEL_GATE"
+INNER_WORKERS_DEFAULT = 4
+WORKERS_MIN = 1
+WORKERS_MAX = 8
+
+_GATE_LOCK = threading.Lock()
+_GATE: dict = {"sem": None, "limit": 0}
+# 验收用的计数器（**只活在进程里，不写进产物**）：在飞峰值 / 累计取槽次数 / 排队次数。
+_GATE_STATS: dict = {"inflight": 0, "peak_inflight": 0, "acquired": 0, "waited": 0}
+
+
+def _clamp_workers(n, default: int = INNER_WORKERS_DEFAULT) -> int:
+    """把并发数夹到 1..8，非法值退回 `default`。"""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return default
+    return max(WORKERS_MIN, min(WORKERS_MAX, n))
+
+
+def inner_workers() -> int:
+    """**单份课件内部**的并发数：`KP_INNER_WORKERS` 优先，默认 4，夹到 1..8。
+
+    `1` 是**安全的回退开关**：此时本管线走与改造前逐字相同的串行路径
+    （不建线程池、不改调用顺序），产物逐字段等价。
+    """
+    return _clamp_workers(os.environ.get(INNER_WORKERS_ENV, INNER_WORKERS_DEFAULT))
+
+
+def _gate_value_from_env() -> int:
+    """闸门值：`KP_MODEL_GATE` 优先，没设则跟随 `KP_INNER_WORKERS`，都没有就是 4。"""
+    raw = os.environ.get(MODEL_GATE_ENV)
+    if raw is None or str(raw).strip() == "":
+        raw = os.environ.get(INNER_WORKERS_ENV, INNER_WORKERS_DEFAULT)
+    return _clamp_workers(raw)
+
+
+def _gate():
+    """惰性建闸门（进程内**唯一一份**）→ 返回 `(sem, limit)`。
+
+    惰性是因为环境变量要在"用之前"才读：进程起来后 `os.environ` 里再塞
+    `KP_INNER_WORKERS` 也来得及（测试与看板接线都吃这个便利）。
+    """
+    with _GATE_LOCK:
+        if _GATE["sem"] is None:
+            _GATE["limit"] = _gate_value_from_env()
+            _GATE["sem"] = threading.BoundedSemaphore(_GATE["limit"])
+        return _GATE["sem"], int(_GATE["limit"])
+
+
+def configure_model_gate(n=None) -> int:
+    """重设闸门值（**只在没有在飞调用时**用：进程启动接线 / 验收脚本）。
+
+    `n=None` 表示按当前环境变量重算。返回新的闸门值。
+    """
+    with _GATE_LOCK:
+        limit = _gate_value_from_env() if n is None else _clamp_workers(n)
+        _GATE["limit"] = limit
+        _GATE["sem"] = threading.BoundedSemaphore(limit)
+        _GATE_STATS.update({"inflight": 0, "peak_inflight": 0, "acquired": 0, "waited": 0})
+        return limit
+
+
+def model_gate_limit() -> int:
+    """当前进程级闸门值（= 允许同时在飞的模型调用数上限）。"""
+    return _gate()[1]
+
+
+def model_gate_stats() -> dict:
+    """闸门快照（验收证据）：{limit, inflight, peak_inflight, acquired, waited}。"""
+    with _GATE_LOCK:
+        d = dict(_GATE_STATS)
+        d["limit"] = int(_GATE["limit"])
+    return d
+
+
+@contextlib.contextmanager
+def model_slot(kind: str = ""):
+    """**进程级模型调用配额**：进入时抢一个槽，退出时还回去。
+
+    所有真发起模型调用的地方都要经过它（本文件的 `_v2_call`、`core/pipeline_pool.py`
+    的每份入库任务）。抢不到就排队等——这就是"总在飞数 ≤ 闸门值"的全部实现。
+    """
+    sem, _limit = _gate()
+    t0 = time.perf_counter()
+    sem.acquire()
+    waited = (time.perf_counter() - t0) > 0.001
+    with _GATE_LOCK:
+        _GATE_STATS["inflight"] += 1
+        _GATE_STATS["acquired"] += 1
+        if waited:
+            _GATE_STATS["waited"] += 1
+        if _GATE_STATS["inflight"] > _GATE_STATS["peak_inflight"]:
+            _GATE_STATS["peak_inflight"] = _GATE_STATS["inflight"]
+    try:
+        yield
+    finally:
+        with _GATE_LOCK:
+            _GATE_STATS["inflight"] -= 1
+        sem.release()
+
+
+# ---------------------------------------------------------------- 页预约（卡 C-0063）
+#
+# ★ 本卡最关键的改动：`claimed`（"页 → 收录它的知识点 id"）**必须在模型调用之前**
+# 就占好，不能等调用返回再写。
+#
+# 依据（C-0062 报告 §7.1 的对抗实验，四种写法实测）：
+#   | 写法                                        | overlap_pages |
+#   |---|---|
+#   | 改造前：读在调用前、写在返回后（**无锁**）      | [10, 11] ❌   |
+#   | 同样写法**加锁**                             | [10, 11] ❌   |
+#   | **调用前预约**（本函数）                      | [] ✅         |
+# 根因：那对"读-改-写"**跨了整个模型调用**（10~88 秒），锁只保护毫秒级临界区，
+# 保护不了"调用期间别人也来读"。所有权必须在并发窗口打开之前定下来。
+#
+# 这两个函数做成**模块级**（不是 `build_v2()` 里的闭包）是为了可被对抗实验直接
+# 调用：验收要证明的正是"预约 → overlap 为空 / 不预约 → overlap 非空"。
+def claim_pages(claimed: dict, claimed_lock, kp_id, pages) -> list:
+    """预约 `pages`：返回**本次实际预约到的页**。
+
+    已被**别人**占着的页不抢、也不报错——交给 `gen_kp_v2()` 的仲裁如实记进
+    `pages_conflict_dropped`（先到先得这条规则本身没变，只是"先到"从
+    "先返回"改成"先预约"）。
+    """
+    got: list = []
+    cm = claimed_lock if claimed_lock is not None else contextlib.nullcontext()
+                    "tokens_in": usage["tokens_in"], "tokens_out": usage["tokens_out"],
+                    "reasoning_tokens": usage["reasoning_tokens"],
+                    "cost_cny": usage["cost_cny"], "raw_chars": len(raw), "error": err})
+        calls.append(rec)
+        if not err:
+            return {"ok": True, "parsed": parsed, "usage": usage, "raw": raw,
+                    "model": rec["model"], "error": "", "call_index": len(calls) - 1}
+        last = "JSON 解析失败：%s" % err
+        log("  ★输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, err))
+        if attempt < retry:
+                    "reasoning_tokens": usage["reasoning_tokens"],
+                    "cost_cny": usage["cost_cny"], "raw_chars": len(raw), "error": err})
+        last_idx = _append_call(calls, rec, call_no=call_no, kp_seq=kp_seq)
+        if not err:
+            return {"ok": True, "parsed": parsed, "usage": usage, "raw": raw,
+                    "model": rec["model"], "error": "", "call_index": last_idx,
+                    "call": rec}
+        last = "JSON 解析失败：%s" % err
+        log("  ★输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, err))
+        if attempt < retry:
+            time.sleep(1)
+    return {"ok": False, "parsed": {}, "usage": {}, "raw": "", "model": MODEL,
+            "error": last, "call_index": len(calls) - 1}
+
+
+    node_pages: dict = {}
+    for p, nid in owner.items():
+        node_pages.setdefault(nid, []).append(int(p))
+    for nid in node_pages:
+        node_pages[nid] = sorted(node_pages[nid])
+    for nd in nodes:
+        nd["pages"] = node_pages.get(nd["id"], [])
+        nd["is_leaf"] = not nd["children_ids"]
+    if conflicts:
+        log("结构兜底：%d 处页码冲突（详见产物 meta.coverage.structure_conflicts）"
+            % len(conflicts))
+    if filled:
+        log("结构兜底：%d 页模型没放进叶节点，已按就近规则补入（详见 structure_filled）"
+            % len(filled))
+    if fallback:
+        log("★结构兜底：%s" % fallback["reason"])
+def _append_call(calls: list, rec: dict, *, call_no: int = 0, kp_seq: bool = False) -> int:
+    """把一条调用记录**在锁内** append 进 `calls`，返回它自己的下标。
+
+    为什么要有这个函数（卡 C-0063）：改造前是 `calls.append(rec)` 之后用
+    `len(calls) - 1` 反推下标。单线程下这两步之间没别人，反推成立；并发下
+    另一个线程可能正好挤在中间，反推出来的下标就指向**别人的**记录。
+    （C-0062 报告 §10 第 10 条：写了对抗实验但 0 次错配，属"理论不成立、
+    实际极难触发"。既然本卡正在改这段代码，顺手使它正确。）
+
+    `kp_no` 也在这里分配：`kp_seq=True` → 取"锁内的 calls 长度 + 1"，
+    并发下唯一且单调；显式传 `call_no` 的老调用方语义不变（记它给的值）。
+    """
+    with _CALLS_LOCK:
+        if kp_seq:
+            rec["kp_no"] = len(calls) + 1
+        elif call_no:
+            rec["kp_no"] = int(call_no)
+        calls.append(rec)
+        return len(calls) - 1
+
+
+def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int,
+             retry: int, log, note: str = "", temperature: float = TEMPERATURE,
+             call_no: int = 0, run_no: int = 1, thinking: bool = THINKING_V2,
+             reasoning_effort: str = REASONING_EFFORT, kp_seq: bool = False) -> dict:
+    """调一次模型，**成功与失败都逐次记账**（`calls` 直接进产物 `meta.calls`）。
+
+    记账字段：run（第几轮运行）/ kind（这一步是谁）/ attempt（第几次试）/
+    tokens_in/out / cost_cny / elapsed_s / ok / error，另有卡 C-0052 追加的
+    `thinking`（是否开推理）、`reasoning_effort`（透传的强度档）、
+    `reasoning_tokens`（思考链占用的 completion token，取自
+    `usage.completion_tokens_details.reasoning_tokens`）。失败轮也占一行——
+    "失败不静默"这条底线靠它落地。
+
+    ⚠ `calls` 是**跨轮累积**的：续跑或 `--force` 重跑时，上一轮的记录一并带过来
+    （见 `build_v2()`），所以产物 `meta.calls` 是这份产物**从头到现在的全部调用**，
+    `meta.cost_cny_all_calls` 也就是它真正的累计花费。
+
+    返回里除了老字段，另有（卡 C-0063）：
+      - `call`：**这一次调用自己的记账对象**（并发下调用方拿它取 `elapsed_s`，
+        不再用 `calls[call_index]` 二次索引）；
+      - `call_index`：同一把锁里算出来的下标（并发下也指向 `call` 本人）；
+      - `kp_seq=True` 时，`kp_no` 由 `_append_call()` **在锁内**分配（唯一、单调）；
+        显式传 `call_no` 的老调用方行为不变。
+    """
+    from . import chat  # 延迟 import：dry-run 时不需要 key
+
+    last = ""
+    last_idx = -1
+    for attempt in range(retry + 1):
+        t0 = time.perf_counter()
+        rec = {"run": int(run_no), "kind": kind, "attempt": attempt + 1, "note": note,
+               "model": MODEL, "max_tokens": int(max_tokens),
+               "thinking": bool(thinking),
+               "reasoning_effort": (str(reasoning_effort) if thinking else ""),
+               "chars_in": len(sys_p) + len(user_p),
+               "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        try:
+            # 卡 C-0063：**进程级闸门**——真调用期间持一个槽（见文件上方的
+            # "并发闸门"小节）。重试的每一次也算一次独立调用，各占各的槽。
+            with model_slot(kind):
+                r = chat.chat_once([{"role": "system", "content": sys_p},
+                                    {"role": "user", "content": user_p}],
+                                   model=MODEL, max_tokens=max_tokens, thinking=thinking,
+                                   temperature=temperature, timeout=TIMEOUT,
+                                   reasoning_effort=(reasoning_effort if thinking else None))
+        except Exception as e:  # noqa: BLE001
+            last = "%s: %s" % (type(e).__name__, e)
+            rec.update({"ok": False, "error": last,
+                        "elapsed_s": round(time.perf_counter() - t0, 1),
+                        "tokens_in": 0, "tokens_out": 0, "reasoning_tokens": 0,
+                        "cost_cny": 0.0, "raw_chars": 0})
+            last_idx = _append_call(calls, rec, call_no=call_no, kp_seq=kp_seq)
+            log("  ★调用失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
+            if attempt < retry:
+                time.sleep(2 * (attempt + 1))
+            continue
+        u = r.get("usage") or {}
+        usage = {"tokens_in": int(u.get("prompt_tokens") or 0),
+                 "tokens_out": int(u.get("completion_tokens") or 0),
+                 "total_tokens": int(u.get("total_tokens") or 0),
+                 "reasoning_tokens": _reasoning_tokens(u),
+                 "cost_cny": cost_of(u)}
+        raw = r["content"] or ""
+        parsed = parse_json(raw)
+        err = str(parsed.get("_parse_error") or "")
+        rec.update({"ok": not err, "model": r.get("model") or MODEL,
+                    "elapsed_s": round(time.perf_counter() - t0, 1),
+                    "tokens_in": usage["tokens_in"], "tokens_out": usage["tokens_out"],
+                    "reasoning_tokens": usage["reasoning_tokens"],
+                    "cost_cny": usage["cost_cny"], "raw_chars": len(raw), "error": err})
+        last_idx = _append_call(calls, rec, call_no=call_no, kp_seq=kp_seq)
+        if not err:
+            return {"ok": True, "parsed": parsed, "usage": usage, "raw": raw,
+                    "model": rec["model"], "error": "", "call_index": last_idx,
+                    "call": rec}
+        last = "JSON 解析失败：%s" % err
+        log("  ★输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, err))
+        if attempt < retry:
+            time.sleep(1)
+    return {"ok": False, "parsed": {}, "usage": {}, "raw": "", "model": MODEL,
+            "error": last, "call_index": last_idx, "call": None}
+
+
+def _reasoning_tokens(usage: dict) -> int:
+    """从 usage 里取思考链 token（官方放在 `completion_tokens_details` 下）。
+
+    兜底认三处写法（`reasoning_tokens` 顶层 / `completion_tokens_details` /
+    `output_tokens_details`），取不到记 0——**不猜**，宁可显示 0 也不编一个数。
+    """
+    if not isinstance(usage, dict):
+        return 0
+    for holder in (usage, usage.get("completion_tokens_details"),
+                   usage.get("output_tokens_details")):
+        if isinstance(holder, dict):
+            v = holder.get("reasoning_tokens")
+            try:
+                if v is not None:
+                    return int(v)
+            except (TypeError, ValueError):
+    leaves = [n for n in nodes if not n["children_ids"]]
+    known = set(int(x) for x in pages_all)
+
+    owner: dict = {}
+    conflicts: list = []
+    for nd in leaves:
+        for p in nd["pages"]:
+            if p not in known:
+                conflicts.append({"page": p, "kept": "", "dropped": nd["id"],
+                                  "reason": "页码越出 1~%d，已丢弃" % (max(known) if known else 0)})
+                continue
+            if p in owner:
+                conflicts.append({"page": p, "kept": owner[p], "dropped": nd["id"],
+                                  "reason": "同一页被多个叶节点声明，保留先声明的那个"})
+                continue
+            owner[p] = nd["id"]
+    filled: list = []
+    for p in sorted(known):
+        if p in owner:
+            continue
+        prev_pages = [q for q in owner if q < p]
+        nxt_pages = [q for q in owner if q > p]
+        if prev_pages:
+            nid = owner[max(prev_pages)]
+            why = "结构模型没把这一页放进任何叶节点；归给它前面最近的已归属页 p.%d 所在的节点" % max(prev_pages)
+        elif nxt_pages:
+            nid = owner[min(nxt_pages)]
+    """由**结构叶节点**推出知识点任务清单。
+
+    卡 C-0052 起：**一个结构叶节点 = 一条知识点**（人拍板解除"每条 ≤3 页"）。
+    `span` 留给旧口径调用（>0 时才按连续段切片），默认 0 = 不限。
+
+    页归属仍来自 `page_owner`（**全页唯一**），所以：
+      - 同一页不可能落到两条知识点（`overlap_pages` 恒为空，可机器判定）；
+      - 每一页都在且只在一个任务里（覆盖率 = 100%，除非预算/失败提前停）。
+
+    唯一的例外是**调用可行性软上限**：该叶节点的材料字符数超过 `chars_max`
+    （默认 24000 字 ≈ 15000 token）时，按**连续页**边界再切一条，
+    每片带 `split_reason`。这不是"页数限制"，是防止单次调用把上下文撑爆。
+    """
+    tasks: list = []
+    for nd in nodes:
+        if not nd.get("is_leaf"):
+            continue
+        ps = sorted(p for p, nid in page_owner.items() if nid == nd["id"])
+        pieces: list = []
+        for run in _split_runs(ps):
+            if span and span > 0:               # 旧口径（v2）：按页数切片
+                for i in range(0, len(run), span):
+                    part = run[i:i + span]
+                    pieces.append((part, sum(_page_material_chars(p, ch) for p in part),
+                                   "v2 口径：叶节点内连续 ≤%d 页切片" % span))
+                continue
+            cur: list = []
+            cur_chars = 0
+            for p in run:
+                n = _page_material_chars(p, ch)
+                if ch is not None and cur and cur_chars + n > chars_max:
+                    pieces.append((cur, cur_chars,
+                                   "材料 %d 字超过单次调用软上限 %d 字，按连续页切开"
+                                   % (cur_chars + n, chars_max)))
+                    cur, cur_chars = [], 0
+                cur.append(p)
+                cur_chars += n
+            if cur:
+                pieces.append((cur, cur_chars, ""))
+        for k, (pages_, chars_, why) in enumerate(pieces, 1):
+            t = {"kp_id": "KP-%s-%d" % (nd["id"], k), "node_id": nd["id"],
+                 "node_name": nd["name"], "node_path": list(nd["path"]),
+def normalize_structure_v2(root: dict | None, pages_all: list, deck: str,
+                           log=print) -> dict:
+    """把模型给的结构树**兜底**成"每一页唯一归属一个叶节点"。
+
+    三步（每一步都留痕，绝不静默）：
+      1. **叶节点先到先得**占页；一页被两个叶节点声明 → 后来的记 `conflicts`；
+      2. 谁都没声明的页（含空页）→ 归给**声明了它之前最近页的那个叶节点**，
+         逐页记 `filled`（附原因）；
+      3. 一个叶节点都没有（模型输出跑偏）→ 退化成"整份一个节点"，记 `fallback`。
+
+    返回 {root, nodes, page_owner, node_pages, conflicts, filled, fallback,
+          n_nodes, n_leaves, max_level}。
+    """
+    clean = _clean_section(root) if root else None
+    fallback = None
+    if clean is None or (not clean.get("children") and not clean.get("pages")):
+        fallback = {"reason": "结构模型没有给出可用的树（没有节点 / 没有叶节点页码），"
+                              "退化为单节点结构：整份课件一个节点",
+                    "node_name": deck or "整份课件"}
+        clean = {"name": (deck or "整份课件")[:24], "children": [], "pages": list(pages_all)}
+    # 根节点若有 children 却没有叶节点页码（模型把 pages 全给了父节点）→ 也退化
+    leaves_tmp = [n for n in _flat_nodes(clean) if not n["children_ids"]]
+    if not any(n["pages"] for n in leaves_tmp):
+        fallback = {"reason": "结构模型给的叶节点一个页码都没写，退化为单节点结构："
+                              "整份课件一个节点",
+                    "node_name": (deck or "整份课件")[:24]}
+        clean = {"name": (deck or "整份课件")[:24], "children": [], "pages": list(pages_all)}
+
+    nodes = _flat_nodes(clean)
+    leaves = [n for n in nodes if not n["children_ids"]]
+    known = set(int(x) for x in pages_all)
+
+    owner: dict = {}
+    conflicts: list = []
+    for nd in leaves:
+        for p in nd["pages"]:
+            if p not in known:
+                conflicts.append({"page": p, "kept": "", "dropped": nd["id"],
+                                  "reason": "页码越出 1~%d，已丢弃" % (max(known) if known else 0)})
+                continue
+            if p in owner:
+                conflicts.append({"page": p, "kept": owner[p], "dropped": nd["id"],
+                                  "reason": "同一页被多个叶节点声明，保留先声明的那个"})
+                continue
+            owner[p] = nd["id"]
+    filled: list = []
+    for p in sorted(known):
+        if p in owner:
+            continue
+        prev_pages = [q for q in owner if q < p]
+        nxt_pages = [q for q in owner if q > p]
+        if prev_pages:
+            nid = owner[max(prev_pages)]
+            why = "结构模型没把这一页放进任何叶节点；归给它前面最近的已归属页 p.%d 所在的节点" % max(prev_pages)
+        elif nxt_pages:
+            nid = owner[min(nxt_pages)]
+            why = "结构模型没把这一页放进任何叶节点；归给它后面最近的已归属页 p.%d 所在的节点" % min(nxt_pages)
+        else:
+            nid = leaves[0]["id"]
+            why = "整份结构里没有任何叶节点页码；归给第一个叶节点"
+        owner[p] = nid
+        filled.append({"page": p, "node_id": nid, "reason": why})
+
+    node_pages: dict = {}
+    for p, nid in owner.items():
+        node_pages.setdefault(nid, []).append(int(p))
+    for nid in node_pages:
+        node_pages[nid] = sorted(node_pages[nid])
+    for nd in nodes:
+        nd["pages"] = node_pages.get(nd["id"], [])
+        nd["is_leaf"] = not nd["children_ids"]
+    if conflicts:
+        log("结构兜底：%d 处页码冲突（详见产物 meta.coverage.structure_conflicts）"
+            % len(conflicts))
+    if filled:
+        log("结构兜底：%d 页模型没放进叶节点，已按就近规则补入（详见 structure_filled）"
+            % len(filled))
+    if fallback:
+        log("★结构兜底：%s" % fallback["reason"])
+    return {"root": clean, "nodes": nodes, "page_owner": owner,
+    if len(drafts) == 1:
+        root = {"name": deck[:24],
+                "children": drafts[0]["sections"] or [
+                    {"name": "内容", "children": [], "pages": list(pages_all)}]}
+        merged_by, note = "local", "只有一段：本地把该段章节挂到课件名下（省一次归并调用）"
+    else:
+        t_text = render_struct_titles(pages_all, titles, ch)
+        d_text = render_struct_drafts(drafts)
+        user = (prompt["merge_user"]
+                .replace("{deck}", deck)
+                .replace("{n_pages}", str(len(pages_all)))
+                .replace("{titles}", t_text)
+                .replace("{drafts}", d_text))
+        # ⚠ 归并**保持单次串行**（卡 C-0063 明确不动它）：
+        #   ① 它必须等**所有** map 段回来才有输入，本身就是一道屏障，切不开；
+        #   ② 全份只有这一次调用（doc#5 实测 87.9 s），没有第二条可并行的调用；
+        #   ③ 它的输入随段数线性增长，段数越多它越慢——C-0062 报告 §4.2 把它
+        #      列为"硬串行咽喉"，并预测它会是并发改造后的新主导项（13% → 34%~47%）。
+        res = _v2_call(calls, "structure.merge", prompt["merge_sys"], user,
+                       max_tokens=STRUCT_MAX_TOKENS, retry=STRUCT_RETRY, log=log,
+                       note="归并 %d 段为全局结构" % len(drafts),
+                       temperature=STRUCT_TEMPERATURE, run_no=run_no,
+                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT)
+        root = _clean_section(res["parsed"].get("root")) if res["ok"] else None
+        if root and not root.get("children"):
+            root = None                    # 归并输出退化成一个节点 → 不当结构用
+        if root:
+            merged_by, note = "model", "归并调用成功（%d 段 → 一棵树）" % len(drafts)
+        else:
+            kids = [s for d in drafts for s in d["sections"]]
+            root = {"name": deck[:24],
+                    "children": kids or [{"name": "内容", "children": [],
+                                          "pages": list(pages_all)}]}
+            merged_by = "fallback"
+            note = ("归并调用未给出可用树（%s），退化为：课件名 + 各段章节并列"
+                    % (res.get("error") or "输出不成树"))
+def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
+                     calls: list, log=print, run_no: int = 1) -> dict:
+    """生成这份课件的**思维导图结构**（章节树）：map 分段 + reduce 归并。
+
+    - 段数 == 1：不调第二次模型，本地把这一段挂到课件名下面（`merged_by: "local"`）；
+    - 段数 ≥ 2：一次归并调用（`merged_by: "model"`）；归并失败/输出不成树时
+      **退化为"课件名 + 各段章节并列"**（`merged_by: "fallback"`），不静默放弃。
+    段与段**完全独立**（各读各的页区间、各调各的模型），所以卡 C-0063 起
+    N 段走 `min(KP_INNER_WORKERS, 段数)` 路并发；归并那一次仍是**单次串行**
+    （它必须等所有段回来，本身不可切——C-0062 报告 §4.2 的硬串行咽喉）。
+    `KP_INNER_WORKERS=1` 时走的是改造前那条串行路径（逐字相同）。
+    """
+    pages_all = list(ch["pages_all"])
+    segs = plan_structure_segments(ch)
+    if not segs:
+        raise RuntimeError("这份课件库里没有任何块（chunks 为空），无法生成结构")
+    log("结构生成：共 %d 页，切成 %d 段（每段 ≤%d 页 / ≤%d 字符）"
+        % (len(pages_all), len(segs), STRUCT_SEG_PAGES, STRUCT_SEG_CHARS))
+
+    def _map_one_seg(seg: dict) -> dict:
+        """一段 map：渲染材料 → 调模型 → 解析成局部草稿（顺序无关，可并发）。"""
+        user = (prompt["user"]
+                .replace("{deck}", deck)
+                .replace("{n_pages}", str(len(pages_all)))
+                .replace("{a}", str(seg["a"]))
+                .replace("{b}", str(seg["b"]))
+                .replace("{k}", str(len(seg["pages"])))
+                .replace("{pages_material}", render_struct_material(seg, ch)))
+        res = _v2_call(calls, "structure.map", prompt["sys"], user,
+                       max_tokens=STRUCT_MAX_TOKENS, retry=STRUCT_RETRY, log=log,
+                       note="第 %d/%d 段（p.%d~%d）"
+                            % (seg["index"], len(segs), seg["a"], seg["b"]),
+                       temperature=STRUCT_TEMPERATURE, run_no=run_no,
+                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT)
+        if not res["ok"]:
+            raise RuntimeError("结构分段分析失败（第 %d 段 p.%d~%d）：%s"
+                               % (seg["index"], seg["a"], seg["b"], res["error"]))
+        r = _struct_map_result(res["parsed"], seg["a"], seg["b"])
+        log("  段 %d/%d（p.%d~%d）：%d 页短标题、%d 个章节草稿"
+            % (seg["index"], len(segs), seg["a"], seg["b"],
+               len(r["titles"]), len(r["sections"])))
+        return {"segment": seg["index"], "a": seg["a"], "b": seg["b"],
+                "pages": list(seg["pages"]), "titles": r["titles"],
+                "sections": r["sections"], "call_index": res["call_index"]}
+
+    seg_workers = max(1, min(inner_workers(), len(segs)))
+    if seg_workers > 1:
+        # 卡 C-0063：N 段并行。`Executor.map` **保序返回**，所以下面的
+        # `drafts` 顺序、`titles` 合并顺序与串行路径完全一致——
+        # 归并那一次调用的输入（render_struct_drafts / render_struct_titles）
+        # 因此逐字节相同，产物口径不变。
+        log("结构分段并发：%d 段走 %d 路（进程级模型闸门 %d）"
+            % (len(segs), seg_workers, model_gate_limit()))
+        with _cf.ThreadPoolExecutor(max_workers=seg_workers,
+                                    thread_name_prefix="kp-seg") as ex:
+            drafts = list(ex.map(_map_one_seg, segs))
+    else:
+        drafts = [_map_one_seg(seg) for seg in segs]
+    titles: dict = {}
+    for _d in drafts:
+        titles.update(_d["titles"])
+
+    if len(drafts) == 1:
+        root = {"name": deck[:24],
+                "children": drafts[0]["sections"] or [
+                    {"name": "内容", "children": [], "pages": list(pages_all)}]}
+        merged_by, note = "local", "只有一段：本地把该段章节挂到课件名下（省一次归并调用）"
+    else:
+        t_text = render_struct_titles(pages_all, titles, ch)
+        d_text = render_struct_drafts(drafts)
+        user = (prompt["merge_user"]
+                .replace("{deck}", deck)
+                .replace("{n_pages}", str(len(pages_all)))
+                .replace("{titles}", t_text)
+                .replace("{drafts}", d_text))
+        # ⚠ 归并**保持单次串行**（卡 C-0063 明确不动它）：
+        #   ① 它必须等**所有** map 段回来才有输入，本身就是一道屏障，切不开；
+        #   ② 全份只有这一次调用（doc#5 实测 87.9 s），没有第二条可并行的调用；
+        #   ③ 它的输入随段数线性增长，段数越多它越慢——C-0062 报告 §4.2 把它
+        #      列为"硬串行咽喉"，并预测它会是并发改造后的新主导项（13% → 34%~47%）。
+        res = _v2_call(calls, "structure.merge", prompt["merge_sys"], user,
+                       max_tokens=STRUCT_MAX_TOKENS, retry=STRUCT_RETRY, log=log,
+                       note="归并 %d 段为全局结构" % len(drafts),
+                       temperature=STRUCT_TEMPERATURE, run_no=run_no,
+                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT)
+        root = _clean_section(res["parsed"].get("root")) if res["ok"] else None
+        if root and not root.get("children"):
+            root = None                    # 归并输出退化成一个节点 → 不当结构用
+        if root:
+            merged_by, note = "model", "归并调用成功（%d 段 → 一棵树）" % len(drafts)
+        else:
+            kids = [s for d in drafts for s in d["sections"]]
+            root = {"name": deck[:24],
+                    "children": kids or [{"name": "内容", "children": [],
+                                          "pages": list(pages_all)}]}
+            merged_by = "fallback"
+            note = ("归并调用未给出可用树（%s），退化为：课件名 + 各段章节并列"
+                    % (res.get("error") or "输出不成树"))
+            log("★结构归并降级：%s" % note)
+    log("结构：%s（merged_by=%s）" % (note, merged_by))
+    return {"root": root, "raw_drafts": drafts, "titles": titles,
+            "segments": [{k: v for k, v in s.items() if k != "chars"} for s in segs],
+            "merged_by": merged_by, "merge_note": note,
+            "params": {"seg_pages": STRUCT_SEG_PAGES, "seg_chars": STRUCT_SEG_CHARS,
+                       "page_chars": STRUCT_PAGE_CHARS, "temperature": STRUCT_TEMPERATURE,
+                       "max_tokens": STRUCT_MAX_TOKENS,
+                       "thinking": THINKING_V2,
+                       "reasoning_effort": (REASONING_EFFORT if THINKING_V2 else "")}}
+
+
+# ---------------------------------------------------------------- 知识点：切片与生成
+def _split_runs(ps: list) -> list:
+    """把升序页号切成若干**连续段**：`[1,2,3,7,8]` → `[[1,2,3],[7,8]]`。"""
+    runs, cur = [], []
+    for p in ps:
+        if cur and p != cur[-1] + 1:
+            runs.append(cur)
+            cur = []
+        cur.append(p)
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def _page_material_chars(p: int, ch: dict | None) -> int:
+    """该页全部块的字符数（跨页块在它覆盖的每一页都算一次，故意保守）。"""
+    if not ch:
+        return 0
+    return sum(len(b.get("text") or "") for b in (ch["blocks"].get(p) or []))
+
+        "sources": srcs,
+        "sources_rejected": sorted(set(dropped)),
+        "insufficient": bool(parsed.get("insufficient")),
+        "insufficient_reason": str(parsed.get("insufficient_reason") or ""),
+        "quality": q_main,
+        "material": [{"chunk_id": m["chunk_id"], "kind": m["kind"], "ref": m["ref"],
+                      "chars": m["chars"], "page": m["page"],
+                      "pages": m.get("pages") or [m["page"]]} for m in inv],
+        "material_chars": sum(m["chars"] for m in inv),
+        "n_material_blocks": len(inv),
+        "n_body_blocks": sum(1 for m in inv if m["kind"] == "正文块"),
+        "n_fig_blocks": sum(1 for m in inv if m["kind"] == "图片理解"),
+        "usage": res["usage"],
+        "elapsed_s": float((calls[res["call_index"]] or {}).get("elapsed_s") or 0),
+        "model": res["model"],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "raw": res["raw"],
+    }
+    if task.get("split_reason"):
+        rec["split_reason"] = task["split_reason"]
+    rec["material_block_ids"] = [m["chunk_id"] for m in inv]
+    return rec
+
+
+def material_text_of_v2(inv: list, ch: dict) -> str:
+    """本条材料去空白后的全文（质量自查用：判"整句照抄"与"数字/专名越界"）。"""
+    by_id: dict = {}
+    for bs in ch["blocks"].values():
+        for b in bs:
+            by_id[b["chunk_id"]] = b["text"]
+    return _norm("".join(by_id.get(m["chunk_id"], "") for m in inv))
+
+
+def _v2_cost(calls: list, run: int | None = None) -> dict:
+    """逐次调用记录的汇总（含失败轮；失败的轮次 token 为 0，但次数照样算）。
+
+    `run` 给定就只统计那一轮（"本次运行花了多少"），不给就统计全部（"这份产物
+    从头到现在花了多少"）——两个口径都要有，见 `_v2_meta()`。
+    """
+    rows = [c for c in calls
+            if run is None or int(c.get("run") or 1) == int(run)]
+    ti = sum(int(c.get("tokens_in") or 0) for c in rows)
+    to = sum(int(c.get("tokens_out") or 0) for c in rows)
+    rt = sum(int(c.get("reasoning_tokens") or 0) for c in rows)
+    cost = round(sum(float(c.get("cost_cny") or 0) for c in rows), 6)
+    return {"calls": len(rows), "calls_failed": sum(1 for c in rows if not c.get("ok")),
+            "tokens_in": ti, "tokens_out": to, "reasoning_tokens": rt,
+            "cost_cny": cost}
+
+
+def _v2_runs(calls: list) -> list:
+    """按**轮**汇总（第几轮、几次调用、几次失败、token、花费、起止时间）。
+
+    "逐次调用记录"与"每轮一共花了多少"是两种读法，产物里都给：
+def render_kp_material(pages: list, node_path: list, ch: dict) -> tuple:
+    """渲染一条知识点的材料（页内先正文块后识图块，每块带自己的出处）+ 材料清单。"""
+    figrows = ch["figrows"]
+    lines: list = []
+    inv: list = []
+    for p in pages:
+        lines.append("===== 第 %d 页 =====" % p)
+        lines.append("【本条所属结构节点】%s" % " > ".join(node_path))
+        if (figrows.get(p) or {}).get("no_info"):
+            lines.append("（注：本页图片已被判定为\u201c无知识性图示\u201d，"
+                         "下面的图片理解只是占位，不含知识内容）")
+        bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
+        figs = [b for b in bs if b["kind"] == "图片理解"]
+        body = [b for b in bs if b["kind"] != "图片理解"]
+        for b in body:
+            lines.append("〔正文块〕[%d]（%s）原文：%s"
+                         % (b["chunk_id"], b["ref"], b["text"]))
+            inv.append({"chunk_id": b["chunk_id"], "page": p, "kind": "正文块",
+                        "ref": b["ref"], "chars": b["chars"], "pages": b["pages"]})
+        for k, b in enumerate(figs, 1):
+            lines.append("〔图片理解·%d/%d〕[%d]（%s）%s"
+                         % (k, len(figs), b["chunk_id"], b["ref"], b["text"]))
+            inv.append({"chunk_id": b["chunk_id"], "page": p, "kind": "图片理解",
+                        "ref": b["ref"], "chars": b["chars"], "fig_index": k,
+                        "fig_total": len(figs), "pages": b["pages"]})
+        lines.append("")
+    if not inv:
+        lines.append("（本次材料为空）")
+    return "\n".join(lines), inv
+
+
+def _block_text_map(ch: dict) -> dict:
+    """chunk_id → 块原文（名词出处回查用）。"""
+    return {b["chunk_id"]: (b.get("text") or "")
+            for bs in ch["blocks"].values() for b in bs}
+
+
+def _page_exclusions(raw, cand_set: set) -> tuple:
+    """读模型给的 `excluded_pages`（卡 C-0052）。
+
+    认三种写法：`[3]` / `["3"]` / `[{"page":3,"reason":"目录页"}]`。
+    返回 `({page: 理由}, {垃圾项: 剔除原因})`——垃圾项**照样留痕**，不静默吞掉。
+    """
+    ok: dict = {}
+    bad: dict = {}
+    if isinstance(raw, (dict, int, str)):
+        raw = [raw]
+    for x in (raw or []):
+        reason = ""
+        if isinstance(x, dict):
+            page = x.get("page") or x.get("p") or x.get("n")
+            reason = str(x.get("reason") or x.get("why") or "").strip()
+        else:
+            page = x
+        try:
+            p = int(str(page).strip())
+        except (TypeError, ValueError):
+            bad[str(page)[:20]] = "excluded_pages 里的项不是页号：%s" % str(x)[:60]
+            continue
+        if p not in cand_set:
+            bad[str(p)] = "页 %d 不在本条候选页里，排除无效（越界页本来就不属于本条）" % p
+            continue
+        ok[p] = reason or "（模型没给理由）"
+    return ok, bad
+
+
+def _clean_terms(raw_terms, inv: list, ch: dict, mat_text: str) -> tuple:
+    """校验模型提炼的**重点名词**：`term` 必须真的出自本条材料。
+
+    卡 C-0052 起这个函数服务"逐条随知识点提炼"；卡 C-0058 把那件事摘出后，
+                   note="%s（p.%s）" % (task["kp_id"], _pages_label(cand)),
+                   call_no=len(calls) + 1, run_no=run_no)
+    if not res["ok"]:
+        raise RuntimeError("调用失败：%s" % res["error"])
+    parsed = res["parsed"]
+    mat_text = material_text_of_v2(inv, ch)
+
+    # ---- 页仲裁（第 2~5 步）----
+    claimed = claimed if claimed is not None else {}
+    declared_raw = _page_list(parsed.get("pages"))
+    declared = sorted(p for p in declared_raw if p in cand_set)
+    rejected = [{"page": p,
+                 "reason": "不在本条候选页（%s）内，已剔除"
+                           % _pages_label(cand)}
+                for p in declared_raw if p not in cand_set]
+    excl, excl_bad = _page_exclusions(parsed.get("excluded_pages"), cand_set)
+    should = [p for p in cand if p not in excl]
+    conflict = [{"page": p, "by": str(claimed.get(p) or ""),
+                 "reason": "这一页已被更早生成的知识点 %s 收录，按先到先得剔除"
+                           % (claimed.get(p) or "")}
+                for p in should if p in claimed]
+    final = [p for p in should if p not in claimed]
+    if declared:
+        filled = [{"page": p,
+                   "reason": "模型没声明这一页，按结构叶节点 %s 的候选页归属补入"
+                             % task["node_id"]}
+                  for p in final if p not in declared]
+    else:
+        filled = [{"page": p,
+                   "reason": "模型没给 pages，按结构叶节点 %s 的候选页全量归属"
+                             % task["node_id"]}
+                  for p in final]
+    pages_excluded = [{"page": p, "reason": r,
+                       "note": "模型显式排除，管线尊重、不再补回（该页会进覆盖率未覆盖清单）"}
+                      for p, r in sorted(excl.items())]
+    pages_empty_reason = ""
+    if not final:
+        pages_empty_reason = ("本条最终一个页都没有：候选页 %s 全部被排除或被更早的知识点收录"
+                              % _pages_label(cand))
+
+    # ---- 出处校验 ----
+    in_mat = {m["chunk_id"] for m in inv}
+    srcs, dropped = [], []
+    if not isinstance(keep_raw, (list, tuple)):
+        keep_raw = [keep_raw]
+    unknown = [str(x) for x in keep_raw if str(x).strip()]
+    known = {_norm_term_key(t["term"]) for t in terms}
+    matched = [x for x in unknown if _norm_term_key(x) in known]
+    if not matched:
+        return {"terms": terms, "filter": "fallback",
+                "kept": [t["term"] for t in terms], "dropped": [],
+                "note": "筛选输出的 keep 名单里没有一个词在候选清单内（模型没按清单回答），"
+                        "保留全部候选名词"}
+                        t.get("first_page") or "?", t.get("first_kp_name") or "",
+                        t.get("def") or ""))
+    user = (prompt["terms_user"].replace("{deck}", deck)
+            .replace("{n_pages}", str(int(n_pages)))
+def gen_kp_v2(task: dict, ch: dict, prompt: dict, deck: str, *, calls: list,
+              log=print, run_no: int = 1, claimed: dict | None = None,
+              claimed_lock=None) -> dict:
+    """写一条知识点：调模型 → **页仲裁** → 校验 sources → 质量自查 → 组装记录。
+
+    卡 C-0052 起，覆盖页**由模型判断**（`pages` / `excluded_pages`），但**仲裁在管线**
+    （人拍板解除 ≤3 页限制的同时，这套不变量一条都不能丢）：
+
+    1. **候选页** = 结构叶节点的页集（`task["pages"]`，全页唯一、互不重叠）；
+    2. 模型给的 `pages` **越界的剔除** → `pages_rejected`；
+    3. 模型给的 `excluded_pages` **尊重**（不再补回），逐页进 `pages_excluded`，
+       这些页会成为产物覆盖率里的 `uncovered` 并带上模型给的理由；
+    4. 候选页里**模型没声明、也没排除**的页 → 按结构归属**补入**本条的 `pages_filled`
+       （逐页带原因），保证"每页都有主"这条不变量默认成立；
+    5. 与**已被别人收录**的页冲突 → 先到先得，剔除并记 `pages_conflict_dropped`。
+
+    `claimed` 是"页 → 收录它的知识点 id"的累计表（由 `build_v2()` 传入）。
+    **卡 C-0063 改了它的用法**：并发下"读-改-写"跨了整个模型调用（10~88 秒），
+    加锁也救不了（C-0062 报告 §7.1 对抗实验：无锁 / 加锁都出现重叠）。所以
+    `build_v2()` 在**提交任务时**就把候选页预约进 `claimed`（pre-claim，见
+    `_claim_pages()`），本函数读到的 `claimed` 因此**包含自己预约的那部分**：
+
+      - 页的主人是别人 → 冲突（`pages_conflict_dropped`）；
+      - 页的主人是自己（预约）→ 不算冲突，正常收录；
+      - 页没有主人（串行续跑的老路径 / 预约失败）→ 正常收录。
+
+    第 5 步的判据因此从"页在 `claimed` 里"改成"页在 `claimed` 里**且主人不是自己**"，
+    这是**"调用前预约"能落地的前提**。`claimed_lock` 是保护 `claimed` 的锁
+    （并发路径传进来；`None` 表示单线程，不加锁）。
+    """
+    cand = [int(x) for x in task["pages"]]
+    cand_set = set(cand)
+    materials, inv = render_kp_material(cand, task["node_path"], ch)
+    user = (prompt["user"]
+            .replace("{deck}", deck)
+            .replace("{structure_path}", " > ".join(task["node_path"]))
+            .replace("{node_name}", task["node_name"])
+            .replace("{pages}", "、".join("p.%d" % p for p in cand))
+            .replace("{materials}", materials))
+    res = _v2_call(calls, "knowledge", prompt["sys"], user,
+                   max_tokens=KP_MAX_TOKENS, retry=RETRY, log=log,
+                   note="%s（p.%s）" % (task["kp_id"], _pages_label(cand)),
+                   kp_seq=True, run_no=run_no)
+    if not res["ok"]:
+        raise RuntimeError("调用失败：%s" % res["error"])
+    parsed = res["parsed"]
+    mat_text = material_text_of_v2(inv, ch)
+
+    # ---- 页仲裁（第 2~5 步）----
+    claimed = claimed if claimed is not None else {}
+    declared_raw = _page_list(parsed.get("pages"))
+    declared = sorted(p for p in declared_raw if p in cand_set)
+    rejected = [{"page": p,
+                 "reason": "不在本条候选页（%s）内，已剔除"
+                           % _pages_label(cand)}
+                for p in declared_raw if p not in cand_set]
+    excl, excl_bad = _page_exclusions(parsed.get("excluded_pages"), cand_set)
+    should = [p for p in cand if p not in excl]
+    # 卡 C-0063：读 `claimed` 要**和预约同一把锁**（并发下别的线程正在预约/收敛）。
+    # `holder[p]` = 这一页现在的主人；`mine_id` = 本条自己（它在提交任务时已经
+    # 把自己的候选页预约进去，所以"主人是自己"必须放行，否则每条都会被自己挡掉）。
+    mine_id = str(task.get("kp_id") or "")
+    holder: dict = {}
+    if claimed:
+        _cm = claimed_lock if claimed_lock is not None else contextlib.nullcontext()
+        with _cm:
+            holder = {p: str(claimed.get(p) or "") for p in should if p in claimed}
+    taken = {p: who for p, who in holder.items() if who and who != mine_id}
+    conflict = [{"page": p, "by": taken[p],
+                 "reason": "这一页已被更早生成的知识点 %s 收录，按先到先得剔除" % taken[p]}
+                for p in should if p in taken]
+    final = [p for p in should if p not in taken]
+    if declared:
+        filled = [{"page": p,
+                   "reason": "模型没声明这一页，按结构叶节点 %s 的候选页归属补入"
+                             % task["node_id"]}
+                  for p in final if p not in declared]
+    else:
+        filled = [{"page": p,
+                   "reason": "模型没给 pages，按结构叶节点 %s 的候选页全量归属"
+                             % task["node_id"]}
+                  for p in final]
+    pages_excluded = [{"page": p, "reason": r,
+                       "note": "模型显式排除，管线尊重、不再补回（该页会进覆盖率未覆盖清单）"}
+                      for p, r in sorted(excl.items())]
+    pages_empty_reason = ""
+    if not final:
+        pages_empty_reason = ("本条最终一个页都没有：候选页 %s 全部被排除或被更早的知识点收录"
+                              % _pages_label(cand))
+
+    # ---- 出处校验 ----
+    in_mat = {m["chunk_id"] for m in inv}
+    srcs, dropped = [], []
+    for s in (parsed.get("sources") or []):
+        if not isinstance(s, dict):
+            continue
+        ids = []
+        for x in (s.get("chunk_ids") or []):
+            try:
+                cid = int(x)
+            except (TypeError, ValueError):
+                continue
+            (ids if cid in in_mat else dropped).append(cid)
+        srcs.append({"page": s.get("page"), "chunk_ids": ids,
+                     "figure_desc": bool(s.get("figure_desc"))})
+
+    # ---- 名词校验（卡 C-0058：这条管线不再提炼名词，整块摘到独立功能）----
+
+    summary = str(parsed.get("summary") or "").strip()
+    points = [str(x).strip() for x in (parsed.get("points") or []) if str(x or "").strip()]
+    q_main = quality_issues(summary, points, mat_text)
+    rec = {
+        "id": task["kp_id"],
+        "doc_id": int(task.get("doc_id") or 0),
+        "name": str(parsed.get("name") or task["node_name"]).strip()[:40],
+        "summary": summary,
+        "points": points,
+        "pages": final,
+        "candidate_pages": cand,
+        "pages_from_model": declared,
+        "pages_filled": filled,
+        "pages_rejected": rejected + [{"page": None, "reason": v}
+                                      for v in excl_bad.values()],
+        "pages_excluded": pages_excluded,
+        "pages_conflict_dropped": conflict,
+        "pages_empty_reason": pages_empty_reason,
+        "pages_rule": ("覆盖页由模型判断（pages / excluded_pages），管线仲裁：越界剔除 → "
+                       "显式排除尊重 → 与他人冲突先到先得 → 漏声明按结构归属补入；"
+                       "四类处理都逐页留痕"),
+        "node_id": task["node_id"],
+        "node_name": task["node_name"],
+        "node_path": list(task["node_path"]),
+        "level": int(task.get("level") or len(task["node_path"])),
+        "sources": srcs,
+        "sources_rejected": sorted(set(dropped)),
+        "insufficient": bool(parsed.get("insufficient")),
+        "insufficient_reason": str(parsed.get("insufficient_reason") or ""),
+        "quality": q_main,
+        "material": [{"chunk_id": m["chunk_id"], "kind": m["kind"], "ref": m["ref"],
+                      "chars": m["chars"], "page": m["page"],
+                      "pages": m.get("pages") or [m["page"]]} for m in inv],
+        "material_chars": sum(m["chars"] for m in inv),
+        "n_material_blocks": len(inv),
+        "n_body_blocks": sum(1 for m in inv if m["kind"] == "正文块"),
+        "n_fig_blocks": sum(1 for m in inv if m["kind"] == "图片理解"),
+        "usage": res["usage"],
+        # 卡 C-0063：耗时从**这次调用自己的记账对象**取（不再 `calls[下标]`
+        # 二次索引——并发下别的线程可能已经往 `calls` 里插了新记录）。
+        "elapsed_s": float((res.get("call") or {}).get("elapsed_s") or 0),
+        "model": res["model"],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "raw": res["raw"],
+    }
+    if task.get("split_reason"):
+        rec["split_reason"] = task["split_reason"]
+    rec["material_block_ids"] = [m["chunk_id"] for m in inv]
+    return rec
+
+
+def material_text_of_v2(inv: list, ch: dict) -> str:
+    """本条材料去空白后的全文（质量自查用：判"整句照抄"与"数字/专名越界"）。"""
+    by_id: dict = {}
+    for bs in ch["blocks"].values():
+        for b in bs:
+            by_id[b["chunk_id"]] = b["text"]
+    return _norm("".join(by_id.get(m["chunk_id"], "") for m in inv))
+
+
+def _v2_cost(calls: list, run: int | None = None) -> dict:
+    """逐次调用记录的汇总（含失败轮；失败的轮次 token 为 0，但次数照样算）。
+
+    `run` 给定就只统计那一轮（"本次运行花了多少"），不给就统计全部（"这份产物
+    从头到现在花了多少"）——两个口径都要有，见 `_v2_meta()`。
+    """
+    rows = [c for c in calls
+            if run is None or int(c.get("run") or 1) == int(run)]
+    ti = sum(int(c.get("tokens_in") or 0) for c in rows)
+    to = sum(int(c.get("tokens_out") or 0) for c in rows)
+    rt = sum(int(c.get("reasoning_tokens") or 0) for c in rows)
+    cost = round(sum(float(c.get("cost_cny") or 0) for c in rows), 6)
+    return {"calls": len(rows), "calls_failed": sum(1 for c in rows if not c.get("ok")),
+            "tokens_in": ti, "tokens_out": to, "reasoning_tokens": rt,
+            "cost_cny": cost}
+
+
+def _v2_runs(calls: list) -> list:
+    """按**轮**汇总（第几轮、几次调用、几次失败、token、花费、起止时间）。
+
+    "逐次调用记录"与"每轮一共花了多少"是两种读法，产物里都给：
+    前者是 `meta.calls`，后者是本节。
+    """
+    agg: dict = {}
+    for c in calls:
+        r = int(c.get("run") or 1)
+        d = agg.setdefault(r, {"run": r, "calls": 0, "calls_failed": 0,
+                               "tokens_in": 0, "tokens_out": 0,
+                               "reasoning_tokens": 0, "cost_cny": 0.0,
+                               "first_at": "", "last_at": ""})
+        d["calls"] += 1
+        if not c.get("ok"):
+            d["calls_failed"] += 1
+        d["tokens_in"] += int(c.get("tokens_in") or 0)
+        d["tokens_out"] += int(c.get("tokens_out") or 0)
+        d["reasoning_tokens"] += int(c.get("reasoning_tokens") or 0)
+        d["cost_cny"] = round(d["cost_cny"] + float(c.get("cost_cny") or 0), 6)
+        at = str(c.get("at") or "")
+        if at:
+            # 卡 C-0063：并发下 `calls` 的**顺序是"完成顺序"**，不再等于时间顺序，
+            # 所以首末时刻按字典序取极值（"%Y-%m-%dT%H:%M:%S" 的字典序 = 时间序）。
+            # 串行时结果与改造前**逐字相同**（原来就是按顺序首尾取）。
+            if not d["first_at"] or at < d["first_at"]:
+                d["first_at"] = at
+            if not d["last_at"] or at > d["last_at"]:
+                d["last_at"] = at
+    return [agg[k] for k in sorted(agg)]
+
+
+# ---------------------------------------------------------------- 名词解释（独立功能）
+#
+# 卡 C-0052 建的这两件（汇总去重 / 全局筛选）原来长在知识点总结管线身上；
+# 卡 C-0058 按人拍板「取消知识点总结管线与名词解释功能的偶联」把它们**摘出来**，
+# 与"提炼"一起组成下面这个**独立功能**（代码在本文件、入口是 `build_terms()`、
+# CLI 是 `tools/terms_build.py`、提示词真源是 `提示词-名词解释.md`、产物是
+# `logs/knowledge/<doc_id>-名词解释.json`）。下面两个函数**语义一字未改**，
+# 只是从"总结管线的第 3/4 步"变成"独立功能的第 2/3 步"。
+def _norm_term_key(s: str) -> str:
+    """名词去重键：去空白 / 连字符 / 括号 / 全角符号，大小写不敏感。
+
+    `拓扑异构酶 II` 与 `拓扑异构酶II`、`Topo II` 与 `topo-ii` 会归到同一个键——
+        "title": doc_title_v2(doc_id, db_path), "deck": doc_title_v2(doc_id, db_path),
+        "n_pages": n, "pages_all": pages_all,
+        # 看板/批量沿用的字段名：v2/v3 里 n_leaf_pages = **计划条数**
+        # （有可复用的产物结构时就是它；否则给"每页一条"的上界，并在下面注明来源）
+        "n_leaf_pages": n_plan or kp_max,
+        "n_leaf_plan_source": ("产物结构（%d 个叶节点，可续跑）" % n_plan if n_plan
+                               else "上界（每页一条：结构还没生成）"),
+        "excluded_parent_pages": [],
+        "kp_min": kp_min, "kp_max": kp_max,
+        "pages": per_page,
+        "material_chars_total": mat_chars, "window_chars_total": mat_chars,
+        "handoff": {}, "handoff_pages": [], "handoff_detail": [], "handoff_unplaced": [],
+        "window_unclaimed": [], "window_claimed_pages": pages_all,
+        "page_owner": {}, "max_window_pages": KP_SPAN_PAGES,
+        "windows": {}, "max_merge_pages": KP_SPAN_PAGES,
+        "structure_calls": struct_calls, "segments": [
+            {"index": s["index"], "a": s["a"], "b": s["b"], "pages": s["pages"]}
+            for s in segs],
+        "seg_pages": STRUCT_SEG_PAGES, "seg_chars": STRUCT_SEG_CHARS,
+        "struct_page_chars": STRUCT_PAGE_CHARS, "kp_span_pages": KP_SPAN_PAGES,
+        "kp_material_chars_max": KP_MATERIAL_CHARS_MAX,
+        "thinking": THINKING_V2, "reasoning_effort": REASONING_EFFORT,
+        "kp_max_tokens": KP_MAX_TOKENS, "struct_max_tokens": STRUCT_MAX_TOKENS,
+        "budget_unlimited": bool(BUDGET_UNLIMITED),
+        "est_calls": struct_calls + kp_max,
+        "est_calls_breakdown": {"structure": struct_calls, "knowledge_max": kp_max,
+                                "knowledge_min": kp_min},
+        "est_tokens_in": est_in, "est_tokens_out": est_out, "est_cost_cny": est_cost,
+        "est_rule": ("上界估算（含思考 token）：结构 %d 次（%d 段 + %d 次归并）按每页 ≤%d 字符的材料算；"
+                     "知识点按**每页一条**的上界算（真实条数由结构树决定，"
+                     "一条 = 一个叶节点、页数不限，区间 %d~%d 条）；"
+                     "输入 token ≈ 字符/%.1f；输出 = 思维链（输入 ×%.1f，实测 1.19）+ 正文"
+                     "（结构 %d/次、知识点 %d/条）；"
+                     "单价非高峰 $%.2f/1M 入、$%.2f/1M 出，汇率 %.1f"
+                     % (struct_calls, len(segs), 1 if len(segs) > 1 else 0,
+                        STRUCT_PAGE_CHARS, kp_min, kp_max, CHARS_PER_TOKEN,
+                        REASON_RATIO, 1200, 450, PRICE_IN, PRICE_OUT, FX)),
+        "already_done_pages": sorted(done),
+        "already_out": str(out) if out.exists() else "",
+        "out_path": str(out),
+        "prompt_path": kp_prompt["path"], "prompt_sha256": kp_prompt["sha256"],
+        "structure_prompt_path": st_prompt["path"],
+        "structure_prompt_sha256": st_prompt["sha256"],
+        "outline_ignored": True,
+        "outline_note": ("v2/v3 不读 logs/outline/%d.json（那是入库管线的结构成果，只服务知识库）；"
+                         "结构由本管线的模型调用生成" % int(doc_id)),
+        "pages_with_blocks": pages_with_blocks,
+        "max_page": ch["max_page"], "n_blocks": ch["n_blocks"],
+    }
+
+
+def prev_info_v2(doc_id: int, out_path: str | os.PathLike | None = None) -> dict:
+    """产物状态（供调用方决定"要不要备份、能不能续跑、能不能跳过"）。
+
+    字段名与 v1 `prev_info_v1()` 一致（看板/批量直接复用），**口径按 v2/v3 解释**：
+      - `n_done_pages` / `pages_total` 数的是**知识点条数**
+        （v1 数的是页；两者都是"这份产物做到哪儿了"的同一件事）；
+    # 所以加倍再试一次；其它失败不重试（重试也没用，直接走 fallback）。
+    if (not res["ok"]
+            and int((res.get("usage") or {}).get("tokens_out") or 0) >= TERMS_MAX_TOKENS):
+        mt2 = min(TERMS_MAX_TOKENS * 2, KP_MAX_TOKENS)
+        cut = int((res.get("usage") or {}).get("tokens_out") or 0)
+        log("★筛选输出被 max_tokens 打满（%d/%d token 全在思维链上），"
+            "加倍到 %d 再试一次" % (cut, TERMS_MAX_TOKENS, mt2))
+        res = _v2_call(calls, "terms.filter", prompt["terms_sys"], user,
+                       max_tokens=mt2, retry=0, log=log,
+                       note="筛选 %d 个候选名词（max_tokens 加倍到 %d）"
+                            % (len(terms), mt2), run_no=run_no)
+    if not res["ok"]:
+        return {"terms": terms, "filter": "fallback",
+                "kept": [t["term"] for t in terms], "dropped": [],
+                "note": "筛选调用失败（%s），保留全部候选名词" % res["error"]}
+    keep_raw = res["parsed"].get("keep")
+    if keep_raw is None:
+        keep_raw = res["parsed"].get("terms") or []
+    if isinstance(keep_raw, dict):
+        keep_raw = list(keep_raw.keys())
+    if not isinstance(keep_raw, (list, tuple)):
+        keep_raw = [keep_raw]
+    unknown = [str(x) for x in keep_raw if str(x).strip()]
+    known = {_norm_term_key(t["term"]) for t in terms}
+    matched = [x for x in unknown if _norm_term_key(x) in known]
+    if not matched:
+        return {"terms": terms, "filter": "fallback",
+                "kept": [t["term"] for t in terms], "dropped": [],
+                "note": "筛选输出的 keep 名单里没有一个词在候选清单内（模型没按清单回答），"
+                        "保留全部候选名词"}
+            ((meta.get("prompts") or {}).get("structure") or {}).get("sha256") or ""),
+        # 卡 C-0052 专属：名词解释汇总（旧产物没有这个顶层键 → 0/False）
+        "n_terms": len(terms),
+        "has_terms": bool(terms),
+    }
+
+
+def _decorate_tree(node: dict, ids: list, idx: list, kp_ids: dict) -> dict:
+    """把先序生成的节点 id / 页 / 知识点挂回展示树（顺序与 `_flat_nodes` 完全一致）。"""
+    nid = ids[idx[0]]
+    idx[0] += 1
+    kids = [_decorate_tree(c, ids, idx, kp_ids) for c in (node.get("children") or [])]
+    me = {"id": nid, "name": node["name"], "pages": list(node.get("pages") or []),
+          "kp_ids": sorted(set(kp_ids.get(nid) or []))}
+    if kids:
+        me["children"] = kids
+    return me
+        "nodes": nodes,
+        "page_owner": {str(p): nid for p, nid in sorted(norm["page_owner"].items())},
+        "n_pages": len(ch["pages_all"]),
+    }
+
+
+def _v2_meta(est: dict, kp_prompt: dict, st_prompt: dict, norm: dict, tasks: list,
+             recs: list, calls: list, *, status: str, started: float, budget: float,
+             struct_reused: bool, failed: list, err: str = "",
+             run_no: int = 1) -> dict:
+    """v2 产物的 `meta`：模型 / 提示词 sha256 / **逐次调用记录** / 花费 / **覆盖率口径**。
+
+    花费给**两个口径**（都不许含糊）：
+      - `cost_cny` / `usage_total_this_run`：**本次运行**（第 `run_no` 轮）花的；
+      - `cost_cny_all_calls` / `usage_total_all_calls`：这份产物**从头到现在**的全部调用
+        （续跑与 `--force` 重跑的轮次都累积在 `meta.calls` 里，按 `run` 分组见 `meta.runs`）。
+    """
+    agg = _v2_cost(calls)
+    this = _v2_cost(calls, run=run_no)
+    done = [r for r in recs if str(r.get("summary") or "").strip()]
+    cover = _v2_coverage(est, recs, norm, tasks)
+    return {
+        "doc_id": int(est["doc_id"]),
+        "chapter": est.get("title") or "",
+        "deck": est.get("deck") or est.get("title") or "",
+        "source_card": "C-0049",
+TERMS_VERSION = PIPELINE_VERSION_V4
+# 提炼的分段口径：与结构生成**同一套双阈值**（页数 / 字符数），
+# 让"段"这个概念在两条管线里是同一件事，也让调用次数与页数无关地有上界。
+TERMS_SEG_PAGES = STRUCT_SEG_PAGES
+TERMS_SEG_CHARS = STRUCT_SEG_CHARS
+# 喂给提炼模型的**每页字符预算**：比结构生成（420）宽得多——挑名词要看得到定义句，
+# 而结构只需要看标题与层级；截断处标 `……`，绝不静默丢页。
+TERMS_PAGE_CHARS = 4000
+TERMS_RETRY = STRUCT_RETRY
+
+
+def default_terms_prompt_file() -> Path:
+    """名词解释提示词真源：本学科 `logs/knowledge/` 优先、项目根兜底（与其它真源同规矩）。"""
+    return _prompt_path_v2(TERMS_PROMPT_NAME)
+
+
+def load_terms_prompts(path: str | os.PathLike | None = None) -> dict:
+    """名词解释的四个提示词块：提炼（`extract_sys`/`extract_user`）+ 筛选（`terms_sys`/`terms_user`）。
+
+    ⚠ `terms_sys` / `terms_user` 这两个键名**故意与卡 C-0052 一致**：
+    `filter_terms_v2()` 就是照这两个键取提示词的，于是"筛选"那一步的函数体
+    **一字未改**——摘出前后，筛选的口径与降级行为完全一样。
+    """
+    p = _prompt_path_v2(TERMS_PROMPT_NAME, path)
+    return _load_md_prompts(p, [("PROMPT-TERMS-EXTRACT-SYS", "extract_sys"),
+                                ("PROMPT-TERMS-EXTRACT-USER", "extract_user"),
+                                ("PROMPT-TERMS-SYS", "terms_sys"),
+                                ("PROMPT-TERMS-USER", "terms_user")])
+
+
+def terms_out_file(doc_id: int, out_path: str | os.PathLike | None = None) -> Path:
+    """独立名词解释产物的路径：`logs/knowledge/<doc_id>-名词解释.json`。"""
+    if out_path:
+        return Path(out_path)
+    return config.LOG_DIR / "knowledge" / ("%d%s" % (int(doc_id), TERMS_SUFFIX))
+
+
+def _terms_page_text(p: int, ch: dict, cap: int = TERMS_PAGE_CHARS) -> str:
+    """该页喂给**提炼模型**的文本（截断到 `cap` 字符，截断处标 `……`）。"""
+    bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
+    parts = []
+    for b in bs:
+        t = re.sub(r"\s+", " ", b["text"] or "").strip()
+        if t:
+            parts.append("〔%s〕%s" % (b["kind"], t))
+    s = " ".join(parts)
+    return s if len(s) <= cap else (s[:cap] + "……")
+
+
+def plan_terms_segments(ch: dict) -> list:
+    """把全页切成若干段（提炼的 map 输入）：**页数与字符数双阈值，谁先到就切**。
+
+    与 `plan_structure_segments()` 同一口径，只是每页按 `TERMS_PAGE_CHARS` 截断。
+    返回 [{index, a, b, pages, chars}]（升序、无缝覆盖 `pages_all`）。
+    """
+    pages = list(ch["pages_all"])
+    if not pages:
+        return []
+    segs: list = []
+    cur: list = []
+    cur_chars = 0
+    for p in pages:
+        n = len(_terms_page_text(p, ch))
+        if cur and (len(cur) >= TERMS_SEG_PAGES or cur_chars + n > TERMS_SEG_CHARS):
+            segs.append(cur)
+            cur, cur_chars = [], 0
+        cur.append(p)
+        cur_chars += n
+    if cur:
+        segs.append(cur)
+    return [{"index": i + 1, "a": s[0], "b": s[-1], "pages": list(s),
+             "chars": sum(len(_terms_page_text(p, ch)) for p in s)}
+            for i, s in enumerate(segs)]
+
+
+def render_terms_material(seg: dict, ch: dict) -> tuple:
+    """渲染一段的材料（页内先正文块后识图块，每块带自己的出处）+ 材料清单。
+
+    材料清单（`inv`）与知识点那一步**同形状**：`_clean_terms()` 判"这个词是不是
+    真出自我手里的材料"就靠它，所以摘出前后"不许编名词"的判据没有任何漂移。
+    """
+    figrows = ch["figrows"]
+    lines: list = []
+    inv: list = []
+    for p in seg["pages"]:
+        lines.append("===== 第 %d 页 =====" % p)
+        if (figrows.get(p) or {}).get("no_info"):
+            lines.append("（注：本页图片已被判定为\u201c无知识性图示\u201d，"
+                         "下面的图片理解只是占位，不含知识内容）")
+        bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
+        figs = [b for b in bs if b["kind"] == "图片理解"]
+        body = [b for b in bs if b["kind"] != "图片理解"]
+        for b in body:
+            lines.append("〔正文块〕[%d]（%s）原文：%s"
+                         % (b["chunk_id"], b["ref"], b["text"]))
+            inv.append({"chunk_id": b["chunk_id"], "page": p, "kind": "正文块",
+                        "ref": b["ref"], "chars": b["chars"], "pages": b["pages"]})
+        for k, b in enumerate(figs, 1):
+            lines.append("〔图片理解·%d/%d〕[%d]（%s）%s"
+                         % (k, len(figs), b["chunk_id"], b["ref"], b["text"]))
+            inv.append({"chunk_id": b["chunk_id"], "page": p, "kind": "图片理解",
+                        "ref": b["ref"], "chars": b["chars"], "fig_index": k,
+                        "fig_total": len(figs), "pages": b["pages"]})
+        lines.append("")
+    if not inv:
+        lines.append("（本段材料为空）")
+    return "\n".join(lines), inv
+
+
+def extract_terms_seg(seg: dict, ch: dict, deck: str, prompt: dict, *, calls: list,
+                      log=print, run_no: int = 1) -> dict:
+    """提炼**一段**的名词：一次调用 → `_clean_terms()` 逐条校验 → 返回该段的清单。
+
+    模型的 `page` 只是它的说法：产物里的 `first_page` 一律由管线按 `evidence`
+    （这个词出现在哪些块里）**自己算**——与卡 C-0052 的口径一致，不采信模型给的页码。
+    """
+    materials, inv = render_terms_material(seg, ch)
+    user = (prompt["extract_user"]
+            .replace("{deck}", deck)
+            .replace("{pages}", "、".join("p.%d" % p for p in seg["pages"]))
+        "budget_policy": ("unlimited（人拍板 2026-09-27：解除整理知识点的花费金额限制、"
+                          "预算无上限）：budget_cny 只记录调用方给的值、**不作为停止条件**；"
+                          "真实花费看 cost_cny_all_calls"
+                          if budget_unlimited else
+                          "enforced（调用方显式要求硬上限）：本轮累计到 budget_cny 即停"),
+        "budget_enforced": (not budget_unlimited),
+        "budget_ignored_value": (float(budget or 0.0) if budget_unlimited else 0.0),
+        "reasoning_tokens_this_run": rt_this,
+        "reasoning_token_share_this_run": (round(rt_this / to_this, 4) if to_this else 0.0),
+        "est_cost_cny": est.get("est_cost_cny"),
+        "est_rule": est.get("est_rule"),
+        "structure_calls": (est.get("est_calls_breakdown") or {}).get("structure") or 0,
+        "structural_notes": {
+            "structure": ("结构由本管线生成：%d 段 map + %s；页归属兜底见 coverage."
+                          "structure_conflicts / structure_filled / structure_fallback"
+                          % (len(est.get("segments") or []),
+                             "模型归并" if len(est.get("segments") or []) > 1 else "本地合成根")),
+            "knowledge": ("一条知识点 = 一个结构叶节点（v3 起页数不限，覆盖页由模型判断）；"
+                          "页归属唯一（page_owner），同一页不会进两条知识点，"
+                          "仲裁过程见 coverage.pages_filled / pages_rejected / "
+                          "pages_excluded / pages_conflict_dropped"),
+            "terms": ("重点名词随知识点提炼（term 必须出自该条材料，否则剔除并记 "
+                      "terms_rejected），汇总去重后由一次全局筛选调用决定保留哪些；"
+                      "每条带 first_kp_id（首次出现的知识点）与 evidence（出处块）"),
+        },
+        "elapsed_s": round(time.perf_counter() - started, 1),
+def _v2_coverage(est: dict, recs: list, norm: dict, tasks: list) -> dict:
+    """覆盖审计（口径写在这里，**也逐字写进产物**——C-0043 栽在口径不明上）。
+
+    口径（卡 C-0052 更新）：
+      1. **页计数**：分母 = `1..max_page`（max_page 是 `chunks.source_ref` 里最大的页号），
+         **含中间没有块的空页**；分子 = 产物的知识点 `pages` 并集。
+      2. **条数**：一条知识点 = **一个结构叶节点**（v3 起不再按"≤3 页"切；页数由模型判断，
+def _kp_page_index(doc_id: int, out_path: str | os.PathLike | None = None) -> dict:
+    """**只读**该课件的知识点产物，建 `{页号: (kp_id, kp_name)}`（名词关联用）。
+
+    读不到就返回空表（没有产物 / 旧版 / 坏文件都算），**绝不因此失败**：
+    名词解释是独立功能，不能反过来被知识点产物的状态卡住。
+    """
+    p = out_file(doc_id, out_path)
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    idx: dict = {}
+    for kp in (raw.get("knowledge_points") or []):
+        if not isinstance(kp, dict):
+            continue
+        kid, kname = str(kp.get("id") or ""), str(kp.get("name") or "")
+        for pg in (kp.get("pages") or []):
+            try:
+                idx.setdefault(int(pg), (kid, kname))
+            except (TypeError, ValueError):
+                continue
+    return idx
+
+
+def _terms_meta(est: dict, prompt: dict, segs: list, cand: list, terms: list,
+                gate: dict, calls: list, *, started: float, status: str = "done",
+                err: str = "", kp_link: dict | None = None,
+                rejected: list | None = None) -> dict:
+    """独立产物的 `meta`：提示词 sha256 / 每段规模 / 逐次调用 / 花费 / 名词口径。"""
+    agg = _v2_cost(calls)
+    rt = int(agg.get("reasoning_tokens") or 0)
+    to = int(agg.get("tokens_out") or 0)
+    kp_link = kp_link or {"read": False, "note": "没有可关联的知识点产物"}
+    return {
+        "doc_id": int(est["doc_id"]),
+        "deck": est.get("deck") or "",
+        "title": est.get("title") or "",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "source_card": "C-0058",
+        "pipeline_version": TERMS_VERSION,
+        "pipeline": ("C-0058 v4 名词解释（**独立功能**，core/kp_build.py::build_terms）："
+                     "只读库里的文本（chunks 正文 + 识图文本，按 source_ref 的页号组织）→ "
+                     "按 %d 页 / %d 字符双阈值切段，**每段一次模型调用**提炼重点名词"
+                     "（term 必须出自该段材料，否则剔除并记 terms_rejected）→ "
+                     "按名词去重汇总 → **一次全局筛选调用**（只保留该考名词解释的）→ "
+                     "写进本文件。人拍板 2026-09-29：把它从知识点总结管线里摘出来"
+                     % (TERMS_SEG_PAGES, TERMS_SEG_CHARS)),
+        "inputs": {"read": ["chunks.text", "chunks.source_ref", "chunks.ord",
+                            "figure_desc.no_info", "documents.title"],
+                   "not_read": ["logs/outline/<doc_id>.json", "chunks.topic",
+                                "chunks.heading_path"],
+                   "outline_read": False,
+                   "terms_artifact": {"read": bool(kp_link.get("read")),
+                                      "note": kp_link.get("note") or ""}},
+        "prompt_path": prompt["path"],
+        "prompt_sha256": prompt["sha256"],
+        "prompts": {"chars": prompt["chars"],
+                    "blocks": {"extract_sys": len(prompt["extract_sys"]),
+                               "extract_user": len(prompt["extract_user"]),
+                               "terms_sys": len(prompt["terms_sys"]),
+                               "terms_user": len(prompt["terms_user"])}},
+        "model": MODEL,
+        "params": {"thinking": THINKING_V2,
+                   "reasoning_effort": (REASONING_EFFORT if THINKING_V2 else ""),
+                   "temperature": TEMPERATURE,
+                   "temperature_note": "思考模式下 temperature 不生效（官方行为），保留仅为不动调用签名",
+                   "max_tokens": TERMS_MAX_TOKENS,
+                   "seg_pages": TERMS_SEG_PAGES, "seg_chars": TERMS_SEG_CHARS,
+                   "page_chars": TERMS_PAGE_CHARS},
+        "segments": [{"index": s["index"], "a": s["a"], "b": s["b"],
+                      "n_pages": len(s["pages"]), "pages": list(s["pages"]),
+                      "chars": s["chars"]} for s in segs],
+        "n_segments": len(segs),
+        "n_candidates": len(cand),
+        "n_terms": len(terms),
+        "terms_filter": {"mode": gate.get("filter") or "skipped",
+                         "note": gate.get("note") or "",
+                         "kept": gate.get("kept") or [],
+                         "dropped": gate.get("dropped") or [],
+                         "rule": ("逐段提炼 → 按名词去重汇总 → 一次全局筛选调用"
+                                  "（只保留该考名词解释的）；筛选失败时不过滤、全部保留")},
+        "terms_rejected": rejected or [],
+        "terms_fields": list(_TERMS_FIELDS_V4),
+        "kp_link": kp_link,
+        "kp_linked": sum(1 for t in terms if t.get("first_kp_id")),
+        "calls": calls,
+        "runs": _v2_runs(calls),
+        "cost_cny": agg["cost_cny"],
+        "cost_rule": ("cost_cny = 每次调用的 (tokens_in/1e6*%.2f + tokens_out/1e6*%.2f) * %.1f"
+                      "（思考 token 已在 completion 里）；失败轮 token 记 0，但照样占一行"
+                      % (PRICE_IN, PRICE_OUT, FX)),
+        "usage_total": {"calls": agg["calls"], "calls_failed": agg["calls_failed"],
+                        "tokens_in": agg["tokens_in"], "tokens_out": agg["tokens_out"],
+                        "reasoning_tokens": rt},
+        "reasoning_token_share": (round(rt / to, 4) if to else 0.0),
+        "elapsed_s": round(time.perf_counter() - started, 1),
+        "status": status,
+        "error": err,
+    }
+
+
+# 独立产物里每个名词的字段（顺序即展示顺序；`_TERMS_FIELDS` 是看板读的字段集）
+_TERMS_FIELDS_V4 = ("term", "en", "en_source", "def", "first_page",
+                    "first_kp_id", "first_kp_name", "kp_ids", "n_occurrences",
+                    "evidence", "seg_id", "seg_name", "page_from_model")
+
+
+def estimate_terms(doc_id: int, *, prompt_path=None, out_path=None,
+                   db_path=None) -> dict:
+    """dry-run：只读库里的文本，给出段数、调用次数与**上界**成本（不调模型、不写文件）。"""
+    prompt = load_terms_prompts(prompt_path)
+    ch = read_text_pages(doc_id, db_path)
+    if not ch["pages_all"]:
+        return {"doc_id": int(doc_id), "ok": False,
+                "error": "这份课件在库里没有任何块（chunks 为空），没有文本可提炼"}
+    segs = plan_terms_segments(ch)
+    seg_chars = sum(s["chars"] for s in segs)
+    n_pages = len(ch["pages_all"])
+    # 上界：提炼 = 段数次；筛选 = 1 次（输入是去重后的清单，按每段 8 个名词估）
+    est_in = int((prompt["chars"] * len(segs) + seg_chars) / CHARS_PER_TOKEN)
+    est_out = int(est_in * REASON_RATIO) + 500 * len(segs)
+    filt_in = int((len(prompt["terms_sys"]) + len(prompt["terms_user"])
+                   + 80 * 8 * len(segs)) / CHARS_PER_TOKEN)
+    filt_out = int(filt_in * REASON_RATIO) + 400
+    est_in += filt_in
+    est_out += filt_out
+    est_cost = round(est_in / 1e6 * PRICE_IN * FX + est_out / 1e6 * PRICE_OUT * FX, 6)
+    out = terms_out_file(doc_id, out_path)
+    prev = _load_prev(out)
+    prev_meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    return {
+        "doc_id": int(doc_id), "ok": True, "pipeline_version": TERMS_VERSION,
+        "title": doc_title_v2(doc_id, db_path), "deck": doc_title_v2(doc_id, db_path),
+        "n_pages": n_pages, "pages_all": list(ch["pages_all"]),
+        "max_page": ch["max_page"], "n_blocks": ch["n_blocks"],
+        "material_chars_total": sum(len(_terms_page_text(p, ch)) for p in ch["pages_all"]),
+        "segments": [{"index": s["index"], "a": s["a"], "b": s["b"],
+                      "n_pages": len(s["pages"]), "chars": s["chars"]} for s in segs],
+        "n_segments": len(segs), "seg_pages": TERMS_SEG_PAGES,
+        "seg_chars": TERMS_SEG_CHARS, "page_chars": TERMS_PAGE_CHARS,
+        "thinking": THINKING_V2, "reasoning_effort": REASONING_EFFORT,
+        "max_tokens": TERMS_MAX_TOKENS,
+        "est_calls": len(segs) + 1,
+        "est_calls_breakdown": {"extract": len(segs), "filter": 1},
+        输入 token 的 `REASON_RATIO` 倍（实测 1.19，上界取 1.5），再加正文输出。
+
+    返回的键与 v1 `estimate_v1()` 保持同名（看板的预估面板直接复用），
+    语义按 v2/v3 口径解释并在 `est_rule` 里写明；`outline_ignored=True` 表示
+    这次预估**没有读** `logs/outline/<doc_id>.json`。
+    """
+    kp_prompt = load_kp_prompts_v2(prompt_path)
+        "exists": out.exists(),
+        "prev": {"pipeline_version": str(prev_meta.get("pipeline_version") or ""),
+                 "n_terms": len([t for t in (prev.get("terms") or [])
+                                 if isinstance(t, dict)]),
+                 "generated_at": str(prev_meta.get("generated_at") or ""),
+                 "cost_cny": float(prev_meta.get("cost_cny") or 0.0)},
+        "outline_ignored": True,
+    }
+
+
+def prev_info_terms(doc_id: int, out_path: str | os.PathLike | None = None) -> dict:
+    """独立名词解释产物的状态（看板/CLI 判"要不要重新生成"用）。"""
+    out = terms_out_file(doc_id, out_path)
+    prev = _load_prev(out)
+    meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    terms = [t for t in (prev.get("terms") or []) if isinstance(t, dict)]
+    return {
+        "exists": out.exists(),
+        "path": str(out),
+        "pipeline_version": str(meta.get("pipeline_version") or ""),
+        "is_current_version": str(meta.get("pipeline_version") or "") == TERMS_VERSION,
+        "n_terms": len(terms),
+        "n_candidates": int(meta.get("n_candidates") or 0),
+        "filter_mode": str((meta.get("terms_filter") or {}).get("mode") or ""),
+        "generated_at": str(meta.get("generated_at") or ""),
+        "cost_cny": float(meta.get("cost_cny") or 0.0),
+        "prompt_sha256": str(meta.get("prompt_sha256") or ""),
+        "kp_linked": int(meta.get("kp_linked") or 0),
+    }
+
+
+def build_terms(doc_id: int, *, prompt_path=None, out_path=None, db_path=None,
+                dry_run: bool = False, force: bool = False, limit: int = 0,
+                log=print) -> dict:
+    """**独立功能**：给一份课件生成名词解释（卡 C-0058 从知识点总结管线摘出）。
+
+    流程：读库里的文本 → 按页数/字符双阈值切段 → **每段一次调用**提炼名词
+    （逐条校验必须出自该段材料）→ 按名词去重汇总 → **一次全局筛选调用**
+    → 只读知识点产物把 `first_kp_id` 关联上（读不到就留空）→ 原子落盘。
+
+    - `limit=N`：只跑前 N 段（调试用），产物照写并如实标 `status="stopped"`；
+    - `force=True`：忽略已有本版产物重跑（已有文件会被覆盖，调用前请先备份）；
+    - 本函数**不写任何数据库表、不碰知识点产物**。
+    """
+    started = time.perf_counter()
+    est = estimate_terms(doc_id, prompt_path=prompt_path, out_path=out_path,
+                         db_path=db_path)
+    if not est.get("ok"):
+        return {"ok": False, "error": est.get("error"), "doc_id": int(doc_id)}
+    if dry_run:
+        return {"ok": True, "dry_run": True, **est}
+
+    prompt = load_terms_prompts(prompt_path)
+    ch = read_text_pages(doc_id, db_path)
+    ch["pages_all"] = list(est["pages_all"])
+    deck = est.get("deck") or est.get("title") or ("文档 %d" % int(doc_id))
+    out = terms_out_file(doc_id, out_path)
+    segs = plan_terms_segments(ch)
+
+    calls: list = []
+    prev_meta = {}
+    if out.exists() and not force:
+        try:
+            prev_meta = (_load_prev(out).get("meta") or {})
+        except Exception:  # noqa: BLE001
+            prev_meta = {}
+    for _c in (prev_meta.get("calls") or []):
+        if isinstance(_c, dict):
+            _c = dict(_c)
+            _c.setdefault("run", 1)
+            calls.append(_c)
+    run_no = max([int(c.get("run") or 1) for c in calls] or [0]) + 1
+    log("名词解释（独立功能）：%s（doc#%d）· %d 页 → %d 段 → 预估 %d 次调用 · CNY%.4f"
+        % (est.get("title") or "", doc_id, est["n_pages"], len(segs),
+           est["est_calls"], est["est_cost_cny"]))
+    if calls:
+        log("调用账本：这份名词产物里已有 %d 次调用（%d 轮），本轮记为第 %d 轮"
+            % (len(calls), len(_v2_runs(calls)), run_no))
+
+    status, err = "done", ""
+    seg_recs: list = []
+    rejected: list = []
+    cand: list = []
+    terms: list = []
+    gate: dict = {"filter": "skipped", "note": "还没到筛选那一步", "kept": [], "dropped": []}
+    kp_link: dict = {"read": False, "note": "还没到关联那一步"}
+    try:
+        todo = segs[:int(limit)] if limit else segs
+        for i, seg in enumerate(todo, 1):
+            log("[%d/%d] 提炼 p.%s（%d 页 / %d 字符）"
+                % (i, len(segs), _pages_label(seg["pages"]), len(seg["pages"]),
+                   seg["chars"]))
+            one = extract_terms_seg(seg, ch, deck, prompt, calls=calls, log=log,
+                                    run_no=run_no)
+            if one["error"]:
+                log("  ★第 %d 段提炼失败：%s（这一段当空处理，不编名词）"
+                    % (seg["index"], one["error"]))
+            for r in one["rejected"]:
+                rejected.append(dict(r, seg=seg["index"]))
+            seg_recs.append({"id": "T%02d" % seg["index"],
+                             "name": "第 %d~%d 页" % (seg["a"], seg["b"]),
+                             "pages": list(seg["pages"]),
+                             "terms": one["terms"]})
+            log("  第 %d 段：%d 个名词（剔除 %d 个）"
+                % (seg["index"], len(one["terms"]), len(one["rejected"])))
+        if limit and len(todo) < len(segs):
+            status = "stopped"
+
+        cand = collect_terms_v2(seg_recs)
+        gate = filter_terms_v2(cand, prompt, deck, len(ch["pages_all"]),
+                               calls=calls, log=log, run_no=run_no)
+        terms = list(gate.get("terms") or [])
+
+        # 关联知识点（**只读**产物；读不到就留空，不影响别名次）
+        idx = _kp_page_index(doc_id, out_path)
+        seg_name = {r["id"]: r["name"] for r in seg_recs}
+        for t in terms:
+            key = str(t.get("first_kp_id") or "")
+            t["seg_id"], t["seg_name"] = key, seg_name.get(key, "")
+            try:
+                pg = int(t.get("first_page") or 0)
+            except (TypeError, ValueError):
+                pg = 0
+            pair = idx.get(pg)
+            if pair:
+                t["first_kp_id"], t["first_kp_name"] = pair[0], pair[1]
+                t["kp_ids"] = [pair[0]]
+            else:
+                t["first_kp_id"], t["first_kp_name"], t["kp_ids"] = "", "", []
+        kp_link = ({"read": True,
+                    "source": str(out_file(doc_id)),
+                    "note": ("只读该课件的知识点产物，按 first_page 关联"
+                             "（%d/%d 个名词关联上）"
+                             % (sum(1 for t in terms if t.get("first_kp_id")),
+                                len(terms)))}
+                   if idx else
+                   {"read": False,
+                    "note": ("没有可用的知识点产物（未整理 / 旧版 / 坏文件），"
+                             "first_kp_id 一律留空——名词解释不因此失败")})
+        log("名词解释：候选 %d 个 → 产物 %d 个（筛选模式 %s）"
+            % (len(cand), len(terms), gate.get("filter")))
+    except Exception as e:  # noqa: BLE001
+        status, err = "failed", "%s: %s" % (type(e).__name__, e)
+        terms = []
+        gate = {"filter": "skipped", "note": "整理中止", "kept": [], "dropped": []}
+        kp_link = {"read": False, "note": "整理中止：" + err}
+        log("★名词解释中止：%s" % err)
+
+    meta = _terms_meta(est, prompt, segs, cand, terms, gate, calls,
+                       started=started, status=status, err=err, kp_link=kp_link,
+                       rejected=rejected)
+    _save({"meta": meta, "terms": terms}, out)
+    log("完成：名词 %d 个（候选 %d，筛掉 %d）· %d 次调用 · CNY%.6f · 用时 %.0fs"
+        % (len(terms), meta["n_candidates"],
+           len((meta.get("terms_filter") or {}).get("dropped") or []),
+           meta["usage_total"]["calls"], meta["cost_cny"], meta["elapsed_s"]))
+    log("产物：%s" % out)
+    return {"ok": True, "status": status, "error": err, "out_path": str(out),
+            "meta": meta, "estimate": est}
+
+
+# ---------------------------------------------------------------- 产物组装
+def _v2_coverage(est: dict, recs: list, norm: dict, tasks: list) -> dict:
+    """覆盖审计（口径写在这里，**也逐字写进产物**——C-0043 栽在口径不明上）。
+
+    口径（卡 C-0052 更新）：
+      1. **页计数**：分母 = `1..max_page`（max_page 是 `chunks.source_ref` 里最大的页号），
+         **含中间没有块的空页**；分子 = 产物的知识点 `pages` 并集。
+      2. **条数**：一条知识点 = **一个结构叶节点**（v3 起不再按"≤3 页"切；页数由模型判断，
+         只有材料超过单次调用软上限时才按连续页再切，`split_reason` 里写明）。
+      3. **重复**：`overlap_pages` 必须为空——每页只允许出现在一条知识点里
+         （由"结构叶节点页集互斥 + 先到先得仲裁"保证，仲裁过程逐页记在下面的
+         `pages_conflict_dropped` 里）。
+      4. **页仲裁留痕**（卡 C-0052）：模型自己声明了几页（`pages_from_model`）、
+         管线补了几页（`pages_filled`）、剔了几页（`pages_rejected`）、
+         模型显式排除了几页（`pages_excluded`）、因冲突丢掉几页
+         （`pages_conflict_dropped`）——五个数都逐页可查。
+    """
+    owner_kp: dict = {}
+    overlap: list = []
+    for r in recs:
+        for p in (r.get("pages") or []):
+            n = int(p)
+            if n in owner_kp and owner_kp[n] != r.get("id"):
+                overlap.append(n)
+            owner_kp[n] = r.get("id")
+    pages_all = list(est.get("pages_all") or [])
+    uncovered = [p for p in pages_all if p not in owner_kp]
+    # 模型显式排除的页 → 未覆盖原因用它自己给的理由（比"任务没生成"更准确）
+    excl_reason: dict = {}
+    filled_rows: list = []
+    rejected_rows: list = []
+    conflict_rows: list = []
+    n_from_model = 0
+    for r in recs:
+        kid = r.get("id") or ""
+        for x in (r.get("pages_excluded") or []):
+            try:
+                excl_reason[int(x.get("page"))] = "知识点 %s 显式排除：%s" % (
+                    kid, x.get("reason") or "（没给理由）")
+        if nd["is_leaf"]:
+            h["leaves"] += 1
+        h["pages"] += len(nd["pages"])
+    return {
+        "source": "model",
+        "generated_by": "core/kp_build.py::gen_structure_v2（整理管线自己的模型调用）",
+        "outline_read": False,
+        "note": ("这份结构**不复用**入库管线（core/outline.py）的成果，也不读 "
+                 "logs/outline/<doc_id>.json；输入只有库里的文本。"),
+        "merged_by": gen["merged_by"], "merge_note": gen["merge_note"],
+        "params": gen["params"], "segments": gen["segments"],
+        "n_nodes": norm["n_nodes"], "n_leaves": norm["n_leaves"],
+        "max_level": norm["max_level"],
+        "level_histogram": [hist[k] for k in sorted(hist)],
+        "level_rule": ("层级深浅由模型按内容判断（提示词已删掉\u201c最多 3 级\u201d的硬限制，"
+                       "鼓励四到五级）；管线侧没有层级常数，这里只统计、不裁剪"),
+        "page_titles": {str(k): v for k, v in sorted(gen["titles"].items())},
+        "segment_drafts": [{"segment": d["segment"], "a": d["a"], "b": d["b"],
+                            "n_sections": len(d["sections"]),
+                            "sections": [s["name"] for s in d["sections"]]}
+                           for d in gen["raw_drafts"]],
+        "raw_root": gen["root"],
+        "root": tree,
+        "nodes": nodes,
+        "page_owner": {str(p): nid for p, nid in sorted(norm["page_owner"].items())},
+        "n_pages": len(ch["pages_all"]),
+    }
+
+
+def _v2_meta(est: dict, kp_prompt: dict, st_prompt: dict, norm: dict, tasks: list,
+             recs: list, calls: list, *, status: str, started: float, budget: float,
+             struct_reused: bool, failed: list, err: str = "",
+             run_no: int = 1,
+             budget_unlimited: bool = BUDGET_UNLIMITED) -> dict:
+    """产物的 `meta`：模型 / 提示词 sha256 / **逐次调用记录** / 花费 / **覆盖率口径**。
+
+    花费给**两个口径**（都不许含糊）：
+      - `cost_cny` / `usage_total_this_run`：**本次运行**（第 `run_no` 轮）花的；
+      - `cost_cny_all_calls` / `usage_total_all_calls`：这份产物**从头到现在**的全部调用
+        （续跑与 `--force` 重跑的轮次都累积在 `meta.calls` 里，按 `run` 分组见 `meta.runs`）。
+
+    卡 C-0052 追加：
+      - `params.thinking=true` + `params.reasoning_effort="max"`（推理模式实测凭据）；
+      - `budget_policy`：预算**只记录不拦停**（人拍板解除花费上限）。
+    卡 C-0058 删掉：`n_terms` / `terms_filter` / `params.terms_max_tokens` /
+    `prompts.knowledge.terms_chars` / `structural_notes.terms`——名词解释不再属于这份产物，
+    它的账与口径写在独立产物 `logs/knowledge/<doc_id>-名词解释.json` 的 `meta` 里。
+    """
+    agg = _v2_cost(calls)
+    this = _v2_cost(calls, run=run_no)
+                                 for p in sorted(norm["page_owner"])},
+        "structure_conflicts": norm["conflicts"],
+        "structure_filled": norm["filled"],
+        "structure_fallback": norm["fallback"],
+        "structure_rule": ("页归属来自**本管线生成的结构树**：叶节点先到先得占页（冲突记 "
+                           "structure_conflicts），模型漏掉的页按「就近」补入（记 structure_filled）；"
+                           "不读 logs/outline/<doc_id>.json"),
+        # ---- 卡 C-0052：模型判断覆盖页之后的仲裁留痕 ----
+        "pages_rule": ("覆盖页由模型判断（pages / excluded_pages），管线仲裁四步："
+                       "越界剔除 → 显式排除尊重 → 与他人冲突先到先得 → 漏声明按结构归属补入"),
+        "n_pages_from_model": n_from_model,
+        "pages_filled": filled_rows,
+        "pages_rejected": rejected_rows,
+        "pages_conflict_dropped": conflict_rows,
+        "pages_excluded": [{"page": p, "reason": excl_reason[p]}
+                           for p in sorted(excl_reason)],
+    }
+
+
+# ---------------------------------------------------------------- 后台线程（看板）
+def start_background(doc_id: int, **kw) -> dict:
+    """起一个后台线程跑 `build()`（看板按钮用）。同时只允许一个任务。
+
+    **不能阻塞 HTTP 线程**：整理一份课件要几分钟到几十分钟（每条一次模型调用），
+    在请求里同步跑会把看板卡死——入库那边是靠"请求挂很久 + 轮询进度"扛过去的，
+    这里直接开线程，请求立刻返回，进度走 `/api/kp-build/progress`。
+    """
+    if is_running():
+        return {"started": False,
+                "error": "已有一个整理任务在跑，请等它结束（同一时间只允许一个）"}
+    with _STATE_LOCK:
+        _STATE.update({"running": True, "doc_id": int(doc_id), "kp_done": 0,
+                       "kp_total": 0, "cost_cny": 0.0, "stage_index": 0})
+    progress.reset()
+    progress.begin("整理知识点：doc#%d" % int(doc_id), files_total=1)
+
+    def _run() -> None:
+        try:
+            build(doc_id, progress_on=True, **kw)
+        except Exception as e:  # noqa: BLE001
+            progress.end("failed", error="%s: %s" % (type(e).__name__, e))
+        finally:
+            with _STATE_LOCK:
+                _STATE["running"] = False
+
+    th = threading.Thread(target=_run, name="kp-build-%d" % int(doc_id), daemon=True)
+    th.start()
+    return {"started": True, "doc_id": int(doc_id)}
+
+
+# ================================================================ 卡 C-0049：v2 的 dry-run / 主流程 / 对外入口
+def estimate_v2(doc_id: int, *, prompt_path=None, struct_prompt_path=None,
+                db_path=None) -> dict:
+    """dry-run（v3）：只读库里的**文本**，给出结构调用次数、知识点条数区间与**上界**成本。
+
+    口径（**上界**，不是承诺；看板不许把它当报价）：
+      - **结构调用** = 段数 + (1 if 段数 > 1 else 0)。段数按"每段 ≤STRUCT_SEG_PAGES 页
+        且 ≤STRUCT_SEG_CHARS 字符"双阈值切出来，与大课件的页数无关地有上界；
+        只有一段时本地合成根节点，**不再调模型**。
+      - **知识点条数**（卡 C-0052 改口径）：一条 = 一个结构叶节点，**页数不限**。
+        所以下界 = `ceil(全份材料字符 / KP_MATERIAL_CHARS_MAX)`（最省的情况：整份塞进
+        尽可能少的叶节点），上界 = `N`（一页一条，最碎的情况）。真实条数由结构树决定。
+      - **成本**按**上界**（一页一条）算，并且**含思考 token**：思维链 token ≈ 该次
+        输入 token 的 `REASON_RATIO` 倍（实测 1.19，上界取 1.5），再加正文输出。
+
+    返回的键与 v1 `estimate_v1()` 保持同名（看板的预估面板直接复用），
+    语义按 v2/v3 口径解释并在 `est_rule` 里写明；`outline_ignored=True` 表示
+    这次预估**没有读** `logs/outline/<doc_id>.json`。
+    """
+    kp_prompt = load_kp_prompts_v2(prompt_path)
+    st_prompt = load_struct_prompts(struct_prompt_path)
+    ch = read_text_pages(doc_id, db_path)
+    if not ch["pages_all"]:
+        return {"doc_id": int(doc_id), "ok": False,
+                "error": "这份课件在库里没有任何块（chunks 为空），没有文本可整理"}
+    pages_all = ch["pages_all"]
+    segs = plan_structure_segments(ch)
+    struct_calls = len(segs) + (1 if len(segs) > 1 else 0)
+
+    per_page = []
+    for p in pages_all:
+        bs = ch["blocks"].get(p) or []
+        per_page.append({"page": p, "role": "leaf",
+                         "chars": sum(b["chars"] for b in bs),
+                         "n_body": sum(1 for b in bs if b["kind"] != "图片理解"),
+                         "n_fig": sum(1 for b in bs if b["kind"] == "图片理解")})
+    mat_chars = sum(x["chars"] for x in per_page)
+    n = len(pages_all)
+    kp_min = max(1, (mat_chars + KP_MATERIAL_CHARS_MAX - 1) // KP_MATERIAL_CHARS_MAX)
+    kp_max = n
+    # 上界成本：结构（段材料按每页截断后的字符算）+ 知识点（每页一条、每条一页材料）
+    # 思考模式下思维链也算 completion token，所以 est_out 不是"正文 350"那么小。
+    seg_chars = sum(s["chars"] for s in segs)
+    seg_in_tok = int((st_prompt["chars"] * len(segs) + seg_chars) / CHARS_PER_TOKEN)
+    merge_in_tok = int((st_prompt["chars"] + 2500) / CHARS_PER_TOKEN)
+    kp_in_tok = int((kp_prompt["chars"] * kp_max + mat_chars) / CHARS_PER_TOKEN)
+    est_in = seg_in_tok + merge_in_tok + kp_in_tok
+    est_out = (int(seg_in_tok * REASON_RATIO) + 1200 * len(segs)
+               + int(merge_in_tok * REASON_RATIO) + 1500
+               + int(kp_in_tok * REASON_RATIO) + 450 * kp_max)
+    est_cost = round(est_in / 1e6 * PRICE_IN * FX + est_out / 1e6 * PRICE_OUT * FX, 6)
+
+    out = out_file(doc_id)
+    prev = _load_prev(out)
+    prev_meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    prev_prompts = prev_meta.get("prompts") if isinstance(prev_meta.get("prompts"), dict) else {}
+    prev_struct = prev.get("structure") if isinstance(prev.get("structure"), dict) else {}
+    is_v2 = str(prev_meta.get("pipeline_version") or "") == PIPELINE_VERSION
+    # 「计划条数」的口径（这个数字要能被 `core/kp_batch.py::done_state` 用来判"已完成"，
+    # 所以必须与产物 `meta.kp_total` 同口径）：
+    #   - 有本版产物、且结构可以复用（提示词没换、页数没变）→ 用产物结构里的叶节点数
+    #     （= 上次真正跑出来的任务条数 = `meta.kp_total`）；
+    #   - 否则结构还没生成，只能给上界（每页一条）——那只是成本上界，不是承诺。
+    reuse_ok = bool(
+        is_v2 and isinstance(prev_struct.get("raw_root"), dict)
+        and int(prev_struct.get("n_pages") or 0) == n
+        and str((prev_prompts.get("structure") or {}).get("sha256") or "") == st_prompt["sha256"]
+        and str((prev_prompts.get("knowledge") or {}).get("sha256") or "") == kp_prompt["sha256"])
+    n_plan = int(prev_struct.get("n_leaves") or 0) if reuse_ok else 0
+    done = set()
+    if is_v2:
+
+
+def build_v2(doc_id: int, *, prompt_path=None, struct_prompt_path=None, out_path=None,
+             db_path=None, dry_run: bool = False, limit: int = 0, max_cost: float = 0.0,
+             force: bool = False, progress_on: bool = True, on_event=None,
+             log=print, budget_unlimited: bool | None = None) -> dict:
+    """整理一份课件（**v3：只读库里的文本**）。
+
+    流程：读文本 → （必要时）模型生成结构 → 每个叶节点一条知识点 → 原子落盘（**只出知识点**）。
+
+    - **推理模式**：结构与知识点两步都 `thinking=True` + `reasoning_effort="max"`
+      （卡 C-0052，人拍板），`max_tokens` 见 `KP_MAX_TOKENS` / `STRUCT_MAX_TOKENS`；
+    - **预算**：`budget_unlimited` 默认取模块级 `BUDGET_UNLIMITED=True`
+      （人拍板解除花费上限）→ `max_cost>0` 也**只记录不拦停**，写进
+      `meta.budget_enforced=False`；显式传 `budget_unlimited=False` 才恢复旧的到线即停；
+    - **页数**：不再"每条 ≤3 页"，一个结构叶节点 = 一条知识点；
+      覆盖页由模型判断（`pages` / `excluded_pages`），管线仲裁并逐页留痕；
+    - **名词**：卡 C-0058 起**不在本管线里**（摘出成独立功能：`build_terms()` /
+      `tools/terms_build.py`，产物 `logs/knowledge/<doc_id>-名词解释.json`）：
+    - 断点续跑：产物是**本版**（`C-0052-v3`）且提示词 sha256 没变时，**复用已生成的结构**
+      （省下结构那几次调用）与已完成的知识点，只补缺的条；
+    - `force=True`：忽略已有产物，结构与知识点全部重生成；
+    - `limit=N`：最多生成 N 条（调试用）；`progress_on=True`：向 `core/progress.py` 上报
+      （看板单份按钮）；`on_event`：批量整理的回调（`core/kp_batch.py`）。
+    """
+    unlimited = BUDGET_UNLIMITED if budget_unlimited is None else bool(budget_unlimited)
+    started = time.perf_counter()
+    est = estimate_v2(doc_id, prompt_path=prompt_path,
+                      struct_prompt_path=struct_prompt_path, db_path=db_path)
+        "budget_unlimited": bool(BUDGET_UNLIMITED),
+        "est_calls": struct_calls + kp_max,
+        "est_calls_breakdown": {"structure": struct_calls, "knowledge_max": kp_max,
+                                "knowledge_min": kp_min},
+        "est_tokens_in": est_in, "est_tokens_out": est_out, "est_cost_cny": est_cost,
+        "est_rule": ("上界估算（含思考 token）：结构 %d 次（%d 段 + %d 次归并）按每页 ≤%d 字符的材料算；"
+                     "知识点按**每页一条**的上界算（真实条数由结构树决定，"
+                     "一条 = 一个叶节点、页数不限，区间 %d~%d 条）；"
+                     "输入 token ≈ 字符/%.1f；输出 = 思维链（输入 ×%.1f，实测 1.19）+ 正文"
+                     "（结构 %d/次、知识点 %d/条）；"
+                     "单价非高峰 $%.2f/1M 入、$%.2f/1M 出，汇率 %.1f"
+                     % (struct_calls, len(segs), 1 if len(segs) > 1 else 0,
+                        STRUCT_PAGE_CHARS, kp_min, kp_max, CHARS_PER_TOKEN,
+                        REASON_RATIO, 1200, 450, PRICE_IN, PRICE_OUT, FX)),
+        "already_done_pages": sorted(done),
+        "already_out": str(out) if out.exists() else "",
+        "out_path": str(out),
+        "prompt_path": kp_prompt["path"], "prompt_sha256": kp_prompt["sha256"],
+        "structure_prompt_path": st_prompt["path"],
+        "structure_prompt_sha256": st_prompt["sha256"],
+        "outline_ignored": True,
+        "outline_note": ("v2/v3/v4 不读 logs/outline/%d.json（那是入库管线的结构成果，只服务知识库）；"
+                         "结构由本管线的模型调用生成" % int(doc_id)),
+        "pages_with_blocks": pages_with_blocks,
+        "max_page": ch["max_page"], "n_blocks": ch["n_blocks"],
+    }
+
+
+def prev_info_v2(doc_id: int, out_path: str | os.PathLike | None = None) -> dict:
+    """产物状态（供调用方决定"要不要备份、能不能续跑、能不能跳过"）。
+
+    字段名与 v1 `prev_info_v1()` 一致（看板/批量直接复用），**口径按 v2/v3 解释**：
+      - `n_done_pages` / `pages_total` 数的是**知识点条数**
+        （v1 数的是页；两者都是"这份产物做到哪儿了"的同一件事）；
+      - `resumable`：**本版**（`C-0052-v3`）产物且至少有一条成品 → 可断点续跑
+        （结构不必重生成）。旧版（`C-0049-v2` 等）产物 `is_current_version=False`，
+        会被判"非本版"而重跑——**这不是坏数据**：它照样能被 `_load_prev()` 读出来、
+        看板按 `meta.pipeline_version` 分流显示，只是不参与本版续跑。
+      - `n_terms` / `has_terms`：**旧产物**（v2/v3）里有没有名词解释汇总。
+        旧 v2 产物连这个键都没有 → 0/False，读它不会抛错；v4 产物也不再有这个键
+        （名词已摘出），所以 v4 这里同样是 0/False——**这不是坏数据**。
+      - `has_terms_file` / `terms_file`（卡 C-0058 加）：**独立名词解释产物**
+        `logs/knowledge/<doc_id>-名词解释.json` 在不在、在哪。看板的名词解释栏
+        先看它、再回落看旧产物的顶层 `terms`。
+    """
+    out = out_file(doc_id, out_path)
+    prev = _load_prev(out)
+    meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    ver = str(meta.get("pipeline_version") or "")
+    kps = [r for r in (prev.get("knowledge_points") or []) if isinstance(r, dict)]
+    done = [r for r in kps if str(r.get("summary") or "").strip()]
+    terms = [t for t in (prev.get("terms") or []) if isinstance(t, dict)]
+    tfile = terms_out_file(doc_id)
+    return {
+        "exists": out.exists(),
+        "path": str(out),
+        "pipeline_version": ver,
+        "is_current_version": ver == PIPELINE_VERSION,
+        "n_kps": len(kps),
+        "n_done_pages": len(done),
+        "resumable": bool(done) and ver == PIPELINE_VERSION,
+        "pages_total": int(meta.get("kp_total") or 0),
+        "cost_cny": float(meta.get("cost_cny_all_calls") or 0.0),
+        "generated_at": str(meta.get("generated_at") or ""),
+        "source_card": str(meta.get("source_card") or ""),
+        # v2 专属：结构是否已在产物里（续跑时不必重生成结构）
+        "has_structure": isinstance(prev.get("structure"), dict)
+                         and bool((prev.get("structure") or {}).get("raw_root")),
+        "structure_prompt_sha256": str(
+            ((meta.get("prompts") or {}).get("structure") or {}).get("sha256") or ""),
+        # 名词解释（卡 C-0052 加、C-0058 保留）：旧产物看自己的顶层 terms 键
+        "n_terms": len(terms),
+        "has_terms": bool(terms),
+        # 卡 C-0058 专属：独立名词解释产物（名词功能已从本管线摘出）
+        "terms_file": str(tfile),
+        "has_terms_file": tfile.is_file(),
+    }
+
+
+def _decorate_tree(node: dict, ids: list, idx: list, kp_ids: dict) -> dict:
+    """把先序生成的节点 id / 页 / 知识点挂回展示树（顺序与 `_flat_nodes` 完全一致）。"""
+    nid = ids[idx[0]]
+    idx[0] += 1
+    kids = [_decorate_tree(c, ids, idx, kp_ids) for c in (node.get("children") or [])]
+    me = {"id": nid, "name": node["name"], "pages": list(node.get("pages") or []),
+          "kp_ids": sorted(set(kp_ids.get(nid) or []))}
+    if kids:
+        me["children"] = kids
+    return me
+
+
+def _v2_structure_block(gen: dict, norm: dict, tasks: list, recs: list,
+                        ch: dict) -> dict:
+    """产物顶层 `structure`：**模型生成的思维导图**（树 + 节点表 + 页归属）。
+
+    给前端（卡 C-0050）消费的两个入口：
+      - `root`：嵌套树，节点带 `id / name / pages / kp_ids / children`——"树 + 点节点看知识点"直接用；
+      - `nodes`：扁平节点表（含 `level / path / parent_id / children_ids / is_leaf`），
+        需要按层级渲染或做面包屑时用它。
+    """
+    kp_ids: dict = {}
+    for t in tasks:
+        kp_ids.setdefault(t["node_id"], [])
+    for r in recs:
+        kp_ids.setdefault(r.get("node_id") or "", []).append(r.get("id"))
+    ids = [n["id"] for n in norm["nodes"]]
+    tree = _decorate_tree(gen["root"], ids, [0], kp_ids)
+    nodes = []
+    for nd in norm["nodes"]:
+        nodes.append({"id": nd["id"], "name": nd["name"], "level": nd["level"],
+                      "path": list(nd["path"]), "parent_id": nd["parent_id"],
+                      "children_ids": list(nd["children_ids"]),
+                      "is_leaf": bool(nd["is_leaf"]), "pages": list(nd["pages"]),
+                      "kp_ids": sorted(set(kp_ids.get(nd["id"]) or []))})
+    # 层级分布（卡 C-0052：人要求"多设计子节点、可以到四五级"，这是核对入口）
+    hist: dict = {}
+    for nd in norm["nodes"]:
+        lv = int(nd["level"])
+        h = hist.setdefault(lv, {"level": lv, "nodes": 0, "leaves": 0, "pages": 0})
+        h["nodes"] += 1
+        if nd["is_leaf"]:
+            h["leaves"] += 1
+        h["pages"] += len(nd["pages"])
+    return {
+        "source": "model",
+        "generated_by": "core/kp_build.py::gen_structure_v2（整理管线自己的模型调用）",
+        "outline_read": False,
+        "note": ("这份结构**不复用**入库管线（core/outline.py）的成果，也不读 "
+                 "logs/outline/<doc_id>.json；输入只有库里的文本。"),
+        "merged_by": gen["merged_by"], "merge_note": gen["merge_note"],
+        "params": gen["params"], "segments": gen["segments"],
+        "n_nodes": norm["n_nodes"], "n_leaves": norm["n_leaves"],
+        "max_level": norm["max_level"],
+        "level_histogram": [hist[k] for k in sorted(hist)],
+        "level_rule": ("层级深浅由模型按内容判断（提示词已删掉\u201c最多 3 级\u201d的硬限制，"
+                       "鼓励四到五级）；管线侧没有层级常数，这里只统计、不裁剪"),
+        "page_titles": {str(k): v for k, v in sorted(gen["titles"].items())},
+        "segment_drafts": [{"segment": d["segment"], "a": d["a"], "b": d["b"],
+                            "n_sections": len(d["sections"]),
+                            "sections": [s["name"] for s in d["sections"]]}
+                           for d in gen["raw_drafts"]],
+        "raw_root": gen["root"],
+        "root": tree,
+        "nodes": nodes,
+        "page_owner": {str(p): nid for p, nid in sorted(norm["page_owner"].items())},
+        "n_pages": len(ch["pages_all"]),
+    }
+
+
+def _v2_meta(est: dict, kp_prompt: dict, st_prompt: dict, norm: dict, tasks: list,
+             recs: list, calls: list, *, status: str, started: float, budget: float,
+             struct_reused: bool, failed: list, err: str = "",
+             run_no: int = 1,
+             budget_unlimited: bool = BUDGET_UNLIMITED) -> dict:
+    """产物的 `meta`：模型 / 提示词 sha256 / **逐次调用记录** / 花费 / **覆盖率口径**。
+
+    花费给**两个口径**（都不许含糊）：
+      - `cost_cny` / `usage_total_this_run`：**本次运行**（第 `run_no` 轮）花的；
+      - `cost_cny_all_calls` / `usage_total_all_calls`：这份产物**从头到现在**的全部调用
+        （续跑与 `--force` 重跑的轮次都累积在 `meta.calls` 里，按 `run` 分组见 `meta.runs`）。
+
+    卡 C-0052 追加：
+      - `params.thinking=true` + `params.reasoning_effort="max"`（推理模式实测凭据）；
+      - `budget_policy`：预算**只记录不拦停**（人拍板解除花费上限）。
+    卡 C-0058 删掉：`n_terms` / `terms_filter` / `params.terms_max_tokens` /
+    `prompts.knowledge.terms_chars` / `structural_notes.terms`——名词解释不再属于这份产物，
+    它的账与口径写在独立产物 `logs/knowledge/<doc_id>-名词解释.json` 的 `meta` 里。
+    """
+    agg = _v2_cost(calls)
+    this = _v2_cost(calls, run=run_no)
+    done = [r for r in recs if str(r.get("summary") or "").strip()]
+    cover = _v2_coverage(est, recs, norm, tasks)
+    rt_this = int(this.get("reasoning_tokens") or 0)
+    to_this = int(this.get("tokens_out") or 0)
+    return {
+        "doc_id": int(est["doc_id"]),
+        "chapter": est.get("title") or "",
+        "deck": est.get("deck") or est.get("title") or "",
+        "source_card": "C-0058",
+        "pipeline": ("C-0058 v4 知识点整理管线（core/kp_build.py）：只读库里的文本"
+                     "（chunks 正文 + 识图文本，按 source_ref 的页号组织）→ 模型生成思维导图结构"
+                     "（%d 页/段、%d 字符/段双阈值 map-reduce，层级由模型判断）→ "
+                     "一个结构叶节点一条知识点（页数不限、覆盖页由模型判断 + 管线仲裁）。"
+                     "**只出知识点**：名词解释已摘出为独立功能"
+                     "（core/kp_build.py::build_terms / tools/terms_build.py）"
+                     % (STRUCT_SEG_PAGES, STRUCT_SEG_CHARS)),
+        "pipeline_version": PIPELINE_VERSION,
+        "inputs": {
+            "read": ["chunks.text", "chunks.source_ref", "chunks.ord",
+                     "figure_desc.no_info", "documents.title"],
+            "not_read": ["logs/outline/<doc_id>.json", "chunks.topic",
+                         "chunks.heading_path", "入库结构派生的任何字段"],
+            "outline_read": False,
+            "note": ("整理管线只吃库里的文本；知识库的结构化数据只用于构建知识库"
+                     "（人拍板 2026-09-23）"),
+        },
+        "structure_source": "model（本管线生成）",
+        "structure_reused": bool(struct_reused),
+        "prompts": {
+            "structure": {"path": st_prompt["path"], "sha256": st_prompt["sha256"],
+    except Exception as e:  # noqa: BLE001
+        status, err = "failed", "%s: %s" % (type(e).__name__, e)
+        log("★整理中止：%s" % err)
+        _emit(on_event, {"ev": "log", "msg": "★整理中止：%s" % err})
+    finally:
+        try:
+            persist()
+        except Exception as e:  # noqa: BLE001
+            log("★落盘失败：%s" % e)
+            status, err = "failed", str(e)
+        if progress_on:
+            with _STATE_LOCK:
+                _STATE["running"] = False
+            progress.end(status if status != "stopped" else "done", error=err)
+        _emit(on_event, {"ev": "end", "status": status, "error": err,
+                         "cost_cny": spent})
+
+    meta = (_load_prev(out).get("meta") or {})
+    cov = meta.get("coverage") or {}
+    this = meta.get("usage_total_this_run") or {}
+    log("完成：%d/%d 条知识点（覆盖 %d/%d 页）· 结构 %d 节点 / %d 叶节点（最深 %d 级）"
+        "· 用时 %.0fs"
+        % (meta.get("kp_actual", 0), meta.get("kp_total", 0),
+           cov.get("n_covered", 0), cov.get("pages_total", 0),
+           norm["n_nodes"], norm["n_leaves"], norm["max_level"],
+           meta.get("elapsed_s", 0)))
+    log("本轮开销：¥%.6f（调用 %d 次，失败 %d 次；入 %d / 出 %d token，其中思考 %d token"
+        " = 输出的 %.1f%%）"
+        % (this.get("cost_cny", 0), this.get("calls", 0), this.get("calls_failed", 0),
+           this.get("tokens_in", 0), this.get("tokens_out", 0),
+           this.get("reasoning_tokens", 0),
+           100.0 * (meta.get("reasoning_token_share_this_run") or 0.0)))
+    log("这份产物累计开销：¥%.6f（调用 %d 次 / %d 轮）· 产物 %s"
+        % (meta.get("cost_cny_all_calls", 0),
+           (meta.get("usage_total_all_calls") or {}).get("calls", 0),
+           len(meta.get("runs") or []), out))
+    return {"ok": True, "status": status, "error": err, "out_path": str(out),
+            "meta": meta, "estimate": est}
+
+
+# ---------------------------------------------------------------- 对外入口（默认 v2）
+def estimate(doc_id: int, *, outline_path=None, prompt_path=None, db_path=None,
+             struct_prompt_path=None, pipeline: str | None = None) -> dict:
+    """dry-run 入口。**默认走 v2（只读文本）**；`pipeline="v1"` 走读 outline 的旧路。
+
+    `outline_path` 只为兼容看板既有的调用签名而保留：v2 **不用它**，
+    返回里 `outline_ignored=True`（v1 才读它）。
+    """
+    if str(pipeline or "").lower() == "v1":
+        return estimate_v1(doc_id, outline_path=outline_path,
+                           prompt_path=prompt_path, db_path=db_path)
+    return estimate_v2(doc_id, prompt_path=prompt_path,
+                       struct_prompt_path=struct_prompt_path, db_path=db_path)
+
+
+# ---------------------------------------------------------------- v1 回退路径
+# ⚠ [重建] 这一段原本是 **C-0045 那代管线**的实现（`build_v1` + `estimate_v1` +
+# `prev_info_v1` + `load_kp_prompts` + `load_outline` …，恢复版里整段丢失）。
+# 现状：只保留 `build_v1` 的签名与一具"明确拒绝"的函数体 ——
+#   · 默认路径（v2/v3）**不受影响**：`build()` 只在 `pipeline="v1"` 时才调它，
+#     而全仓库默认都是 `pipeline=None` ⇒ 走 `build_v2()`；
+#   · 真需要 v1 时（`--pipeline v1` 对照/回退）会得到一句清楚的话，而不是
+#     `NameError`；
+#   · 待用 `ai_decompile.py --pyc "...\core\kp_build.pyc"` 重建后替换本函数体即可。
+def build_v1(doc_id: int, *, outline_path=None, prompt_path=None, out_path=None,
+             db_path=None, dry_run: bool = False, limit: int = 0, max_cost: float = 0.0,
+             force: bool = False, progress_on: bool = True, on_event=None,
+             log=print) -> dict:
+    """v1（C-0045）回退路径 —— **本版未重建**，调用即明确报错。"""
+    return {
+        "ok": False,
+        "error": ("v1 管线未重建：恢复时整段丢失（约 400 行）。"
+                  "请改用默认路径（pipeline=None ⇒ v2/v3），"
+                  "或用 ai_decompile.py 重建 kp_build.pyc 后替换 build_v1 的函数体。"),
+        "doc_id": int(doc_id),
+        "pipeline": "v1",
+    }
+
+
+def prev_info_v1(doc_id: int, out_path=None) -> dict:
+    """v1 产物状态 —— 同上，未重建。"""
+    return {"exists": False, "error": "v1 管线未重建", "pipeline": "v1"}
+
+
+def estimate_v1(doc_id: int, *, outline_path=None, prompt_path=None,
+                db_path=None) -> dict:
+    """v1 预估 —— 同上，未重建。"""
+    return {"ok": False, "error": "v1 管线未重建", "doc_id": int(doc_id)}
+
+
+def build_v2(doc_id: int, *, prompt_path=None, struct_prompt_path=None, out_path=None,
+             db_path=None, dry_run: bool = False, limit: int = 0, max_cost: float = 0.0,
+             force: bool = False, progress_on: bool = True, on_event=None,
+             log=print, budget_unlimited: bool | None = None) -> dict:
+    """整理一份课件（**v3：只读库里的文本**）。
+
+    流程：读文本 → （必要时）模型生成结构 → 每个叶节点一条知识点 → 原子落盘（**只出知识点**）。
+
+    - **推理模式**：结构与知识点两步都 `thinking=True` + `reasoning_effort="max"`
+      （卡 C-0052，人拍板），`max_tokens` 见 `KP_MAX_TOKENS` / `STRUCT_MAX_TOKENS`；
+    - **预算**：`budget_unlimited` 默认取模块级 `BUDGET_UNLIMITED=True`
+      （人拍板解除花费上限）→ `max_cost>0` 也**只记录不拦停**，写进
+      `meta.budget_enforced=False`；显式传 `budget_unlimited=False` 才恢复旧的到线即停；
+    - **页数**：不再"每条 ≤3 页"，一个结构叶节点 = 一条知识点；
+      覆盖页由模型判断（`pages` / `excluded_pages`），管线仲裁并逐页留痕；
+    - **名词**：卡 C-0058 起**不在本管线里**（摘出成独立功能：`build_terms()` /
+      `tools/terms_build.py`，产物 `logs/knowledge/<doc_id>-名词解释.json`）：
+    - 断点续跑：产物是**本版**（`C-0052-v3`）且提示词 sha256 没变时，**复用已生成的结构**
+      （省下结构那几次调用）与已完成的知识点，只补缺的条；
+    - `force=True`：忽略已有产物，结构与知识点全部重生成；
+    - `limit=N`：最多生成 N 条（调试用）；`progress_on=True`：向 `core/progress.py` 上报
+      （看板单份按钮）；`on_event`：批量整理的回调（`core/kp_batch.py`）。
+    """
+    unlimited = BUDGET_UNLIMITED if budget_unlimited is None else bool(budget_unlimited)
+    started = time.perf_counter()
+    est = estimate_v2(doc_id, prompt_path=prompt_path,
+                      struct_prompt_path=struct_prompt_path, db_path=db_path)
+    if not est.get("ok"):
+        return {"ok": False, "error": est.get("error"), "doc_id": int(doc_id)}
+    if dry_run:
+        return {"ok": True, "dry_run": True, **est}
+
+    kp_prompt = load_kp_prompts_v2(prompt_path)
+    st_prompt = load_struct_prompts(struct_prompt_path)
+    ch = read_text_pages(doc_id, db_path)
+    ch["pages_all"] = list(est["pages_all"])
+    deck = est.get("deck") or est.get("title") or ("文档 %d" % int(doc_id))
+    out = out_file(doc_id, out_path)
+    est["budget_cny"] = float(max_cost or 0.0)
+
+    if progress_on:
+        progress.reset()
+        progress.begin("整理知识点(v4)：%s（doc#%d）" % (est.get("title") or "", doc_id),
+                       files_total=1)
+        _stage(0, note="读取库里的文本（%d 页 / %d 块）"
+                       % (len(ch["pages_all"]), ch["n_blocks"]))
+        with _STATE_LOCK:
+            _STATE.update({"running": True, "doc_id": int(doc_id), "kp_done": 0,
+                           "kp_total": 0, "cost_cny": 0.0})
+    _emit(on_event, {"ev": "stage", "stage": KP_STAGES[0], "stage_index": 0,
+                     "note": "读取库里的文本（%d 页）" % len(ch["pages_all"])})
+    log("推理模式：thinking=True · reasoning_effort=%s · 知识点 max_tokens=%d（思考 token 计入 completion）"
+        % (REASONING_EFFORT, KP_MAX_TOKENS))
+    if unlimited:
+        log("预算策略：**不限**（人拍板 2026-09-27）。调用方给的 max_cost=%s 只记进 meta，不作为停止条件"
+            % ("%.2f" % max_cost if max_cost else "0（未给）"))
+    else:
+        log("预算策略：硬上限 CNY%.2f（调用方显式要求 enforce）" % float(max_cost or 0.0))
+
+    calls: list = []
+    prev_raw = _load_prev(out)
+    prev = {} if force else prev_raw
+    prev_meta = prev_raw.get("meta") if isinstance(prev_raw.get("meta"), dict) else {}
+    # 逐次调用记录**跨轮累积**：这份产物从头到现在花过的每一次调用都留在 meta.calls 里
+    # （续跑、`--force` 重跑都不抹账），每条带 `run` 标记是第几轮，按轮汇总见 meta.runs。
+    # 缺 `run` 的老记录按第 1 轮补（v2 首版实现没写这个字段）。
+    calls: list = []
+    for _c in (prev_meta.get("calls") or []):
+        if isinstance(_c, dict):
+            _c = dict(_c)
+            _c.setdefault("run", 1)
+            calls.append(_c)
+    run_no = max([int(c.get("run") or 1) for c in calls] or [0]) + 1
+    if calls:
+        log("调用账本：产物里已有 %d 次调用记录（%d 轮，CNY%.6f），本轮记为第 %d 轮"
+            % (len(calls), len(_v2_runs(calls)),
+               sum(float(c.get("cost_cny") or 0) for c in calls), run_no))
+    prev_prompts = prev_meta.get("prompts") if isinstance(prev_meta.get("prompts"), dict) else {}
+    prev_struct = prev.get("structure") if isinstance(prev.get("structure"), dict) else {}
+    reuse = bool(
+        not force
+        and str(prev_meta.get("pipeline_version") or "") == PIPELINE_VERSION
+        and isinstance(prev_struct.get("raw_root"), dict)
+        # 页数变了（课件重入库）→ 结构必须重生成，否则页归属会对不上新文本
+        and int(prev_struct.get("n_pages") or 0) == len(ch["pages_all"])
+        and str((prev_prompts.get("structure") or {}).get("sha256") or "") == st_prompt["sha256"]
+        and str((prev_prompts.get("knowledge") or {}).get("sha256") or "") == kp_prompt["sha256"])
+
+    if reuse:
+        gen = {"root": prev_struct["raw_root"],
+               "raw_drafts": [], "titles": {int(k): v for k, v in
+                                            (prev_struct.get("page_titles") or {}).items()},
+               "segments": prev_struct.get("segments") or [],
+               "merged_by": prev_struct.get("merged_by") or "", "merge_note": "（续跑：复用产物里的结构）",
+               "params": prev_struct.get("params") or {}}
+        log("续跑：复用产物里的结构（%d 节点 / %d 叶节点），不重新生成、不重复花钱"
+            % (prev_struct.get("n_nodes") or 0, prev_struct.get("n_leaves") or 0))
+    else:
+        if prev and not reuse:
+            why = ("人显式要求重跑（--force）" if force else
+                   ("旧产物不是本版管线（%s）" % (prev_meta.get("pipeline_version") or "未知")
+                    if str(prev_meta.get("pipeline_version") or "") != PIPELINE_VERSION
+                    else "提示词换了（sha256 不一致），结构必须重生成"))
+            log("提示：%s → 结构与知识点全部重新生成；如需留档请先备份 %s" % (why, out.name))
+        _stage(1, note="模型生成思维导图结构（%d 段）"
+                       % len(est.get("segments") or []), on=progress_on)
+        _emit(on_event, {"ev": "stage", "stage": KP_STAGES[1], "stage_index": 1,
+                         "note": "生成结构"})
+        gen = gen_structure_v2(doc_id, ch, st_prompt, deck, calls=calls, log=log,
+                               run_no=run_no)
+
+    norm = normalize_structure_v2(gen["root"], ch["pages_all"], deck, log=log)
+    tasks = plan_kp_tasks_v2(norm["nodes"], norm["page_owner"], ch=ch)
+    log("结构：%d 个节点 / %d 个叶节点 / 最深 %d 级 → %d 条知识点"
+        "（v4：一个叶节点一条，页数不限；仅超 %d 字材料才按连续页切）"
+        % (norm["n_nodes"], norm["n_leaves"], norm["max_level"], len(tasks),
+           KP_MATERIAL_CHARS_MAX))
+
+    done_map: dict = {}
+    if reuse:
+        for r in (prev.get("knowledge_points") or []):
+            if isinstance(r, dict) and str(r.get("summary") or "").strip():
+                done_map[str(r.get("id") or "")] = r
+    recs: list = [done_map[t["kp_id"]] for t in tasks if t["kp_id"] in done_map]
+    if recs:
+        log("续跑：产物里已有 %d 条知识点，跳过这些（剩余 %d 条）"
+            % (len(recs), len(tasks) - len(recs)))
+
+    # 页仲裁的"已被收录"表（卡 C-0052）：跨条先到先得，续跑时把已有条目的页也算进来
+    claimed: dict = {}
+    for _r in recs:
+        for _p in (_r.get("pages") or []):
+            try:
+                claimed[int(_p)] = str(_r.get("id") or "")
+            except (TypeError, ValueError):
+                continue
+
+    extra_fail: list = []
+    # 卡 C-0063：预约表由多个 worker 线程共读写，读写都在 `claimed_lock` 里。
+    claimed_lock = threading.Lock()
+
+    def _claim_pages(kp_id, pages) -> list:
+        """★**调用前预约**（卡 C-0063 最关键的改动）→ 见模块级 `claim_pages()`。
+
+        为什么必须提前到调用之前：C-0062 报告 §7.1 的对抗实验实测——不预约时
+        （即使**加锁**）4 条任务全都会收录同一页，`overlap_pages=[10,11]`；
+        预约之后只有 1 条收录、3 条空，`overlap_pages=[]`。根因是那对
+        "读-改-写"**跨了整个模型调用**（10~88 秒），锁保护不了这么长的窗口。
+        """
+        return claim_pages(claimed, claimed_lock, kp_id, pages)
+
+    def _release_pages(kp_id, pages) -> None:
+        """回滚预约（失败 / 未最终收录的页）→ 见模块级 `release_pages()`。"""
+        release_pages(claimed, claimed_lock, kp_id, pages)
+
+    def spent_now() -> float:
+        """**本轮**累计花费（`max_cost` 是每次运行的硬上限，不是历史总额的上限）。"""
+        return round(sum(float(c.get("cost_cny") or 0) for c in calls
+                         if int(c.get("run") or 0) == run_no), 6)
+
+    spent = spent_now()
+    made = 0            # 本轮已生成条数（进度、--limit 都看它；**只由主线程改**）
+    status, err = "done", ""
+    if progress_on:
+        with _STATE_LOCK:
+            _STATE.update({"kp_done": len(recs), "kp_total": len(tasks)})
+
+    # 卡 C-0058：名词那两步（汇总去重 + 全局筛选）**已从本管线摘出**，产物不再有
+    # 顶层 `terms` 键，`meta` 里也没有 `n_terms` / `terms_filter` 了。名词解释改由
+    # 独立功能产出自己的文件（`build_terms()` / `tools/terms_build.py`）。
+
+    def ordered_recs() -> list:
+        return sorted(recs, key=lambda r: ((r.get("pages") or [0])[0], str(r.get("id") or "")))
+
+    def persist() -> None:
+        """落盘。**只由主线程调用**（并发路径里 worker 只调模型、不落盘）。
+
+        卡 C-0063 在这里加一道**兜底断言**：落盘前用 `_v2_coverage()` 算一次
+        `overlap_pages`，**不为空就拒绝落盘并抛错**（宁可失败也不出坏产物）。
+        这是"调用前预约"之外的第二道守护（C-0062 报告 §7.1 的三条一起上：
+        预约 + 落盘前断言 + 产物里保留 `meta.coverage.overlap_pages` 供事后查）。
+        """
+        cov_now = _v2_coverage(est, recs, norm, tasks)
+        if cov_now.get("overlap_pages"):
+            raise RuntimeError(
+                "★页归属出现重叠：overlap_pages=%s（同一页进了多条知识点）。"
+                "按卡 C-0063 的红线**拒绝落盘**——这是并发页仲裁的 bug，"
+                "宁可这一轮失败，也不写出坏产物" % (cov_now["overlap_pages"],))
+        # 并发下别把"正在被 append 的账本"直接拿去序列化（C-0062 报告 §7.4 的
+        # "锁内快照"）：这里在账本锁里取一份**一致快照**再交给 `_v2_meta()`。
+        # 串行时快照与原 list 逐条相同（产物不受影响）。
+        with _CALLS_LOCK:
+            calls_snap = list(calls)
+        doc = {"meta": _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls_snap,
+                                status=status, started=started, budget=max_cost,
+                                struct_reused=reuse, failed=extra_fail, err=err,
+                                run_no=run_no,
+                                budget_unlimited=unlimited),
+               "structure": _v2_structure_block(gen, norm, tasks, recs, ch),
+               "knowledge_points": ordered_recs()}
+        with _SAVE_LOCK:
+            _save(doc, out)
+
+    def _accept_rec(task: dict, rec: dict, mine: list) -> None:
+        """收下一条**成功**的记录：入列 → 收敛预约 → 进度 → 落盘 → 日志。
+
+        并发与串行两条路径共用这个函数，且**只由主线程调用**，所以 `recs` /
+        `done_map` / 进度 / 落盘在并发下也没有竞态（worker 线程不碰它们）。
+        """
+        nonlocal made, spent
+        kp_id = str(task["kp_id"])
+        recs.append(rec)
+        done_map[kp_id] = rec
+        keep = set()
+        for _p in (rec.get("pages") or []):
+            try:
+                _n = int(_p)
+            except (TypeError, ValueError):
+                continue
+            keep.add(_n)
+            with claimed_lock:
+                claimed[_n] = str(rec.get("id") or kp_id)
+        # 预约了但**最终没收录**的页（模型显式排除 / 越界 / 被抢）→ 撤回预约，
+        # 让它们如实进 coverage.uncovered（原因文案才说得对）。
+        _release_pages(kp_id, [p for p in mine if p not in keep])
+        made += 1
+        spent = spent_now()
+        if progress_on:
+            with _STATE_LOCK:
+                _STATE["kp_done"] = len(recs)
+                _STATE["cost_cny"] = spent
+            progress.tick(made, total=len(tasks),
+                          note="%s → %s" % (kp_id, rec.get("name") or ""))
+        _emit(on_event, {"ev": "tick", "kp_done": len(recs), "kp_total": len(tasks),
+                         "cost_cny": spent, "note": rec.get("name") or ""})
+        persist()
+        log("[%2d/%2d] %-12s p.%-8s → %-24s %d 字 / %d 要点 · CNY%.6f · 累计 CNY%.6f"
+            % (made, len(tasks), kp_id, _pages_label(task["pages"]),
+               (rec.get("name") or "")[:24], len(rec.get("summary") or ""),
+               len(rec.get("points") or []),
+               float((rec.get("usage") or {}).get("cost_cny") or 0), spent))
+
+    persist()          # 结构一生成就先落一次盘：中途失败也不丢结构（下次续跑直接复用）
+    try:
+        # ---------------------------------------------------------- 知识点：两条路径
+        #
+        # 卡 C-0063：`KP_INNER_WORKERS=1` 或只剩一条待生成时，走**改造前那条串行路径**
+        # （逐字保留：不建线程池、调用顺序与落盘时机一模一样）——这是安全的回退开关。
+        # 否则走并发路径：worker 线程只负责"调模型 + 解析成 rec"，收结果、页预约的
+        # 收敛、进度、落盘全部回到**主线程**做，所以共享状态没有竞态。
+        inner_w = max(1, min(inner_workers(), max(1, len(tasks))))
+        pending = [t for t in tasks if t["kp_id"] not in done_map]
+        use_parallel = inner_w > 1 and len(pending) > 1
+
+        if use_parallel:
+            log("知识点并发：%d 条待生成走 %d 路（进程级模型闸门 %d）；"
+                "调用前预约已开启，落盘前断言 overlap_pages 必须为空"
+                % (len(pending), inner_w, model_gate_limit()))
+
+            def _kp_worker(task: dict, mine: list) -> dict:
+                """worker 线程：**只做"调模型 + 解析"**，异常也在这里兜住。
+
+                不碰 `recs` / `claimed` 的收敛 / 进度 / 落盘（那些都在主线程），
+                所以并发下这些共享状态没有竞态；唯一共享的 `claimed`（预约表）
+                走 `claimed_lock`。异常不往外抛（外抛会让 `wait()` 那一圈丢掉
+                别的在飞结果），改为把错误带回主线程**逐条记账**。
+                """
+                try:
+                    rec = gen_kp_v2(task, ch, kp_prompt, deck, calls=calls, log=log,
+                                    run_no=run_no, claimed=claimed,
+                                    claimed_lock=claimed_lock)
+                    return {"ok": True, "rec": rec, "error": ""}
+                except Exception as e:  # noqa: BLE001
+                    return {"ok": False, "rec": None,
+                            "error": "%s: %s" % (type(e).__name__, e)}
+
+            stop_note = ""
+            futures: dict = {}
+            qi = 0
+            with _cf.ThreadPoolExecutor(max_workers=inner_w,
+                                        thread_name_prefix="kp-inner") as ex:
+                while True:
+                    # 填窗口：**提交前**先预约页（★调用前预约），再发调用。
+                    while (not stop_note) and len(futures) < inner_w and qi < len(pending):
+                        task = pending[qi]
+                        if limit and made >= int(limit):
+                            stop_note = ("已达 --limit %d 条上限，停止（剩余 %d 条下次续跑）"
+                                         % (int(limit), len(pending) - qi))
+                            break
+                        if max_cost and not unlimited and spent >= max_cost:
+                            stop_note = ("★累计 CNY%.6f 已达硬上限 CNY%.2f：停止"
+                                         "（剩余 %d 条下次续跑）"
+                                         % (spent, max_cost, len(pending) - qi))
+                            break
+                        qi += 1
+                        mine = _claim_pages(task["kp_id"], task["pages"])
+                        fut = ex.submit(_kp_worker, {**task, "doc_id": int(doc_id)}, mine)
+                        futures[fut] = (task, mine)
+                    if not futures:
+                        break
+                    done, _still = _cf.wait(list(futures),
+                                            return_when=_cf.FIRST_COMPLETED)
+                    for fut in done:
+                        task, mine = futures.pop(fut)
+                        one = fut.result()
+                        if not one.get("ok"):
+                            log("★失败 %s（p.%s）：%s"
+                                % (task["kp_id"], _pages_label(task["pages"]),
+                                   one.get("error")))
+                            _emit(on_event, {"ev": "log", "msg": "★失败 %s：%s"
+                                             % (task["kp_id"], one.get("error"))})
+                            extra_fail.append(task["kp_id"])
+                            _release_pages(task["kp_id"], mine)     # 失败 → 回滚预约
+                            persist()
+                            continue
+                                 "note": "第 %d/%d 条 · %s" % (i, len(tasks), task["kp_id"])})
+                # ★ 调用前预约（卡 C-0063）：串行路径同样预约——只有一套语义，
+                # 才能保证 `KP_INNER_WORKERS=1` 与并发路径的产物逐字段一致。
+                mine = _claim_pages(task["kp_id"], task["pages"])
+                try:
+                    rec = gen_kp_v2({**task, "doc_id": int(doc_id)}, ch, kp_prompt, deck,
+                                    calls=calls, log=log, run_no=run_no, claimed=claimed,
+                                    claimed_lock=claimed_lock)
+                except Exception as e:  # noqa: BLE001
+                    log("★失败 %s（p.%s）：%s: %s"
+                        % (task["kp_id"], _pages_label(task["pages"]), type(e).__name__, e))
+                    _emit(on_event, {"ev": "log", "msg": "★失败 %s：%s"
+                                     % (task["kp_id"], e)})
+                    extra_fail.append(task["kp_id"])
+                    _release_pages(task["kp_id"], mine)             # 失败 → 回滚预约
+                    persist()
+                    continue
+                _accept_rec(task, rec, mine)
+        if extra_fail and len(recs) == 0:
+            status = "failed"
+            err = "全部知识点都失败了（%d 条）" % len(extra_fail)
+        persist()
+        _stage(3, note="写入产物", on=progress_on)
+        _emit(on_event, {"ev": "stage", "stage": KP_STAGES[3], "stage_index": 3,
+                         "note": "写入产物"})
+    except Exception as e:  # noqa: BLE001
+        status, err = "failed", "%s: %s" % (type(e).__name__, e)
+        log("★整理中止：%s" % err)
+        _emit(on_event, {"ev": "log", "msg": "★整理中止：%s" % err})
+    finally:
+        try:
+            persist()
+        except Exception as e:  # noqa: BLE001
+            log("★落盘失败：%s" % e)
+            status, err = "failed", str(e)
+        if progress_on:
+            with _STATE_LOCK:
+                _STATE["running"] = False
+            progress.end(status if status != "stopped" else "done", error=err)
+        _emit(on_event, {"ev": "end", "status": status, "error": err,
+                         "cost_cny": spent})
+
+    meta = (_load_prev(out).get("meta") or {})
+    cov = meta.get("coverage") or {}
+    this = meta.get("usage_total_this_run") or {}
+    log("完成：%d/%d 条知识点（覆盖 %d/%d 页）· 结构 %d 节点 / %d 叶节点（最深 %d 级）"
+        "· 用时 %.0fs"
+        % (meta.get("kp_actual", 0), meta.get("kp_total", 0),
+           cov.get("n_covered", 0), cov.get("pages_total", 0),
+           norm["n_nodes"], norm["n_leaves"], norm["max_level"],
+           meta.get("elapsed_s", 0)))
+    log("本轮开销：CNY%.6f（调用 %d 次，失败 %d 次；入 %d / 出 %d token，其中思考 %d token"
+        " = 输出的 %.1f%%）"
+        % (this.get("cost_cny", 0), this.get("calls", 0), this.get("calls_failed", 0),
+           this.get("tokens_in", 0), this.get("tokens_out", 0),
+           this.get("reasoning_tokens", 0),
+           100.0 * (meta.get("reasoning_token_share_this_run") or 0.0)))
+    log("这份产物累计开销：CNY%.6f（调用 %d 次 / %d 轮）· 产物 %s"
+        % (meta.get("cost_cny_all_calls", 0),
+           (meta.get("usage_total_all_calls") or {}).get("calls", 0),
+           len(meta.get("runs") or []), out))
+    return {"ok": True, "status": status, "error": err, "out_path": str(out),
+            "meta": meta, "estimate": est}
+
+
+    **v1 回退路径也吃同一个策略**（卡 C-0052）：默认不限时把 `max_cost` 归零传给
+    `build_v1()`，于是 v1 的 `meta.budget_cny` 记 0（= 不限）——否则"整理知识点预算无上限"
+    会在 `--pipeline v1` 这条路上落空。
+    """
+    if str(pipeline or "").lower() == "v1":
+        unlimited = BUDGET_UNLIMITED if budget_unlimited is None else bool(budget_unlimited)
+        mc = float(max_cost or 0.0)
+        if unlimited and mc:
+            log("预算策略：不限（人拍板 2026-09-27；v1 回退路径同样生效）："
+                "--max-cost %.2f 只记录、不作为停止条件" % mc)
+            mc = 0.0
+        return build_v1(doc_id, outline_path=outline_path, prompt_path=prompt_path,
+                        out_path=out_path, db_path=db_path, dry_run=dry_run,
+
+
+def build(doc_id: int, *, outline_path=None, prompt_path=None, out_path=None,
+          db_path=None, dry_run: bool = False, limit: int = 0, max_cost: float = 0.0,
+          force: bool = False, progress_on: bool = True, on_event=None, log=print,
+          struct_prompt_path=None, pipeline: str | None = None,
+          budget_unlimited: bool | None = None) -> dict:
+    """整理一份课件的入口。**默认走 v3（只读库里的文本，自己生成结构，开推理模式）**。
+
+    `pipeline="v1"` 走 C-0045 那代（读 `logs/outline/<doc_id>.json`），仅供对照与回退。
+    `budget_unlimited`：None = 用模块级 `BUDGET_UNLIMITED`（默认 True，不限花费）；
+    显式 False 才让 `max_cost` 恢复成硬上限。
+    **v1 回退路径也吃同一个策略**（卡 C-0052）：默认不限时把 `max_cost` 归零传给
+    `build_v1()`，于是 v1 的 `meta.budget_cny` 记 0（= 不限）——否则"整理知识点预算无上限"
+    会在 `--pipeline v1` 这条路上落空。
+    """
+    if str(pipeline or "").lower() == "v1":
+        unlimited = BUDGET_UNLIMITED if budget_unlimited is None else bool(budget_unlimited)
+        mc = float(max_cost or 0.0)
+        if unlimited and mc:
+            log("预算策略：不限（人拍板 2026-09-27；v1 回退路径同样生效）："
+                "--max-cost %.2f 只记录、不作为停止条件" % mc)
+            mc = 0.0
+        return build_v1(doc_id, outline_path=outline_path, prompt_path=prompt_path,
+                        out_path=out_path, db_path=db_path, dry_run=dry_run,
+                        limit=limit, max_cost=mc, force=force,
+                        progress_on=progress_on, on_event=on_event, log=log)
+    return build_v2(doc_id, prompt_path=prompt_path,
+                    struct_prompt_path=struct_prompt_path, out_path=out_path,
+                    db_path=db_path, dry_run=dry_run, limit=limit, max_cost=max_cost,
+                    force=force, progress_on=progress_on, on_event=on_event, log=log,
+                    budget_unlimited=budget_unlimited)
+
+
+def prev_info(doc_id: int, out_path: str | os.PathLike | None = None,
+              pipeline: str | None = None) -> dict:
+    """已有产物的状态。默认按 v2 口径读（`pipeline="v1"` 走旧口径）。"""
+    if str(pipeline or "").lower() == "v1":
+        return prev_info_v1(doc_id, out_path=out_path)
+    return prev_info_v2(doc_id, out_path=out_path)
+
+
+def prompt_file_v2(path: str | os.PathLike | None = None) -> Path:
+    """v2 知识点提示词真源（结构提示词是另一个文件，见 `default_struct_prompt_file()`）。"""
+    return _prompt_path_v2(KP_PROMPT_NAME_V2, path)

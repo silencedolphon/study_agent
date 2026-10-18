@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · 设计 token 对照（现状 vs linear-app）· 卡 C-0091</title>
+<!--
+  卡 C-0091 原型之三：设计 token 对照表。
+  · 自包含：CSS/JS 全内联，零外部 CDN，零 @font-face，双击即可打开
+  · 左＝看板现状（tools\dashboard.py:6193-6197），右＝linear-app（G:\open-design\design-systems\linear-app\tokens.css）
+  · 用途：讨论时并排看差异，先定 token 再开施工卡
+-->
+<style>
+body{margin:0;background:#08090a;color:#f7f8f8;
+  font:14px/1.55 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}
+a{color:#828fff}
+code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px}
+.top{padding:14px 24px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;
+  align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;background:rgba(8,9,10,.94);
+  backdrop-filter:blur(8px);z-index:10}
+.top h1{font-size:16px;margin:0;font-weight:590}
+.tag{font-size:12px;color:#62666d;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:2px 10px}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 16px 80px}
+h2{font-size:16px;font-weight:590;margin:32px 0 12px;padding-bottom:8px;
+  border-bottom:1px solid rgba(255,255,255,.08)}
+h2:first-child{margin-top:0}
+h3{font-size:13px;font-weight:560;color:#8a8f98;margin:18px 0 8px;letter-spacing:.02em}
+p.note{color:#8a8f98;font-size:13px;margin:0 0 16px}
+p.note b{color:#d0d6e0;font-weight:560}
+
+/* 对照表 */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+th{color:#62666d;font-weight:500;font-size:12px;white-space:nowrap}
+tr:hover td{background:#191a1b}
+.sw{display:inline-block;width:15px;height:15px;border-radius:4px;border:1px solid rgba(255,255,255,.14);
+  vertical-align:-2px;margin-right:7px}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:#d0d6e0}
+.conf{color:#d29922;font-size:12px}
+.same{color:#3fb950;font-size:12px}
+.new{color:#828fff;font-size:12px}
+
+/* 并排对比卡 */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:820px){.two{grid-template-columns:1fr}}
+.pane{border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
+.pane .ph{padding:10px 14px;font-size:12px;color:#8a8f98;border-bottom:1px solid rgba(255,255,255,.08);
+  background:#191a1b}
+.pane .pb{padding:16px}
+
+/* ── 现状 token 渲染的示意卡 ── */
+.demo-now{background:#0f1115;padding:16px;border-radius:10px}
+.demo-now .card{background:#171a21;border:1px solid #2a2f3a;border-radius:10px;padding:16px}
+.demo-now h4{margin:0 0 6px;font-size:13px;color:#9aa3b2;font-weight:500}
+.demo-now .big{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums}
+.demo-now .sub{color:#9aa3b2;font-size:12px;margin-top:4px}
+.demo-now .accent{background:#5b9dff;color:#08111f;border:0;padding:8px 15px;border-radius:7px;
+  font-weight:600;font-size:13px;cursor:pointer}
+.demo-now .ghost{background:#1e222b;color:#e6e9ef;border:1px solid #2a2f3a;padding:7px 12px;
+  border-radius:7px;font-size:13px;cursor:pointer}
+.demo-now .inner{background:#1e222b;border:1px solid #2a2f3a;border-radius:8px;padding:12px;margin-top:12px}
+.demo-now .txt{color:#e6e9ef;font-size:14px}
+
+/* ── linear-app token 渲染的示意卡 ── */
+.demo-new{background:#08090a;padding:16px;border-radius:12px}
+.demo-new .card{background:#191a1b;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:16px}
+.demo-new h4{margin:0 0 6px;font-size:12px;color:#62666d;font-weight:500;letter-spacing:.02em}
+.demo-new .big{font-size:24px;font-weight:590;font-variant-numeric:tabular-nums;color:#f7f8f8}
+.demo-new .sub{color:#8a8f98;font-size:12px;margin-top:4px}
+.demo-new .accent{background:#5e6ad2;color:#fff;border:0;padding:7px 14px;border-radius:6px;
+  font-weight:560;font-size:13px;cursor:pointer}
+.demo-new .ghost{background:transparent;color:#d0d6e0;border:1px solid rgba(255,255,255,.08);
+  padding:6px 12px;border-radius:6px;font-size:13px;cursor:pointer}
+.demo-new .inner{background:#212223;border:1px solid rgba(255,255,255,.05);border-radius:6px;
+  padding:12px;margin-top:12px}
+.demo-new .txt{color:#d0d6e0;font-size:14px}
+
+/* ── 文字层级演示 ── */
+.levels>div{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.levels .lbl{font-size:11px;color:#62666d;font-family:ui-monospace,monospace}
+
+/* 结论条 */
+.verdict{background:rgba(94,106,210,.1);border:1px solid rgba(94,106,210,.35);border-radius:12px;
+  padding:14px 16px;margin:16px 0}
+.verdict b{color:#828fff}
+.warnv{background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.32);border-radius:12px;
+  padding:14px 16px;margin:16px 0}
+.warnv b{color:#d29922}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>设计 token 对照</h1>
+  <span class="tag">卡 C-0091</span>
+  <span class="tag">左：看板现状</span>
+  <span class="tag">右：linear-app</span>
+</div>
+
+<div class="wrap">
+
+  <p class="note">
+    数据来源：现状取自 <code>tools\dashboard.py:6193-6197</code>；
+    候选取自 <code>G:\open-design\design-systems\linear-app\tokens.css</code>（153 个设计系统之一，本次推荐）。
+    <b>建议只改 5 组（bg / surface / fg / border / accent），状态色沿用看板现值</b>——见文末结论。
+  </p>
+
+  <div class="verdict">
+    <b>一句话结论</b>：现状的噪声不是"颜色太花"，是"<b>只有两级文字、一种边框、一个圆角</b>"——
+    所有东西看起来一样重，所以只能靠"到处加按钮"来区分主次。linear-app 给的是<b>层级</b>，不是新颜色。
+  </div>
+
+  <!-- ══════════ 1. 色板 ══════════ -->
+  <h2>1. 色板对照</h2>
+  <table>
+    <thead><tr><th>角色</th><th>看板现状</th><th>linear-app</th><th>差异</th><th>改不改</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>页面底色 <code>--bg</code></td>
+        <td><span class="sw" style="background:#0f1115"></span><span class="mono">#0f1115</span></td>
+        <td><span class="sw" style="background:#08090a"></span><span class="mono">#08090a</span></td>
+        <td class="conf">现状偏蓝、偏亮</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>卡片 <code>--panel</code></td>
+        <td><span class="sw" style="background:#171a21"></span><span class="mono">#171a21</span></td>
+        <td><span class="sw" style="background:#191a1b"></span><span class="mono">#191a1b</span></td>
+        <td class="conf">现状带蓝调；linear 是中性灰</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>卡内嵌 <code>--panel2</code></td>
+        <td><span class="sw" style="background:#1e222b"></span><span class="mono">#1e222b</span></td>
+        <td><span class="sw" style="background:#212223"></span><span class="mono">#212223</span>（补一级）</td>
+        <td class="conf">linear 只有 1 级台阶，看板需要 2 级</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>主文字 <code>--fg</code></td>
+        <td><span class="sw" style="background:#e6e9ef"></span><span class="mono">#e6e9ef</span></td>
+        <td><span class="sw" style="background:#f7f8f8"></span><span class="mono">#f7f8f8</span></td>
+        <td class="conf">现状偏暗偏冷；linear 近白不刺眼</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>次要文字 <code>--fg-2</code></td>
+        <td colspan="2"><span class="new">★ 看板无此级</span>（正文直接用 <code>--fg</code>）</td>
+        <td class="new">新增</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>说明文字 <code>--dim/muted</code></td>
+        <td><span class="sw" style="background:#9aa3b2"></span><span class="mono">#9aa3b2</span></td>
+        <td><span class="sw" style="background:#8a8f98"></span><span class="mono">#8a8f98</span></td>
+        <td class="conf">现状偏亮偏蓝，说明文字"太显眼"</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>时间戳 <code>--meta</code></td>
+        <td colspan="2"><span class="new">★ 看板无此级</span>（时间戳与说明共用 <code>--dim</code>）</td>
+        <td class="new">新增</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>描边 <code>--line</code></td>
+        <td><span class="sw" style="background:#2a2f3a"></span><span class="mono">#2a2f3a</span>（实色）</td>
+        <td><span class="sw" style="background:#3a3b3d"></span><span class="mono">rgba(255,255,255,.08)</span></td>
+        <td class="conf">实色边框在多层嵌套里"一样重"</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>主张色 <code>--accent</code></td>
+        <td><span class="sw" style="background:#5b9dff"></span><span class="mono">#5b9dff</span></td>
+        <td><span class="sw" style="background:#5e6ad2"></span><span class="mono">#5e6ad2</span></td>
+        <td class="conf">亮蓝 → 靛紫；linear 的彩色<b>只给主 CTA</b></td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>CTA 文字 <code>--accent-on</code></td>
+        <td><span class="mono">#08111f</span>（深字配亮底）</td>
+        <td><span class="mono">#ffffff</span></td>
+        <td class="conf">随主张色一起改</td><td class="new">改</td>
+      </tr>
+      <tr>
+        <td>成功 <code>--ok</code></td>
+        <td><span class="sw" style="background:#3fb950"></span><span class="mono">#3fb950</span></td>
+        <td><span class="sw" style="background:#27a644"></span><span class="mono">#27a644</span></td>
+        <td class="same">差异小</td><td class="same">不改（沿用现值）</td>
+      </tr>
+      <tr>
+        <td>警告 <code>--warn</code></td>
+        <td><span class="sw" style="background:#d29922"></span><span class="mono">#d29922</span></td>
+        <td><span class="sw" style="background:#eab308"></span><span class="mono">#eab308</span></td>
+        <td class="same">差异小</td><td class="same">不改（沿用现值）</td>
+      </tr>
+      <tr>
+        <td>危险 <code>--bad</code></td>
+        <td><span class="sw" style="background:#f85149"></span><span class="mono">#f85149</span></td>
+        <td><span class="sw" style="background:#dc2626"></span><span class="mono">#dc2626</span></td>
+        <td class="same">差异小</td><td class="same">不改（沿用现值）</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="warnv">
+    <b>为什么状态色不改</b>：这三个色已经用在 4 种徽章、进度条、表格状态、错误提示里（全站上千处）。
+    改它们收益低、回归面大——而<b>本次改造的收益 90% 来自 bg / surface / fg / border / accent 这 5 组</b>。
+    真想完全对齐 linear，应另开一张卡专门做状态色迁移。
+  </div>
+
+  <!-- ══════════ 2. 同一张卡片，两种 token ══════════ -->
+  <h2>2. 同一张统计卡：两种 token 的实际观感</h2>
+  <div class="two">
+    <div class="pane">
+      <div class="ph">看板现状 · <code>6193-6197</code></div>
+      <div class="pb demo-now">
+        <div class="card">
+          <h4>今日已复习</h4>
+          <div class="big">12<span style="font-size:13px;color:#9aa3b2;font-weight:400"> 次</span></div>
+          <div class="sub">累计 348 次 · 上次 10-13 21:04</div>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="accent">开始复习</button>
+            <button class="ghost">全部知识点</button>
+            <button class="ghost">录入遗忘曲线</button>
+            <button class="ghost">导出</button>
+          </div>
+          <div class="inner">
+            <div class="txt">切块 3358 · 146.5 万字</div>
+            <div class="sub">检索引擎：向量（本地 ONNX）+ 全文索引（FTS5 trigram）</div>
+          </div>
+        </div>
+        <p class="note" style="margin-top:12px;color:#9aa3b2;font-size:12px">
+          注意：<b style="color:#e6e9ef">4 个按钮长得一样重</b>，用户每次都要读完才知道点哪个；
+          说明文字与正文<b style="color:#e6e9ef">同一个灰</b>，糊成一片；
+          卡内嵌与卡片<b style="color:#e6e9ef">边框一样重</b>，层级看不出来。
+        </p>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="ph">linear-app · <code>tokens.css</code></div>
+      <div class="pb demo-new">
+        <div class="card">
+          <h4>今日已复习</h4>
+          <div class="big">12<span style="font-size:13px;color:#8a8f98;font-weight:400"> 次</span></div>
+          <div class="sub">累计 348 次 · 上次 10-13 21:04</div>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="accent">开始复习</button>
+            <button class="ghost">全部知识点</button>
+            <button class="ghost">⋯</button>
+          </div>
+          <div class="inner">
+            <div class="txt">切块 3358 · 146.5 万字</div>
+            <div class="sub">向量 + 全文索引</div>
+          </div>
+        </div>
+        <p class="note" style="margin-top:12px;color:#8a8f98;font-size:12px">
+          注意：<b style="color:#d0d6e0">只有主 CTA 有颜色</b>（唯一彩色），其余一律描边；
+          文字分三级（<code>#f7f8f8 / #d0d6e0 / #8a8f98</code>）不再糊成一片；
+          卡内嵌底色更亮一档 + 边框更淡，<b style="color:#d0d6e0">层级自动浮现</b>。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 3. 文字层级 ══════════ -->
+  <h2>3. 文字层级：这是"文字墙"的直接解药</h2>
+  <p class="note">
+    看板现在只有 <code>--fg</code> / <code>--dim</code> 两级。所有说明文字共用同一个灰，
+    于是"<b>要么全都很显眼，要么全都很淡</b>"——文字墙就是这么来的。
+    不是把字删光就好了，是让留下的字<b>有层次</b>。
+  </p>
+  <div class="two">
+    <div class="pane">
+      <div class="ph">现状：2 级</div>
+      <div class="pb demo-now levels">
+        <div><span class="lbl">--fg #e6e9ef</span><div style="color:#e6e9ef">要点正文与标题</div></div>
+        <div><span class="lbl">--dim #9aa3b2</span><div style="color:#9aa3b2">说明文字、时间戳、空态、出处、提示 —— 全挤在这一级</div></div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="ph">linear-app：4 级</div>
+      <div class="pb demo-new levels">
+        <div><span class="lbl">--fg #f7f8f8</span><div style="color:#f7f8f8">标题 / 关键数字</div></div>
+        <div><span class="lbl">--fg-2 #d0d6e0</span><div style="color:#d0d6e0">正文：要点、段落</div></div>
+        <div><span class="lbl">--muted #8a8f98</span><div style="color:#8a8f98">说明：图中这些解释性文字</div></div>
+        <div><span class="lbl">--meta #62666d</span><div style="color:#62666d">时间戳 / 路径 / 禁用态 / 计数</div></div>
+      </div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:12px">
+    ⚠ <b>落地要点（本项目硬约束）</b>：linear 的字体栈是 <code>Inter</code>，而看板界面是中文，Inter 不含中文字形；
+    本项目"外部 CDN 引用 0"，不能引 Google Fonts。<b>做法：保留 Inter 段但必然回落，中文交给系统栈</b>
+    —— <code>--font: "Inter", -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif</code>，
+    不下载任何字体文件。看板现状（<code>6200</code> 行）本来就是这个栈，属于零成本沿用。
+  </p>
+
+  <!-- ══════════ 4. 间距 / 字号 / 圆角 / 阴影 ══════════ -->
+  <h2>4. 间距 / 字号 / 圆角 / 阴影</h2>
+  <table>
+    <thead><tr><th>类别</th><th>看板现状</th><th>linear-app</th><th>建议取用</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>间距</td>
+        <td class="conf">无体系，内联散落（<code>margin-bottom:14px</code>、<code>padding:12px 14px</code>、<code>gap:9px</code> 混用）</td>
+        <td><code>4 / 8 / 12 / 16 / 20 / 24 / 32 / 48</code></td>
+        <td class="new"><code>8 / 12 / 16 / 24</code> 四档起步（不要求一次全改）</td>
+      </tr>
+      <tr>
+        <td>字号</td>
+        <td class="conf">无体系：11 / 12 / 13 / 14 / 15 / 17 / 26 散落</td>
+        <td><code>12 / 14 / 16 / 18 / 24 / 32 / 48 / 72</code></td>
+        <td class="new"><code>12 / 13 / 14 / 16</code>——工具界面用不到 48/72</td>
+      </tr>
+      <tr>
+        <td>圆角</td>
+        <td class="conf">单一 <code>10px</code>（卡、按钮、输入框全一样）</td>
+        <td><code>6</code>（按钮/输入）/ <code>8</code>（卡）/ <code>12</code>（浮层）</td>
+        <td class="new">按 linear 分级——圆角分级本身就在传达层级</td>
+      </tr>
+      <tr>
+        <td>阴影</td>
+        <td class="same">基本无（仅顶栏 <code>backdrop-filter</code>）</td>
+        <td><code>none</code> / ring / <code>0 2px 4px + ring</code>，<b>靠亮度台阶而非投影</b></td>
+        <td class="same">不冲突，沿用"不靠投影"</td>
+      </tr>
+      <tr>
+        <td>焦点环</td>
+        <td class="conf">仅 <code>input:focus{border-color}</code>，键盘用户看不出焦点在哪</td>
+        <td><code>0 0 0 2px color-mix(accent, transparent 30%)</code></td>
+        <td class="new">新增（<b>无障碍改进</b>）</td>
+      </tr>
+      <tr>
+        <td>动效</td>
+        <td class="conf">仅进度条有 <code>transition</code></td>
+        <td><code>150 / 200ms</code>，<code>cubic-bezier(.2,0,0,1)</code></td>
+        <td class="new">新增（弹窗开合、菜单浮现）</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ══════════ 5. 建议落地块 ══════════ -->
+  <h2>5. 建议直接贴进 <code>:root</code> 的 token 块</h2>
+  <p class="note">位置：<code>tools\dashboard.py:6193-6197</code>。由卡① 独占修改，其余卡等它。</p>
+  <div class="pane"><div class="pb" style="background:#191a1b">
+<pre style="margin:0;color:#d0d6e0;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.75;overflow:auto">:root{
+  /* 底色（linear-app，深色原生；panel2 补一级台阶） */
+  --bg:#08090a; --panel:#191a1b; --panel2:#212223;
+  --line:rgba(255,255,255,.08); --line-soft:rgba(255,255,255,.05);
+  /* 文字四级（新增 fg-2 与 meta 两级）★ 本次改造的关键 */
+  --fg:#f7f8f8; --fg2:#d0d6e0; --dim:#8a8f98; --meta:#62666d;
+  /* 主张色（靛紫，全站唯一彩色，只给主 CTA） */
+  --accent:#5e6ad2; --accent-on:#fff; --accent-hover:#828fff;
+  /* 状态色：沿用看板现值（回归风险低优先） */
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  /* 圆角分级 */
+  --radius-sm:6px; --radius:8px; --radius-lg:12px;
+  /* 间距与字号（只取小端） */
+  --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px;
+  --fs-xs:12px; --fs-sm:13px; --fs:14px; --fs-lg:16px;
+  --focus-ring:0 0 0 2px rgba(94,106,210,.42);
+  /* 中文交给系统栈：本项目外部 CDN 引用为 0，不下载字体 */
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",
+         "Microsoft YaHei","PingFang SC",sans-serif;
+}</pre>
+  </div></div>
+
+  <div class="verdict" style="margin-top:24px">
+    <b>迁移风险提示</b>：看板现有组件全部依赖这 9 个变量名（<code>--bg/--panel/--panel2/--line/--fg/--dim/--accent/--ok/--warn/--bad/--radius</code>）。
+    上面这块<b>保留了全部旧变量名</b>，只改取值 + 新增 6 个变量 —— 所以<b>组件代码一行都不用动就会跟着变</b>。
+    这正是把"设计 token 落地"单独拆成卡① 且最先做的原因：它风险最低、收益最广。
+  </div>
+
+</div>
+</body>
+</html>
