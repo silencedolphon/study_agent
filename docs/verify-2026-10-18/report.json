@@ -1,0 +1,1696 @@
+{
+  "generated_at": "2026-10-18T17:09:09+0800",
+  "git_head": "4c3d142（产品区干净）",
+  "elapsed_seconds": 55.8,
+  "exit_code": 0,
+  "env": {
+    "project": "D:\\study_agent",
+    "python": "3.13.2",
+    "sandbox": "D:\\study_agent\\_work\\verify\\sandbox",
+    "data": "D:\\study_agent\\_work\\verify\\data",
+    "fixtures": "D:\\study_agent\\_work\\verify\\fixtures",
+    "product_hashes": {
+      "core/config.py": {
+        "size": 56916,
+        "sha256": "e7aa96a1967d6500f881cc89fd9dee9cbb90cb0dd55649e0e4c69f5a8380cbbf"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      },
+      "core/search.py": {
+        "size": 40035,
+        "sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1"
+      },
+      "core/subjects.py": {
+        "size": 20715,
+        "sha256": "aa55a1134511f83d0dd09c5c6b458dc44ab62c3ecac86b1d54bbe833df9b5f2d"
+      },
+      "tools/dashboard.py": {
+        "size": 616945,
+        "sha256": "653b11feebd61062336d1770364dc11453664f97b55c422d987130bd850aaa11"
+      },
+      "tools/study.py": {
+        "size": 36648,
+        "sha256": "80a7ee5315361cf8e1d450d33ad473e853433d6f12ce2e5c0fe6e5c54d904e76"
+      }
+    },
+    "product_hashes_end": {
+      "core/config.py": {
+        "size": 56916,
+        "sha256": "e7aa96a1967d6500f881cc89fd9dee9cbb90cb0dd55649e0e4c69f5a8380cbbf"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      },
+      "core/search.py": {
+        "size": 40035,
+        "sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1"
+      },
+      "core/subjects.py": {
+        "size": 20715,
+        "sha256": "aa55a1134511f83d0dd09c5c6b458dc44ab62c3ecac86b1d54bbe833df9b5f2d"
+      },
+      "tools/dashboard.py": {
+        "size": 616945,
+        "sha256": "653b11feebd61062336d1770364dc11453664f97b55c422d987130bd850aaa11"
+      },
+      "tools/study.py": {
+        "size": 36648,
+        "sha256": "80a7ee5315361cf8e1d450d33ad473e853433d6f12ce2e5c0fe6e5c54d904e76"
+      }
+    },
+    "product_hashes_note": "core/config.py + core/study.py + core/search.py + core/subjects.py + tools/dashboard.py + tools/study.py 的 sha256 见 report.json::env.product_hashes",
+    "code_sync_ok": true,
+    "code_sync_diff": []
+  },
+  "summary": {
+    "total": 63,
+    "passed": 63,
+    "failed": 0,
+    "expected_failures": 0,
+    "skipped": 0,
+    "matrix_total": 63,
+    "matrix_covered": 63,
+    "gaps": 10,
+    "known_bugs": 0,
+    "fixed_bugs": 3
+  },
+  "isolation": {
+    "code_sync_ok": true,
+    "code_sync_diff": [],
+    "code_changed_during_run": false,
+    "hashes_start": {
+      "core/config.py": {
+        "size": 56916,
+        "sha256": "e7aa96a1967d6500f881cc89fd9dee9cbb90cb0dd55649e0e4c69f5a8380cbbf"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      },
+      "core/search.py": {
+        "size": 40035,
+        "sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1"
+      },
+      "core/subjects.py": {
+        "size": 20715,
+        "sha256": "aa55a1134511f83d0dd09c5c6b458dc44ab62c3ecac86b1d54bbe833df9b5f2d"
+      },
+      "tools/dashboard.py": {
+        "size": 616945,
+        "sha256": "653b11feebd61062336d1770364dc11453664f97b55c422d987130bd850aaa11"
+      },
+      "tools/study.py": {
+        "size": 36648,
+        "sha256": "80a7ee5315361cf8e1d450d33ad473e853433d6f12ce2e5c0fe6e5c54d904e76"
+      }
+    },
+    "hashes_end": {
+      "core/config.py": {
+        "size": 56916,
+        "sha256": "e7aa96a1967d6500f881cc89fd9dee9cbb90cb0dd55649e0e4c69f5a8380cbbf"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      },
+      "core/search.py": {
+        "size": 40035,
+        "sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1"
+      },
+      "core/subjects.py": {
+        "size": 20715,
+        "sha256": "aa55a1134511f83d0dd09c5c6b458dc44ab62c3ecac86b1d54bbe833df9b5f2d"
+      },
+      "tools/dashboard.py": {
+        "size": 616945,
+        "sha256": "653b11feebd61062336d1770364dc11453664f97b55c422d987130bd850aaa11"
+      },
+      "tools/study.py": {
+        "size": 36648,
+        "sha256": "80a7ee5315361cf8e1d450d33ad473e853433d6f12ce2e5c0fe6e5c54d904e76"
+      }
+    },
+    "used_ports": [
+      8897,
+      8897,
+      8897,
+      8897,
+      8897
+    ],
+    "ports_listening_after": {
+      "8897": false,
+      "8898": false,
+      "8899": false
+    },
+    "leftover_processes": [],
+    "real_data_verdict": "运行前后完全一致（本套件未写真实数据）",
+    "real_data_diffs": [],
+    "fixture_manifest": "_work\\verify\\fixtures\\manifest.json",
+    "fixture_roles": {
+      "main": {
+        "source": "subjects\\生药药动\\index\\study.db",
+        "source_size": 15806464,
+        "source_sha256": "781410c50013c2348e44a9e6a84eb0b1332ff24561a147dfe46048f4359f94bd",
+        "created": false,
+        "fixture_size": 15806464,
+        "fixture_sha256": "11d902e725275f32a196e773a6f5f2bbb65a44903b5705bf2db192ccd8ad7105"
+      },
+      "deck": {
+        "source": "subjects\\药物化学\\index\\study.db",
+        "source_size": 7811072,
+        "source_sha256": "5ab7e40a73996efbe8015cc1de9cb23aa7ce67eafec3c2a71946fc411c2af933",
+        "created": false,
+        "fixture_size": 7811072,
+        "fixture_sha256": "bb1ff288319097df526e7b60bb4635272b0973a98a31941fadccb1e18929f736"
+      }
+    }
+  },
+  "matrix": [
+    {
+      "id": "F01",
+      "feature": "服务启动与首页渲染",
+      "entry": "GET /",
+      "kind": "health",
+      "priority": "P0",
+      "tests": [
+        "test_home_ok"
+      ],
+      "evidence": "http",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_home_ok"
+      ]
+    },
+    {
+      "id": "F02",
+      "feature": "首页 HTML 别名与页面骨架",
+      "entry": "GET /index.html",
+      "kind": "health",
+      "priority": "P0",
+      "tests": [
+        "test_index_html_alias"
+      ],
+      "evidence": "http",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_index_html_alias"
+      ]
+    },
+    {
+      "id": "F03",
+      "feature": "页面自包含（无外部静态资源依赖）",
+      "entry": "GET /（HTML 内嵌全部 JS/CSS）",
+      "kind": "health",
+      "priority": "P1",
+      "tests": [
+        "test_page_self_contained"
+      ],
+      "evidence": "http",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_page_self_contained"
+      ]
+    },
+    {
+      "id": "F04",
+      "feature": "未知路由回落 404 JSON",
+      "entry": "GET/POST /api/<未知>",
+      "kind": "health",
+      "priority": "P1",
+      "tests": [
+        "test_unknown_route_404"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_unknown_route_404"
+      ]
+    },
+    {
+      "id": "F05",
+      "feature": "测试实例指向隔离数据副本",
+      "entry": "GET /api/firstrun、/api/subjects",
+      "kind": "health",
+      "priority": "P0",
+      "tests": [
+        "test_isolation_paths"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_isolation_paths"
+      ]
+    },
+    {
+      "id": "F06",
+      "feature": "真实数据零写入（只读校验）",
+      "entry": "真实 index/raw/notes/subjects 指纹对比",
+      "kind": "health",
+      "priority": "P0",
+      "tests": [
+        "test_real_data_untouched"
+      ],
+      "evidence": "db",
+      "status": "PASS",
+      "matched_tests": [
+        "test_01_health.TestHealth.test_real_data_untouched"
+      ]
+    },
+    {
+      "id": "F10",
+      "feature": "学习总览统计",
+      "entry": "GET /api/stats",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_stats"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_stats",
+        "test_04_cli.TestCli.test_stats"
+      ]
+    },
+    {
+      "id": "F11",
+      "feature": "文档列表",
+      "entry": "GET /api/docs",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_docs"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_docs",
+        "test_03_api_write.TestWriteApi.test_docs_delete_preview",
+        "test_04_cli.TestCli.test_docs",
+        "test_04_cli.TestCli.test_docs_outline"
+      ]
+    },
+    {
+      "id": "F12",
+      "feature": "文档详情（大纲/切块）",
+      "entry": "GET /api/doc?id=",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_doc_detail"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_doc_detail"
+      ]
+    },
+    {
+      "id": "F13",
+      "feature": "切块及上下文",
+      "entry": "GET /api/chunk?id=",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_chunk"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_chunk"
+      ]
+    },
+    {
+      "id": "F14",
+      "feature": "混合检索（向量+关键词）",
+      "entry": "GET /api/search?q=&k=",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_search"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_search",
+        "test_04_cli.TestCli.test_search"
+      ]
+    },
+    {
+      "id": "F15",
+      "feature": "知识点列表",
+      "entry": "GET /api/kps",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_kps"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_kps"
+      ]
+    },
+    {
+      "id": "F16",
+      "feature": "知识点详情（出处/历史/前置）",
+      "entry": "GET /api/kp?id=",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_kp_detail"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_kp_detail"
+      ]
+    },
+    {
+      "id": "F17",
+      "feature": "复习队列",
+      "entry": "GET /api/queue",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_queue"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_queue"
+      ]
+    },
+    {
+      "id": "F18",
+      "feature": "课件复习月历",
+      "entry": "GET /api/deck-calendar?ym=",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_deck_calendar"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_deck_calendar"
+      ]
+    },
+    {
+      "id": "F19",
+      "feature": "错题本列表与统计",
+      "entry": "GET /api/mistakes",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_mistakes"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_mistakes"
+      ]
+    },
+    {
+      "id": "F20",
+      "feature": "知识点依赖图谱",
+      "entry": "GET /api/graph",
+      "kind": "read",
+      "priority": "P2",
+      "tests": [
+        "test_graph"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_graph"
+      ]
+    },
+    {
+      "id": "F21",
+      "feature": "思维导图数据",
+      "entry": "GET /api/mindmap?doc_id=",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_mindmap"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_mindmap"
+      ]
+    },
+    {
+      "id": "F22",
+      "feature": "名词解释产物状态",
+      "entry": "GET /api/terms?doc_id=",
+      "kind": "read",
+      "priority": "P2",
+      "tests": [
+        "test_terms"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_terms"
+      ]
+    },
+    {
+      "id": "F23",
+      "feature": "按页知识点定位",
+      "entry": "GET /api/page-kps?doc_id=&page=",
+      "kind": "read",
+      "priority": "P2",
+      "tests": [
+        "test_page_kps"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_page_kps"
+      ]
+    },
+    {
+      "id": "F24",
+      "feature": "知识点整理候选与成本预估",
+      "entry": "GET /api/kp-build/options、/batch/options",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_kp_build_options"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_kp_build_options"
+      ]
+    },
+    {
+      "id": "F25",
+      "feature": "原始资料清单（raw/ 与孤儿）",
+      "entry": "GET /api/raw",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_raw"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_raw"
+      ]
+    },
+    {
+      "id": "F26",
+      "feature": "首次运行体检（空库/凭据判定）",
+      "entry": "GET /api/firstrun",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_firstrun"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_firstrun"
+      ]
+    },
+    {
+      "id": "F27",
+      "feature": "笔记列表/详情/按来源反查",
+      "entry": "GET /api/notes、/api/note、/api/notes/by_kp",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_notes_read"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_notes_read"
+      ]
+    },
+    {
+      "id": "F28",
+      "feature": "学科列表与当前真实路径",
+      "entry": "GET /api/subjects",
+      "kind": "read",
+      "priority": "P0",
+      "tests": [
+        "test_subjects"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_subjects"
+      ]
+    },
+    {
+      "id": "F29",
+      "feature": "设置读取（四条管线）",
+      "entry": "GET /api/settings",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_settings_read"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_settings_read"
+      ]
+    },
+    {
+      "id": "F30",
+      "feature": "设置窗口提示词读取（内置/文件）",
+      "entry": "GET /api/settings/prompt",
+      "kind": "read",
+      "priority": "P2",
+      "tests": [
+        "test_settings_prompt"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_settings_prompt"
+      ]
+    },
+    {
+      "id": "F31",
+      "feature": "长任务进度快照",
+      "entry": "GET /api/ingest/progress、/api/kp-build/progress、/api/ingest/batch/progress、/api/kp-build/batch/progress",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_progress_snapshots"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_progress_snapshots"
+      ]
+    },
+    {
+      "id": "F32",
+      "feature": "分享包列表与进度",
+      "entry": "GET /api/share/packages、/api/share/progress",
+      "kind": "read",
+      "priority": "P2",
+      "tests": [
+        "test_share"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_share"
+      ]
+    },
+    {
+      "id": "F33",
+      "feature": "问答管线状态（离线可用性）",
+      "entry": "GET /api/chat/status",
+      "kind": "read",
+      "priority": "P1",
+      "tests": [
+        "test_chat_status"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_chat_status"
+      ]
+    },
+    {
+      "id": "F40",
+      "feature": "知识点新建/详情/图谱联动",
+      "entry": "POST /api/kp",
+      "kind": "write",
+      "priority": "P0",
+      "tests": [
+        "test_kp_create"
+      ],
+      "evidence": "json+db",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_kp_create"
+      ]
+    },
+    {
+      "id": "F41",
+      "feature": "复习评分与统计联动",
+      "entry": "POST /api/review",
+      "kind": "write",
+      "priority": "P0",
+      "tests": [
+        "test_review"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_review",
+        "test_04_cli.TestCli.test_review"
+      ]
+    },
+    {
+      "id": "F42",
+      "feature": "笔记保存→列表→按文件原位更新",
+      "entry": "POST /api/note/kp、/api/note/update",
+      "kind": "write",
+      "priority": "P0",
+      "tests": [
+        "test_note_write"
+      ],
+      "evidence": "json+file",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_note_write"
+      ]
+    },
+    {
+      "id": "F43",
+      "feature": "课件答疑笔记保存",
+      "entry": "POST /api/note/deck",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_note_deck"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_note_deck"
+      ]
+    },
+    {
+      "id": "F44",
+      "feature": "笔记正文路径安全（拒绝穿越）",
+      "entry": "POST /api/note/update（非法 file）",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_note_update_guard"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_note_update_guard"
+      ]
+    },
+    {
+      "id": "F45",
+      "feature": "设置保存/重置（写沙箱 settings）",
+      "entry": "POST /api/settings、/api/settings/reset",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_settings_write"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_settings_write"
+      ]
+    },
+    {
+      "id": "F46",
+      "feature": "按路径导入预览",
+      "entry": "POST /api/import (dry_run)",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_import_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_import_preview"
+      ]
+    },
+    {
+      "id": "F47",
+      "feature": "批量入库计划预览",
+      "entry": "POST /api/ingest/batch/plan",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_ingest_batch_plan"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_ingest_batch_plan"
+      ]
+    },
+    {
+      "id": "F48",
+      "feature": "孤儿数据清理预览",
+      "entry": "POST /api/cleanup (dry_run)",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_cleanup_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_cleanup_preview"
+      ]
+    },
+    {
+      "id": "F49",
+      "feature": "单份删除影响预览",
+      "entry": "POST /api/doc/delete (dry_run)",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_doc_delete_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_doc_delete_preview"
+      ]
+    },
+    {
+      "id": "F50",
+      "feature": "文档标题改名预览",
+      "entry": "POST /api/doc/rename (dry_run)",
+      "kind": "write",
+      "priority": "P2",
+      "tests": [
+        "test_doc_rename_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_doc_rename_preview"
+      ]
+    },
+    {
+      "id": "F51",
+      "feature": "学科切换 + 课件月历 + 入计划/标记",
+      "entry": "POST /api/subjects/switch、/api/deck-enroll、/api/deck-mark",
+      "kind": "write",
+      "priority": "P0",
+      "tests": [
+        "test_subject_switch_deck"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_subject_switch_deck"
+      ]
+    },
+    {
+      "id": "F52",
+      "feature": "新建/重命名学科",
+      "entry": "POST /api/subjects/create、/api/subjects/rename",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_subject_create_rename"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_subject_create_rename"
+      ]
+    },
+    {
+      "id": "F53",
+      "feature": "批量删除预览（BUG-1 修复回归）",
+      "entry": "POST /api/docs/delete (dry_run)",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_docs_delete_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_docs_delete_preview"
+      ]
+    },
+    {
+      "id": "F54",
+      "feature": "原始文件重命名预览（BUG-1 修复回归）",
+      "entry": "POST /api/rename/raw (dry_run)",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_rename_raw_preview"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_rename_raw_preview"
+      ]
+    },
+    {
+      "id": "F55",
+      "feature": "非法查询参数健壮性（BUG-3 修复回归）",
+      "entry": "GET /api/doc?id=abc 等",
+      "kind": "write",
+      "priority": "P2",
+      "tests": [
+        "test_bad_query_params_robust"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_bad_query_params_robust"
+      ]
+    },
+    {
+      "id": "F56",
+      "feature": "按名读取笔记（BUG-2 修复回归）",
+      "entry": "GET /api/note?name=",
+      "kind": "write",
+      "priority": "P1",
+      "tests": [
+        "test_note_lookup_by_name"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_note_lookup_by_name"
+      ]
+    },
+    {
+      "id": "F60",
+      "feature": "CLI 环境自检",
+      "entry": "study.py check",
+      "kind": "cli",
+      "priority": "P0",
+      "tests": [
+        "test_check"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_04_cli.TestCli.test_check"
+      ]
+    },
+    {
+      "id": "F61",
+      "feature": "CLI 学习统计",
+      "entry": "study.py stats",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_stats"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_stats",
+        "test_04_cli.TestCli.test_stats"
+      ]
+    },
+    {
+      "id": "F62",
+      "feature": "CLI 文档列表/大纲",
+      "entry": "study.py docs [--outline ID]",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_docs",
+        "test_docs_outline"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_docs",
+        "test_03_api_write.TestWriteApi.test_docs_delete_preview",
+        "test_04_cli.TestCli.test_docs",
+        "test_04_cli.TestCli.test_docs_outline"
+      ]
+    },
+    {
+      "id": "F63",
+      "feature": "CLI 混合检索",
+      "entry": "study.py search",
+      "kind": "cli",
+      "priority": "P0",
+      "tests": [
+        "test_search"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_search",
+        "test_04_cli.TestCli.test_search"
+      ]
+    },
+    {
+      "id": "F64",
+      "feature": "CLI 切块上下文",
+      "entry": "study.py show",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_show"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_04_cli.TestCli.test_show"
+      ]
+    },
+    {
+      "id": "F65",
+      "feature": "CLI 复习队列/评分",
+      "entry": "study.py review",
+      "kind": "cli",
+      "priority": "P0",
+      "tests": [
+        "test_review"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_review",
+        "test_04_cli.TestCli.test_review"
+      ]
+    },
+    {
+      "id": "F66",
+      "feature": "CLI 知识点增/列",
+      "entry": "study.py kp add/list",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_kp"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_kp_build_options",
+        "test_02_api_read.TestReadApi.test_kp_detail",
+        "test_02_api_read.TestReadApi.test_kps",
+        "test_03_api_write.TestWriteApi.test_kp_create",
+        "test_04_cli.TestCli.test_kp"
+      ]
+    },
+    {
+      "id": "F67",
+      "feature": "CLI 错题登记/统计",
+      "entry": "study.py mistake add/stats",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_mistake"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_mistakes",
+        "test_04_cli.TestCli.test_mistake"
+      ]
+    },
+    {
+      "id": "F68",
+      "feature": "CLI 笔记回写与读回",
+      "entry": "study.py note save/list/read",
+      "kind": "cli",
+      "priority": "P0",
+      "tests": [
+        "test_note"
+      ],
+      "evidence": "cli",
+      "status": "PASS",
+      "matched_tests": [
+        "test_02_api_read.TestReadApi.test_notes_read",
+        "test_03_api_write.TestWriteApi.test_note_deck",
+        "test_03_api_write.TestWriteApi.test_note_lookup_by_name",
+        "test_03_api_write.TestWriteApi.test_note_update_guard",
+        "test_03_api_write.TestWriteApi.test_note_write",
+        "test_04_cli.TestCli.test_note"
+      ]
+    },
+    {
+      "id": "F69",
+      "feature": "CLI 小 md 入库（解析/切块/向量/FTS）",
+      "entry": "study.py ingest",
+      "kind": "cli",
+      "priority": "P0",
+      "tests": [
+        "test_ingest"
+      ],
+      "evidence": "cli+db",
+      "status": "PASS",
+      "matched_tests": [
+        "test_03_api_write.TestWriteApi.test_ingest_batch_plan",
+        "test_04_cli.TestCli.test_ingest",
+        "test_04_cli.TestCli.test_ingest_idempotent"
+      ]
+    },
+    {
+      "id": "F70",
+      "feature": "CLI 入库幂等（重复跑跳过）",
+      "entry": "study.py ingest 同文件两次",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_ingest_idempotent"
+      ],
+      "evidence": "cli+db",
+      "status": "PASS",
+      "matched_tests": [
+        "test_04_cli.TestCli.test_ingest_idempotent"
+      ]
+    },
+    {
+      "id": "F80",
+      "feature": "Edge headless 主界面渲染",
+      "entry": "Edge --headless --dump-dom /",
+      "kind": "browser",
+      "priority": "P0",
+      "tests": [
+        "test_edge_dom"
+      ],
+      "evidence": "dom",
+      "status": "PASS",
+      "matched_tests": [
+        "test_05_browser.TestBrowser.test_edge_dom"
+      ]
+    },
+    {
+      "id": "F81",
+      "feature": "Edge headless 截图证据",
+      "entry": "Edge --headless --screenshot /",
+      "kind": "browser",
+      "priority": "P2",
+      "tests": [
+        "test_edge_screenshot"
+      ],
+      "evidence": "screenshot",
+      "status": "PASS",
+      "matched_tests": [
+        "test_05_browser.TestBrowser.test_edge_screenshot"
+      ]
+    },
+    {
+      "id": "F90",
+      "feature": "一键健康检查（解释器/导入/语法/库/study check）",
+      "entry": "tools/healthcheck.py --json",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_healthcheck_all_green"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green"
+      ]
+    },
+    {
+      "id": "F91",
+      "feature": "MCP 服务自测与 stdio 握手（经 healthcheck）",
+      "entry": "tools/serve_mcp.py --selftest / verify_mcp_handshake.py",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_healthcheck_all_green"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green"
+      ]
+    },
+    {
+      "id": "F92",
+      "feature": "一键数据备份（备份到临时目录 + integrity + --keep 清理）",
+      "entry": "tools/backup_data.py --json --out <tmp>",
+      "kind": "cli",
+      "priority": "P1",
+      "tests": [
+        "test_backup_data_isolated"
+      ],
+      "evidence": "json",
+      "status": "PASS",
+      "matched_tests": [
+        "test_06_healthcheck.TestHealthcheck.test_backup_data_isolated"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "test_01_health.TestHealth.test_home_ok",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_01_health.TestHealth.test_index_html_alias",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_01_health.TestHealth.test_isolation_paths",
+      "status": "PASS",
+      "elapsed": 0.05,
+      "detail": ""
+    },
+    {
+      "id": "test_01_health.TestHealth.test_page_self_contained",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_01_health.TestHealth.test_real_data_untouched",
+      "status": "PASS",
+      "elapsed": 0.07,
+      "detail": ""
+    },
+    {
+      "id": "test_01_health.TestHealth.test_unknown_route_404",
+      "status": "PASS",
+      "elapsed": 0.07,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_chat_status",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_chunk",
+      "status": "PASS",
+      "elapsed": 0.04,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_deck_calendar",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_doc_detail",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_docs",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_firstrun",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_graph",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_kp_build_options",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_kp_detail",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_kps",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_mindmap",
+      "status": "PASS",
+      "elapsed": 0.05,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_mistakes",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_notes_read",
+      "status": "PASS",
+      "elapsed": 0.03,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_page_kps",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_progress_snapshots",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_queue",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_raw",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_search",
+      "status": "PASS",
+      "elapsed": 0.23,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_settings_prompt",
+      "status": "PASS",
+      "elapsed": 0.03,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_settings_read",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_share",
+      "status": "PASS",
+      "elapsed": 0.03,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_stats",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_subjects",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_02_api_read.TestReadApi.test_terms",
+      "status": "PASS",
+      "elapsed": 0.03,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_bad_query_params_robust",
+      "status": "PASS",
+      "elapsed": 0.31,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_cleanup_preview",
+      "status": "PASS",
+      "elapsed": 0.04,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_doc_delete_preview",
+      "status": "PASS",
+      "elapsed": 0.06,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_doc_rename_preview",
+      "status": "PASS",
+      "elapsed": 0.05,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_docs_delete_preview",
+      "status": "PASS",
+      "elapsed": 0.07,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_import_preview",
+      "status": "PASS",
+      "elapsed": 0.02,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_ingest_batch_plan",
+      "status": "PASS",
+      "elapsed": 0.01,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_kp_create",
+      "status": "PASS",
+      "elapsed": 0.13,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_note_deck",
+      "status": "PASS",
+      "elapsed": 0.06,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_note_lookup_by_name",
+      "status": "PASS",
+      "elapsed": 0.22,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_note_update_guard",
+      "status": "PASS",
+      "elapsed": 0.16,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_note_write",
+      "status": "PASS",
+      "elapsed": 0.17,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_rename_raw_preview",
+      "status": "PASS",
+      "elapsed": 0.04,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_review",
+      "status": "PASS",
+      "elapsed": 0.19,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_settings_write",
+      "status": "PASS",
+      "elapsed": 0.16,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_subject_create_rename",
+      "status": "PASS",
+      "elapsed": 0.44,
+      "detail": ""
+    },
+    {
+      "id": "test_03_api_write.TestWriteApi.test_subject_switch_deck",
+      "status": "PASS",
+      "elapsed": 0.23,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_check",
+      "status": "PASS",
+      "elapsed": 1.91,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_docs",
+      "status": "PASS",
+      "elapsed": 0.9,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_docs_outline",
+      "status": "PASS",
+      "elapsed": 0.94,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_ingest",
+      "status": "PASS",
+      "elapsed": 2.06,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_ingest_idempotent",
+      "status": "PASS",
+      "elapsed": 1.77,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_kp",
+      "status": "PASS",
+      "elapsed": 1.86,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_mistake",
+      "status": "PASS",
+      "elapsed": 1.81,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_note",
+      "status": "PASS",
+      "elapsed": 2.67,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_review",
+      "status": "PASS",
+      "elapsed": 3.63,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_search",
+      "status": "PASS",
+      "elapsed": 1.09,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_show",
+      "status": "PASS",
+      "elapsed": 1.77,
+      "detail": ""
+    },
+    {
+      "id": "test_04_cli.TestCli.test_stats",
+      "status": "PASS",
+      "elapsed": 0.91,
+      "detail": ""
+    },
+    {
+      "id": "test_05_browser.TestBrowser.test_edge_dom",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_05_browser.TestBrowser.test_edge_screenshot",
+      "status": "PASS",
+      "elapsed": 0.0,
+      "detail": ""
+    },
+    {
+      "id": "test_06_healthcheck.TestHealthcheck.test_backup_data_isolated",
+      "status": "PASS",
+      "elapsed": 2.86,
+      "detail": ""
+    },
+    {
+      "id": "test_06_healthcheck.TestHealthcheck.test_healthcheck_all_green",
+      "status": "PASS",
+      "elapsed": 6.48,
+      "detail": ""
+    }
+  ],
+  "known_bugs": [],
+  "fixed_bugs": [
+    {
+      "id": "BUG-1",
+      "severity": "高",
+      "matrix_refs": [
+        "F53",
+        "F54"
+      ],
+      "title": "批量删除预览 / 原始文件重命名 500（Path.replace 误用）",
+      "symptom": "资料页「批量删除」预览、raw 文件「重命名」预览/执行均返回 HTTP 500，错误体为 TypeError: Path.replace() takes 2 positional arguments but 3 were given。",
+      "root_cause": "tools/dashboard.py::_doc_stem() 把结字符串的 `str(...).replace('\\\\','/')` 写成 `Path(str(doc_path)).replace('\\\\','/')`，而 pathlib.Path.replace 是「改文件名」(2 参数)；_deck_dirs_for() → _doc_artifacts() 触发，波及 /api/docs/delete 与 /api/rename/raw。",
+      "impact": "资料管理中批量删除（含影响预览）与原始文件重命名两条真实用户路径不可用。",
+      "fixed_in": "ec394bb fix(dashboard): 修复三个真实用户路径缺陷（验收 BUG-1/2/3）",
+      "fix_summary": "改为 Path(str(doc_path or '').replace('\\\\', '/')).stem.strip()（与同文件 7970 行一致）。",
+      "verify": "回归用例：test_03_api_write.py::test_docs_delete_preview、test_rename_raw_preview（已全绿）\nLead 侧独立验证：_work/lead/verify_bugfix.py（8898 隔离实例，12/12 通过）",
+      "repro": "venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_docs_delete_preview\nvenv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_rename_raw_preview"
+    },
+    {
+      "id": "BUG-2",
+      "severity": "中",
+      "matrix_refs": [
+        "F56"
+      ],
+      "title": "GET /api/note?name= 恒返回第一篇笔记（匹配条件写成恒真）",
+      "symptom": "笔记页点开任意一篇、或知识点窗口「查看笔记」，返回的永远是列表里的第一篇笔记；前端编辑保存会把第一篇笔记的文件名带回去，存在写错笔记的风险。",
+      "root_cause": "tools/dashboard.py::api_note() 循环里写成 `if (name, n['title'], n['file'].removesuffix('.md')) in [(name, n['title'], n['file'].removesuffix('.md'))]:`——元组在单元素列表里，条件恒为真。",
+      "impact": "笔记按名读取（查看/编辑入口）不可用；多篇笔记时内容错位。",
+      "fixed_in": "ec394bb fix(dashboard): 修复三个真实用户路径缺陷（验收 BUG-1/2/3）",
+      "fix_summary": "name 与 file/title/stem 精确匹配（含大小写兜底），未命中返回 {\"error\": \"笔记不存在\"}。",
+      "verify": "回归用例：test_03_api_write.py::test_note_lookup_by_name、test_note_write（已全绿）\nLead 侧独立验证：_work/lead/verify_bugfix.py 12/12 通过",
+      "repro": "venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_note_lookup_by_name"
+    },
+    {
+      "id": "BUG-3",
+      "severity": "低",
+      "matrix_refs": [
+        "F55"
+      ],
+      "title": "非法数字型查询参数返回 500（非法学科 slug 也 500）",
+      "symptom": "GET /api/doc?id=abc、/api/chunk?id=abc、/api/search?k=abc、/api/kp?id=abc、/api/queue?limit=abc 均 HTTP 500（ValueError: invalid literal for int()）。另：POST /api/subjects/switch 传不存在的 slug 也是 500。",
+      "root_cause": "tools/dashboard.py::do_GET 这几个分支用裸 `int(qs.get(...))`，未用同文件已有的 `_int_arg()` 兜底；subjects/switch 未捕获 SubjectError。",
+      "impact": "接口健壮性/错误码不规范（前端正常路径不受影响，异常输入/第三方调用会拿到 500）。",
+      "fixed_in": "ec394bb fix(dashboard): 修复三个真实用户路径缺陷（验收 BUG-1/2/3）",
+      "fix_summary": "统一改用 _int_arg(qs.get('id'), 0)；subjects/switch 捕获 SubjectError 返回 400 JSON。",
+      "verify": "回归用例：test_03_api_write.py::test_bad_query_params_robust（已全绿）\nLead 侧独立验证：_work/lead/verify_bugfix.py 12/12 通过",
+      "repro": "venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_bad_query_params_robust"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "G01",
+      "feature": "AI 问答流式接口",
+      "entry": "POST /api/chat/stream",
+      "reason": "需要真实大模型 API Key 与联网，离线基线不覆盖；本次仅覆盖 /api/chat/status 状态查询。"
+    },
+    {
+      "id": "G02",
+      "feature": "AI 知识点总结（单份/批量）",
+      "entry": "POST /api/kp-build、/api/kp-build/batch",
+      "reason": "需要真实大模型 API Key（付费）且历史 outline/提示词产物在恢复后的 logs/ 中缺失，离线环境不可执行。"
+    },
+    {
+      "id": "G03",
+      "feature": "课件答疑流式接口",
+      "entry": "POST /api/deck-chat/stream",
+      "reason": "依赖大模型 API；离线不覆盖（笔记落盘路径由 /api/note/deck 覆盖）。"
+    },
+    {
+      "id": "G04",
+      "feature": "课件分享包导出/导入真实写",
+      "entry": "POST /api/share/export、/api/share/import",
+      "reason": "导出会触发渲染/打包长任务；本次只覆盖 /api/share/packages、/api/share/progress 与错误分支（share/estimate）。"
+    },
+    {
+      "id": "G05",
+      "feature": "上传文件（multipart）",
+      "entry": "POST /api/upload",
+      "reason": "需要构造 multipart 请求；同路径能力由 /api/import 预览覆盖，避免在验收里引入额外复杂度。"
+    },
+    {
+      "id": "G06",
+      "feature": "教材入库（OCR 长任务）",
+      "entry": "POST /api/ingest/textbook、ingest --mode textbook",
+      "reason": "OCR 452 页量级、单页 16s+，且依赖本地 OCR 引擎；本次用 md fixture 覆盖同一条 ingest 管线的解析/切块/向量/FTS。"
+    },
+    {
+      "id": "G07",
+      "feature": "单份 API 入库 /api/ingest",
+      "entry": "POST /api/ingest",
+      "reason": "服务端同步长任务会加载嵌入模型并可能调用大模型；CLI ingest 已覆盖同一 pipeline，API 仅覆盖非法路径错误分支。"
+    },
+    {
+      "id": "G08",
+      "feature": "识图/图注（视觉模型）",
+      "entry": "入库 FIGURE_DESC、/img/slide",
+      "reason": "需要视觉大模型 API 与真实页图；离线基线不覆盖。"
+    },
+    {
+      "id": "G09",
+      "feature": "分享包导入的真实解压/落库",
+      "entry": "POST /api/share/import",
+      "reason": "需要先有导出产物（见 G04）；本次只验证 inspect/estimate 的输入校验分支。"
+    },
+    {
+      "id": "G10",
+      "feature": "设置窗口密钥回填/校验",
+      "entry": "POST /api/settings（secret 字段）",
+      "reason": "离线基线不写入真实密钥；只验证非密钥字段保存与重置。"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "_work\\verify\\artifacts\\browser-home.png",
+      "note": "Edge headless 首页截图",
+      "size": 39729
+    },
+    {
+      "path": "_work\\verify\\artifacts\\healthcheck-result.json",
+      "note": "tools/healthcheck.py --json 原始输出",
+      "size": 1340
+    },
+    {
+      "path": "_work\\verify\\artifacts\\backup-data-result.json",
+      "note": "tools/backup_data.py --json 原始输出",
+      "size": 1132
+    },
+    {
+      "path": "_work\\verify\\report.md",
+      "note": "本报告",
+      "size": 23205
+    },
+    {
+      "path": "_work\\verify\\report.json",
+      "note": "机读结果",
+      "size": 48968
+    },
+    {
+      "path": "_work\\verify\\fixtures\\manifest.json",
+      "note": "fixture 快照与真实库指纹",
+      "size": 776
+    },
+    {
+      "path": "_work\\verify\\data\\main.db",
+      "note": "被测主库副本（真实库 backup 快照）",
+      "size": 15806464
+    },
+    {
+      "path": "_work\\verify\\logs\\browser-8897.log",
+      "note": "被测实例启动日志",
+      "size": 143
+    },
+    {
+      "path": "_work\\verify\\logs\\health-8897.log",
+      "note": "被测实例启动日志",
+      "size": 143
+    },
+    {
+      "path": "_work\\verify\\logs\\healthcheck-8897.log",
+      "note": "被测实例启动日志",
+      "size": 143
+    },
+    {
+      "path": "_work\\verify\\logs\\read-8897.log",
+      "note": "被测实例启动日志",
+      "size": 143
+    },
+    {
+      "path": "_work\\verify\\logs\\write-8897.log",
+      "note": "被测实例启动日志",
+      "size": 143
+    }
+  ]
+}
