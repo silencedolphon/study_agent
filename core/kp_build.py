@@ -720,22 +720,7 @@ def _page_stats(doc_id: int, db_path: str | os.PathLike | None = None) -> dict:
         d["n_fig" if is_fig else "n_body"] += int(n or 0)
         total += int(c or 0)
         n_blocks += int(n or 0)
-
-    # —— 卡 C-0048：宿主没能进入窗口（下放页与它之间被别的条目的页阻断）——————
-    inv: list = []
-    for p in win:
-        lines.append("===== 第 %d 页 =====" % p)
-        path = pages.get(p) or []
-        lines.append("【本页在导图中的节点路径】%s" % " > ".join(path))
-        if p in pp:
-            lines.append("（注：本页是**上级节点页**「%s」——它在导图里还有下级节点、"
-                         "自己不成条；它的内容必须**并入本条知识点**，"
-                         "并在 pages 里带上第 %d 页。）"
-                         % (path[-1] if path else "p.%d" % p, p))
-        elif cur is not None and p != cur and p < cur:
-            lines.append("（注：本页在导图里是末级节点页，先于当前页 p.%d 出现。）" % cur)
-        rows_fig = fig.get(p) or []
-        n_blocks += int(n or 0)
+        # 跨页块：区间内每一页都算被覆盖（与 read_chunks() 同口径）
         for p in range(a, b + 1):
             cover.setdefault(p, 0)
             cover[p] += int(n or 0)
