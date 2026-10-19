@@ -8233,6 +8233,10 @@ def api_summary_kp(doc_id, kp_id, conn):
         "prompt_source": str(meta.get("prompt_source") or ""),
         "chapter": str(meta.get("chapter") or ""),
         "source": str(idx.get("source") or ""),
+        # 卡 C-0056：知识点小窗底部「已绑定 N 条笔记」读的就是这个字段。
+        # 2026-10-19 修：重建版算完 n_notes 却漏了写进返回 dict，前端拿不到 →
+        # 刚保存时本地 +1、切到别的知识点再切回来又变回 0。
+        "note_count": int(n_notes),
         "prev_id": prev["id"] if prev else "",
         "prev_name": prev["name"] if prev else "",
         "next_id": nxt["id"] if nxt else "",

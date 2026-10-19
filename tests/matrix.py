@@ -171,6 +171,9 @@ MATRIX = [
     dict(id="F104", feature="M0-8 移动端基础（390 无横向滚动/首屏 scrollY=0/表格卡片式）",
          entry="≤560px 媒体查询 + safeFocus", kind="ui", priority="P1",
          tests=["test_12_m0_import_ui_mobile"], evidence="json+shot"),
+    dict(id="F105", feature="知识点小窗「已绑定 N 条笔记」计数（summary-kp 返回 note_count）",
+         entry="GET /api/summary-kp?doc_id=&kp_id=", kind="read", priority="P1",
+         tests=["test_13_summary_note_count"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
@@ -279,6 +282,21 @@ FIXED_BUGS = [
         verify=("回归用例：test_12_m0_import_ui_mobile.py（7/7）\n"
                 "gate v2 终测：_work/m0/gate/report-v2.md；_work/m0/waveB/shots/fixed390/"),
         repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_12_m0_import_ui_mobile",
+    ),
+    dict(
+        id="BUG-9", severity="中", matrix_refs=["F105"],
+        title="知识点小窗「已绑定 N 条笔记」计数恒为 0（切节点再回来丢失）",
+        symptom="知识点页→课件思维导图→点节点打开「理解与要点」小窗：底部先显示「已绑定 1 条笔记」，"
+                "点「下一知识点」再切回原知识点后变成「已绑定 0 条笔记」。",
+        root_cause="tools/dashboard.py::api_summary_kp() 计算了 n_notes，但返回 dict 漏了 "
+                   "`note_count` 键（2026-10-14 灾后重建版丢行）；前端 parseInt(d.note_count||0) 恒为 0，"
+                   "保存后的「+1」只是前端本地假象。",
+        impact="用户以为笔记没绑定成功（实际已写入 notes/ 并出现在笔记页签），对笔记功能失去信任。",
+        fixed_in="2026-10-19 fix(dashboard): summary-kp 返回 note_count",
+        fix_summary="返回 dict 补 `\"note_count\": int(n_notes)`；新增单测锁定契约（有 1 条=1、0 条=0）。",
+        verify=("回归用例：test_13_summary_note_count.py（2/2）\n"
+                "线上只读核对：doc46 KP-N07-1 等 note_count 与 /api/notes/by_kp 一致；切走再切回 1→1"),
+        repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_13_summary_note_count",
     ),
 ]
 
