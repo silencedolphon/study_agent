@@ -499,6 +499,16 @@ _FIELDS: list[dict] = [
     {"pipeline": "ingest", "key": "OUTLINE_THINKING", "label": "结构分析开启推理",
      "type": "bool", "default": 1,
      "hint": "层级判断不开推理容易拍平。"},
+    # ---- 2026-10-19 用户需求：课件入库改「整页切块」（每页一块 + 识图并入） ----
+    # 默认开；关掉逐字回退旧管线（AI 结构分析 + 跨页语义切块 + 独立识图块）。
+    # 只影响 pdf/pptx **非教材课件**；教材专线与非课件资料（txt/md/docx 等）不受影响。
+    {"pipeline": "ingest", "key": "INGEST_PAGE_CHUNK",
+     "label": "整页切块（每页一块，识图并入文字）", "type": "bool", "default": 1,
+     "env": "KB_INGEST_PAGE_CHUNK",
+     "hint": "默认开。课件按**页**切块：一页一块，有图页的识图文字并入同一块，"
+             "不再跑 AI 结构分析、不再额外建「p.N 图」独立块。"
+             "关掉 = 回到旧模式（AI 思维导图结构 + 跨页语义切块 + 独立识图块），"
+             "旧资料不受影响、不自动重导。"},
     {"pipeline": "ingest", "key": "FIGURE_RENDER_DPI", "label": "页面渲染分辨率（DPI）",
      "type": "int", "default": 110, "advanced": True,
      "hint": "识图前把页面渲染成图的清晰度。实测中文术语识别率对 DPI 不敏感，调大只变慢。"},

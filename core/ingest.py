@@ -7,6 +7,13 @@
 
 幂等性：以源文件内容 sha256 判重。改过的文件会重建该文档的所有切块与向量，
 没改的直接跳过。因此重复对整个 raw/ 目录跑 ingest 是安全且廉价的。
+
+两种切块模式（2026-10-19，`config.INGEST_PAGE_CHUNK`，默认开）：
+
+- **整页切块**（默认，`page_mode`）：pdf/pptx **非教材课件**每页一块，有图页的
+  识图文字并入同一块；不跑 AI 结构分析（`core/outline.py`）、不建独立识图块。
+- **旧模式**（开关关闭 / 教材专线 / 非课件资料）：逐字走改造前的
+  识图 → AI 结构分析 → `chunk_blocks` → 独立识图块重挂，一行未改。
 """
 from __future__ import annotations
 
@@ -46,6 +53,89 @@ TOKEN_PER_CHAR = 0.75
 TEXTBOOK_MODE = "textbook"
 TEXTBOOK_ROLE = "textbook"
 TEXTBOOK_CHUNK_SCHEME = "textbook-v1"
+
+# ---------------------------------------------------------------- 整页切块
+# 2026-10-19 用户需求：「课件入库不要再让大模型拆结构；**每一页切一块**；
+# 页里有图片就把识图信息和文字**合并进同一块**。」
+#
+# 实现方式：只做**加法/分支**——`ingest_file` 里多一条 `page_mode` 分支，
+# 默认开启（`config.INGEST_PAGE_CHUNK`，设置中心可关）。关掉时旧分支
+# （outline 分析 + `chunk_blocks` + 独立识图块）**逐字回退**，一行未改。
+#
+# 边界（本卡红线）：只对 kind in ("pdf","pptx") 且非教材课件生效；
+# 教材专线（mode="textbook"）与非课件资料（txt/md/docx/图片…）不受影响。
+PAGE_CHUNK_IMAGE_HEAD = "【图片理解】"
+
+
+def page_chunk_enabled(kind: str, is_textbook: bool = False) -> bool:
+    """这份资料是否走「整页切块」模式（默认开、可回退）。
+
+    纯判断、无副作用：只对 pdf/pptx 非教材课件返回 True；
+    `config.INGEST_PAGE_CHUNK`（设置中心「整页切块」开关，环境变量
+    `KB_INGEST_PAGE_CHUNK`）关掉时对任何资料都返回 False → 旧分支逐字回退。
+    """
+    if is_textbook or kind not in ("pdf", "pptx"):
+        return False
+    return bool(getattr(config, "INGEST_PAGE_CHUNK", 1))
+
+
+def _first_heading(blocks: list) -> str:
+    """一页里第一个非空标题块（没有就给空串，写库时回退文档标题）。"""
+    for b in blocks or []:
+        if getattr(b, "kind", "") == "heading":
+            t = (getattr(b, "text", "") or "").strip()
+            if t:
+                return t
+    return ""
+
+
+def build_page_chunks(blocks, fig_text) -> list:
+    """整页切块：**每页一块**，图片理解并入同一块（纯函数，无 IO/无模型调用）。
+
+    规则（与用户需求逐条对应）：
+
+    - 页内文本 = 该页**全部非空 block 按原顺序**用 "\\n" 连接（保留标题/正文/
+      表格行/OCR 行原文，不重排、不跨页合并）；
+    - 该页有识图文字（`fig_text[页号]`，来自 `figure_desc` 缓存/本轮识图）→
+      在正文后追加 `【图片理解】` 段；
+    - `source_ref = "p.N"`（**无区间**）；`heading_path` = 该页第一个标题块
+      （无则空串；`_write_chunks` 会按既有逻辑回退到文档标题）；
+    - **纯空页跳过**（文字与识图都为空）；块数 = 有内容页数；
+    - 本函数不做 outline、不建独立识图块——这两件事只属于旧分支。
+    """
+    by_page: dict[int, list] = {}
+    for b in (blocks or []):
+        try:
+            p = int(getattr(b, "page", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if p > 0:
+            by_page.setdefault(p, []).append(b)
+    figs = fig_text or {}
+    fig_pages: set[int] = set()
+    for k in figs:
+        try:
+            fig_pages.add(int(k))
+        except (TypeError, ValueError):
+            continue
+    out: list = []
+    for p in sorted(set(by_page) | fig_pages):
+        page_blocks = by_page.get(p) or []
+        parts = [(getattr(b, "text", "") or "").strip() for b in page_blocks]
+        body = "\n".join(t for t in parts if t)
+        fig = str(figs.get(p) or figs.get(str(p)) or "").strip()
+        if fig:
+            body = (body + "\n\n" + PAGE_CHUNK_IMAGE_HEAD + "\n" + fig).strip()
+        if not body:
+            continue
+        out.append(chunk_mod.Chunk(
+            text=body,
+            heading_path=_first_heading(page_blocks),
+            source_ref=f"p.{p}",
+            ord=len(out) + 1,
+            meta={"page": p},
+        ))
+    return out
 
 
 @dataclass
@@ -416,6 +506,10 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
 
     if with_figures is None:
         with_figures = bool(getattr(config, "FIGURE_DESC", 1))
+    # 「整页切块」模式（2026-10-19）：只对 pdf/pptx 非教材课件生效，默认开。
+    # 这里只读一次配置，整份文件的判断口径就固定下来（设置中心改值下次入库才生效，
+    # 与其它设置项"下一次任务按新值跑"的既定口径一致）。
+    page_mode = page_chunk_enabled(kind, is_textbook)
 
     content_hash = db.sha256_file(path)
     rel = rel_override or _rel(path)
@@ -592,12 +686,18 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
                          if is_textbook else None)
             fs = _fig.ingest_document_figures(
                 conn, doc_id, path, kind=kind, verbose=verbose,
-                max_calls=max_calls)
+                max_calls=max_calls,
+                # ★ 整页切块模式：identified 描述**不单独建 p.N 图 块**，
+                # 随后由 build_page_chunks 并进该页那一块（旧模式传 True，逐字不变）。
+                store_chunks=not page_mode)
+            if page_mode:
+                # 只进日志，不改返回结构：让人一眼看出这一轮没建独立识图块。
+                progress.stage("识别图片", note="有图页识图（描述并入整页块）")
             if is_textbook:
                 tb_diag["figure_max_calls"] = max_calls
             fig_stats = dict(fs or {})
             fig_errors = list(fs.get("errors") or [])
-            fig_text = _figure_texts(conn, doc_id)
+            fig_text = _figure_texts(conn, doc_id, skip_no_info=page_mode)
         except Exception as e:  # noqa: BLE001
             fig_errors = [f"{type(e).__name__}: {e}"]
             # 同上：异常可能落在"写语句之后、commit 之前"，那时写锁还在手里，
@@ -622,7 +722,9 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     # 完成，**根本不读 outline**。跑一次 analyze_deck 再把它丢掉，等于白花一次
     # 模型调用的钱、还多一段不确定的输出。`not is_textbook` 在通用路径上是
     # 短路为真的常量，所以这一行对改造前的行为没有任何影响。
-    if (not is_textbook) and _should_analyze(kind, n_pages):
+    # ★ 教材专线不跑这一步（卡 C-0088）；**整页切块模式也不跑**（2026-10-19：
+    # 用户明确要求"不再用大模型做结构拆分"）。两处都是短路常量，旧分支行为不变。
+    if (not is_textbook) and (not page_mode) and _should_analyze(kind, n_pages):
         progress.stage("分析结构", note="大模型看完整份课件、画思维导图")
         try:
             from . import outline as _ol
@@ -671,6 +773,12 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
         # 教材块的面包屑形状（验收用）：取前若干种，便于人一眼核对
         tb_diag["heading_path_kinds"] = sorted(
             {c.heading_path for c in chunks})[:6]
+    elif page_mode:
+        # ★ 整页切块（2026-10-19，默认开）：**每页一块**，识图文字并入同一块；
+        # 不做 AI 结构分析（outline 恒为 None）、不建独立识图块。
+        # 旧模式（开关关闭/教材专线/非课件）继续走下面那条**一行未改**的老路。
+        progress.stage("整页切块", note="每页一块（识图并入文字，不做结构分析）")
+        chunks = build_page_chunks(res.blocks, fig_text)
     else:
         chunks = chunk_mod.chunk_blocks(res.blocks, doc_meta=res.meta,
                                         outline=outline)
@@ -741,6 +849,10 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
         # 免得下游把"全是 vision 块"当成异常；成本另见 figures.cost_cny。
         out["zero_text"] = True
         out["vision_blocks"] = int(zero_vision_stats.get("blocks") or 0)
+    if page_mode:
+        # 整页切块模式（2026-10-19）：**只增键**供对照/验收；
+        # 旧模式（开关关闭 / 教材专线 / 非课件）返回值逐字段不变。
+        out["chunk_mode"] = "page"
     if tb_diag:
         # 教材专线的回执（卡 C-0088）：章数 / 是否降级 / 跨章块数 / 面包屑形状。
         # **只增键**，且只在教材模式出现——通用路径的返回值逐字段不变。
@@ -752,7 +864,10 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     # 老面包屑；`_write_chunks` 又把该文档的块全部删掉重建了正文块，
     # 识图块也一并没了。这里按新路径重建一次，让正文块与识图块挂在
     # **同一个节点**下，检索时才会一起被捞出来。
-    if fig_text:
+    #
+    # ★ 整页切块模式**不重挂**（2026-10-19）：识图文字已经并进每页那一块，
+    # 库里不该再出现独立的 `p.N 图` 识图块（用户需求原话）。
+    if fig_text and not page_mode:
         try:
             out["figures_rewritten"] = _rewrite_figure_chunks(
                 conn, doc_id, title, fig_text, outline)
@@ -889,20 +1004,29 @@ def _should_analyze(kind: str, n_pages: int) -> bool:
     return True
 
 
-def _figure_texts(conn, doc_id: int) -> dict[int, str]:
-    """按页取回识图描述正文（`figure_desc` 表，不依赖切块）。"""
+def _figure_texts(conn, doc_id: int, *, skip_no_info: bool = False) -> dict[int, str]:
+    """按页取回识图描述正文（`figure_desc` 表，不依赖切块）。
+
+    `skip_no_info`（2026-10-19，默认 False = 旧行为逐字不变）：整页切块模式下
+    跳过「本页无知识性图示」的页——那些页的文字层已经够了，把模型自报的
+    "没有图示"再拼进每页正文只会污染检索；旧模式仍按原样返回（它后续会走
+    `is_no_info` 分支，语义不变）。
+    """
     out: dict[int, str] = {}
     try:
         rows = conn.execute(
-            "SELECT page, description FROM figure_desc WHERE doc_id=? "
+            "SELECT page, description, no_info FROM figure_desc WHERE doc_id=? "
             "ORDER BY page", (doc_id,)).fetchall()
     except Exception:  # noqa: BLE001
         return out
     for r in rows:
         d = (r["description"] or "").strip()
-        if d:
-            pno = int(r["page"])
-            out[pno] = (out.get(pno, "") + "\n" + d).strip()
+        if not d:
+            continue
+        if skip_no_info and int(r["no_info"] or 0):
+            continue
+        pno = int(r["page"])
+        out[pno] = (out.get(pno, "") + "\n" + d).strip()
     return out
 
 

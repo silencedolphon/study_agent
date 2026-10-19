@@ -398,6 +398,44 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
 .evpop .pf{padding:8px 11px;border-top:1px solid var(--line);
   display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .evpop .pmeta{color:var(--dim);font-size:12px}
+/* ---------------- 特性1：知识点小窗左侧思维导图栏（只增不改） ----------------
+   小窗内容 = 左侧本课件完整导图 + 右侧原有「理解与要点」正文。
+   左侧与右侧**各自独立滚动**（aside overflow:auto / .pbody 原有滚动不动）。
+   宽屏 ≥900px 常驻；窄屏默认收起，用头部「☰ 导图」按钮展开为左侧抽屉。
+   所有选择器都挂在 .evpop 下，不碰其它页面。 */
+.evpop .mmkp-toggle{display:none;background:none;border:1px solid var(--line);
+  color:var(--dim);font-size:12px;line-height:1;cursor:pointer;padding:5px 8px;
+  border-radius:6px;flex:0 0 auto;margin-right:2px}
+.evpop .mmkp-toggle:hover{color:var(--accent);border-color:var(--accent)}
+.evpop .mmkp-shell{display:flex;flex:1 1 auto;min-height:0;min-width:0;position:relative}
+.evpop .mmkp-main{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0}
+.evpop .mmkp-side{display:none;flex:0 0 224px;min-height:0;overflow:auto;
+  padding:8px 8px 10px;border-right:1px solid var(--line);background:#12151c;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.evpop.mmkp-has-side .mmkp-side{display:block}
+.evpop.mmkp-has-side{width:min(940px,calc(100vw - 24px))}
+.evpop .mmkp-side .mms-ttl{color:var(--dim);font-size:11.5px;margin:0 0 6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evpop .mmkp-side .mms-kids{list-style:none;margin:0;padding-left:10px}
+.evpop .mmkp-side .mms-kids.mms-root{padding-left:0}
+.evpop .mmkp-side .mms-node{display:block;padding:2px 6px;border-left:2px solid transparent;
+  border-radius:4px;font-size:12px;line-height:1.55;color:var(--dim);word-break:break-word}
+.evpop .mmkp-side .mms-kp{cursor:pointer;color:var(--fg)}
+.evpop .mmkp-side .mms-kp:hover{background:var(--panel2);color:var(--accent)}
+.evpop .mmkp-side .mms-kp.on{color:var(--accent);font-weight:600;
+  background:rgba(91,157,255,.12);border-left-color:var(--accent)}
+.evpop .mmkp-side .mms-pg{color:var(--dim);font-size:10.5px;margin-left:4px}
+.evpop .mmkp-side .mms-empty{color:var(--dim);font-size:12px;padding:6px;line-height:1.7}
+@media (max-width:899px){
+  .evpop.mmkp-has-side{width:min(560px,calc(100vw - 24px))}
+  .evpop.mmkp-has-side .mmkp-side{display:none;position:absolute;left:0;top:0;bottom:0;
+    width:min(260px,82vw);z-index:1;border-right:1px solid var(--accent);
+    box-shadow:8px 0 24px rgba(0,0,0,.5);padding-top:54px;background:#10141b}
+  .evpop.mmkp-has-side.mm-tree-open .mmkp-side{display:block}
+  .evpop .mmkp-toggle{display:inline-flex;align-items:center}
+  /* 头部压在抽屉上方：展开抽屉时关闭按钮不被遮挡、仍可点 */
+  .evpop .mmkp-main .ph{position:relative;z-index:3;background:var(--panel2)}
+}
 /* 卡 C-0055：出处小窗里的"这一页"——课件图 + 该页知识点。
    人拍板（2026-09-27）：「AI问答版块点击右下标签时最好可以跳出那一页的课件图片。
    并且可以看到那一页课件对应的知识点，形成一个网状知识体系。」
@@ -1046,6 +1084,9 @@ function evPopClose(){
     }
     EVPOP.dataset.deck = '';
     EVPOP.classList.remove('deck-open');
+    // 特性1：左侧导图栏状态一并清掉，下一个出处小窗不会继承"加宽 + 抽屉展开"
+    EVPOP.classList.remove('mmkp-has-side', 'mm-tree-open');
+    MMSIDE.open = false;
   }
   document.removeEventListener('click', evPopOutside, true);
   document.removeEventListener('keydown', evPopEsc);
@@ -1187,6 +1228,9 @@ function evPopShow(el, n){
   // 卡 C-0042：出处小窗贴角标（不居中），顺手摘掉"知识点弹窗"的居中身份，
   // 免得它顶掉知识点弹窗之后还按居中的规矩摆。
   d.dataset.kpPop = '';
+  // 特性1：出处小窗不显示左侧导图栏（宽屏加宽 / 窄屏抽屉都不该带过来）
+  d.classList.remove('mmkp-has-side', 'mm-tree-open');
+  MMSIDE.open = false;
   d.dataset.cite = '';   // 卡 C-0055：上一条出处的"这一页"请求一并作废
   if (!e) {
     d.innerHTML = `<div class="ph"><div class="src">
@@ -4540,6 +4584,8 @@ async function mmOpenKp(kpId, name, el, keepDeck, docId){
   const pop = evPopEl();
   pop.dataset.kp = kpId;
   if (!keepDeck) pop.dataset.deck = '';
+  // 特性1：先摘掉上一屏的左侧栏状态；真正渲染时 mmRenderKp 会按本课件重新加回
+  pop.classList.remove('mmkp-has-side', 'mm-tree-open');
   MMPOP.anchor = el;
   MMPOP.docId = did;
   evPopMount(el, `<div class="ph"><div class="src">
@@ -4619,6 +4665,11 @@ function mmRenderKp(d, el, keepDeck){
     ? '展开这一页的课件大图（图可点开原尺寸）'
     : '这个知识点对应的页没有课件图缓存';
   const html = `
+    <div class="mmkp-shell">
+      <aside class="mmkp-side" id="mmkp-tree">
+        <div class="mms-empty">左侧导图加载中…</div>
+      </aside>
+      <div class="mmkp-main">
     <div class="ph">
       <div class="src">
         <div class="loc">${esc(d.name || d.kp_id || '')}
@@ -4626,6 +4677,7 @@ function mmRenderKp(d, el, keepDeck){
           <span class="small muted">末级知识点 · 第 ${esc(d.level || '?')} 层</span></div>
         <div class="hdg">${esc((d.path || []).join(' › ') || d.node_name || '')}</div>
       </div>
+      <button class="mmkp-toggle" id="mmkp-treebtn" title="展开 / 收起左侧导图">☰ 导图</button>
       <button class="pclose" onclick="evPopClose()" title="关闭（Esc）">✕</button>
     </div>
     <div class="pbody" id="mmkp-body">
@@ -4697,7 +4749,13 @@ function mmRenderKp(d, el, keepDeck){
         title="看与这条知识点绑定的笔记">查看笔记</button>
       <button class="ghost" id="mmkp-search">在资料库中检索此主题</button>
       <button class="ghost" id="mmkp-deck" title="${esc(deckTitle)}">展开当页课件</button>
+    </div>
+      </div>
     </div>`;
+  // 特性1：左侧栏占位（宽屏常驻）——失败会收起；窄屏抽屉若正开着，换节点后保持展开。
+  const pop0 = evPopEl();
+  pop0.classList.add('mmkp-has-side');
+  if (MMSIDE.open) pop0.classList.add('mm-tree-open');
   evPopMount(el, html);
   // ★ 卡 C-0042：点「▸ 展开：总结正文 · 出处明细 · 生成链条」也会让内容变高
   //   （同一类"尺寸变了位置没跟着变"的越界），所以折叠体一开一合也重新兜一次。
@@ -4732,6 +4790,113 @@ function mmRenderKp(d, el, keepDeck){
   if (keepDeck) mmToggleDeck();
   // 卡 C-0056：挂上"弹窗内怎么滚都不出窗"的两道防线（幂等，见 mmKpScrollGuard）
   mmKpScrollGuard(evPopEl());
+  // 特性1：左侧「本课件完整导图」栏（异步；失败/无产物时收起，不影响右侧正文）。
+  mmSidebarPaint(d, el);
+  const treeBtn = $('#mmkp-treebtn');
+  if (treeBtn) treeBtn.onclick = () => {
+    MMSIDE.open = !MMSIDE.open;
+    evPopEl().classList.toggle('mm-tree-open', MMSIDE.open);
+    evPopPlace(MMPOP.anchor || evPopEl());
+  };
+}
+
+// ---------------- 特性1：知识点小窗左侧的「本课件完整导图」 ----------------
+// 只做加法：左侧数据来自既有 `/api/mindmap?doc_id=`（同一 doc 一次会话只请求一次），
+// 点左侧叶子复用 `mmOpenKp` **就地换右侧内容**（不关窗、不新开浮层）；
+// 当前知识点按 `d.kp_id` 高亮。取不到 / 没整理产物时左栏给一句人话并自动收起，
+// 右侧正文照常显示（绝不影响原有功能）。
+const MMSIDE = {cache: {}, open: false};   // {docId: Promise<{ok, tree, title, err}>}
+
+function mmSideData(docId){
+  if (!MMSIDE.cache[docId]){
+    MMSIDE.cache[docId] = api('/api/mindmap?doc_id=' + encodeURIComponent(docId))
+      .then(r => ({ok: !!(r && r.has_structure && (r.tree || []).length),
+                   tree: (r && r.tree) || [], title: (r && r.title) || ''}))
+      .catch(e => ({ok: false, tree: [], err: e.message}));
+  }
+  return MMSIDE.cache[docId];
+}
+
+function mmSideTree(nodes, curId, docId){
+  if (!nodes || !nodes.length) return '';
+  return nodes.map(n => {
+    const name = esc(n.name || '');
+    const pg = n.lkp_pages_label
+      ? `<span class="mms-pg">${esc(n.lkp_pages_label)}</span>`
+      : (n.page ? `<span class="mms-pg">p.${esc(n.page)}</span>` : '');
+    const kids = (n.children && n.children.length)
+      ? `<ul class="mms-kids">${mmSideTree(n.children, curId, docId)}</ul>` : '';
+    if (n.lkp_ready){
+      const ids = (n.lkp_ids && n.lkp_ids.length)
+        ? n.lkp_ids : (n.lkp_id ? [n.lkp_id] : []);
+      if (ids.length > 1){
+        // 一个结构叶节点挂了多条知识点（产物按连续 ≤3 页切开）：就地展开子项，
+        // 点哪条看哪条——与右侧列表弹窗同口径，但不用先跳一层。
+        const names = n.lkp_names || [];
+        const sub = ids.map((id, i) => `<li><a href="#" class="mms-node mms-kp${
+          String(id) === String(curId) ? ' on' : ''}" data-kp="${esc(id)}"
+          data-name="${esc(names[i] || id)}"
+          title="这条知识点的理解与要点">${esc(names[i] || id)}</a></li>`).join('');
+        return `<li><div class="mms-node">${name}${pg}</div>
+          <ul class="mms-kids">${sub}</ul></li>`;
+      }
+      const id = ids[0] || '';
+      return `<li><a href="#" class="mms-node mms-kp${
+        String(id) === String(curId) ? ' on' : ''}" data-kp="${esc(id)}"
+        data-name="${esc(n.lkp_name || n.name || id)}"
+        title="这条知识点的理解与要点">${name}${pg}</a></li>`;
+    }
+    if (n.lkp_role === 'leaf'){
+      return `<li><div class="mms-node" title="末级节点：该建知识点，但总结待生成">${
+        name}${pg}</div></li>`;
+    }
+    return `<li><div class="mms-node">${name}${pg}</div>${kids}</li>`;
+  }).join('');
+}
+
+// 点左侧叶子 → 与 mmOpenNode（右侧导图点节点）同一个入口：先标"居中"再 mmOpenKp。
+// 不关窗、不换浮层，只换右侧内容；高亮在重渲染后由 mmSidebarPaint 重新 mark。
+function mmSidebarBind(aside, docId, curId){
+  aside.querySelectorAll('.mms-kp').forEach(a => {
+    a.onclick = e => {
+      e.preventDefault();
+      const kpId = a.dataset.kp;
+      if (!kpId || String(kpId) === String(curId)) return;
+      evPopEl().dataset.kpPop = '1';
+      mmOpenKp(kpId, a.dataset.name || kpId, MMPOP.anchor, false, docId);
+    };
+  });
+}
+
+async function mmSidebarPaint(d, el){
+  const aside = $('#mmkp-tree');
+  const pop = evPopEl();
+  if (!aside) return;
+  const docId = parseInt((d && d.doc_id) || MMPOP.docId, 10) || 0;
+  if (!docId){
+    aside.innerHTML = '<div class="mms-empty">这条知识点没有关联课件，左侧导图不可用。</div>';
+    pop.classList.remove('mmkp-has-side', 'mm-tree-open');
+    evPopPlace(el || MMPOP.anchor || pop);
+    return;
+  }
+  const curId = (d && d.kp_id) || '';
+  const c = await mmSideData(docId);
+  // 期间用户又切了别的知识点 / 关掉了小窗 → 这趟结果作废，别盖掉新内容
+  if (evPopEl() !== pop || !document.body.contains(aside) || aside !== $('#mmkp-tree')) return;
+  if ((pop.dataset.kp || '') !== String(curId)) return;
+  if (!c || !c.ok){
+    aside.innerHTML = `<div class="mms-empty">这份课件还没有可显示的整理导图${
+      c && c.err ? '（' + esc(c.err) + '）' : ''}。右侧内容不受影响。</div>`;
+    pop.classList.remove('mmkp-has-side', 'mm-tree-open');
+    evPopPlace(el || MMPOP.anchor || pop);
+    return;
+  }
+  pop.classList.add('mmkp-has-side');
+  aside.innerHTML = `<div class="mms-ttl" title="${
+    esc(c.title || '')}">本课件导图 · 点知识点直达</div>
+    <ul class="mms-kids mms-root">${mmSideTree(c.tree, curId, docId)}</ul>`;
+  mmSidebarBind(aside, docId, curId);
+  evPopPlace(el || MMPOP.anchor || pop);
 }
 
 // ---------------- 知识点窗口的笔记（卡 C-0052） ----------------

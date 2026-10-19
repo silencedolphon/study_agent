@@ -174,6 +174,12 @@ MATRIX = [
     dict(id="F105", feature="知识点小窗「已绑定 N 条笔记」计数（summary-kp 返回 note_count）",
          entry="GET /api/summary-kp?doc_id=&kp_id=", kind="read", priority="P1",
          tests=["test_13_summary_note_count"], evidence="json"),
+    dict(id="F106", feature="知识点小窗左侧思维导图栏（高亮当前 + 点击直达，纯新增）",
+         entry="知识点小窗 #mmkp-tree + GET /api/mindmap", kind="ui", priority="P1",
+         tests=["test_14_mindmap_sidebar"], evidence="json+shot"),
+    dict(id="F107", feature="课件整页切块（每页一块 + 识图并入同一块，旧模式可回退）",
+         entry="study.py ingest + config.INGEST_PAGE_CHUNK / KB_INGEST_PAGE_CHUNK",
+         kind="write", priority="P1", tests=["test_15_page_chunk"], evidence="json+db"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

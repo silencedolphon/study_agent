@@ -656,7 +656,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                             only_with_images: bool = True,
                             max_calls: int | None = None,
                             verbose: bool = False,
-                            workers: int | None = None) -> dict:
+                            workers: int | None = None,
+                            store_chunks: bool = True) -> dict:
     """**完整识图管线**：渲染 → 逐页描述 → 写入库（含向量）。
 
     这是"入库"的一部分，由 `core.ingest.ingest_file` 调用，
@@ -676,9 +677,16 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
        每块带"图示说明"与 `p.N 图` 标记（与正文块可区分）。
        「本页无知识性图示」的页**不入库**——文字层已覆盖，存进去只占检索名额。
 
-    `workers`：逐页并发数，默认取 `page_workers()`（环境变量
-    `KB_FIGURE_WORKERS`，上限与 `pipeline_pool.MAX_WORKERS` 同口径）。
-    **`1` = 改造前的串行行为**（逐字回退）。
+     `workers`：逐页并发数，默认取 `page_workers()`（环境变量
+     `KB_FIGURE_WORKERS`，上限与 `pipeline_pool.MAX_WORKERS` 同口径）。
+     **`1` = 改造前的串行行为**（逐字回退）。
+
+     `store_chunks`（**2026-10-19 新增，默认 True = 旧行为逐字不变**）：
+     False 时**只识别/复用描述、写 `figure_desc` 缓存与 md，不建独立识图块**
+     （不写 `chunks`/`embeddings`、不改 `n_chunks`、不跑 stale 清理）；
+     供 `core/ingest.py` 的「整页切块」模式把描述并进**每页那一块**，
+     避免同一页内容在库里出现两份。识图页过滤（`only_with_images` +
+     `page_has_image`，仅 pptx 有可靠判据）与缓存复用逻辑完全不变。
 
     返回统计字典（供入库报告汇总）。除了老字段（pages/described/reused/
     no_info/chunks/cost_cny/errors/stale_dropped），本卡新增三个**只增不改**
@@ -905,6 +913,14 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             conn.commit()          # 同上：不留未决事务
             return
 
+        if not store_chunks:
+            # 整页切块模式（core/ingest.py::ingest_file）：描述正文只留在
+            # figure_desc 做缓存，由调用方把它并进「每页一块」的正文块，
+            # **不单独建 `p.N 图` 识图块**（否则同一页内容库里会有两份）。
+            stats["merged_only"] = stats.get("merged_only", 0) + 1
+            conn.commit()
+            return
+
         n = _store_figure_chunks(conn, doc_id, deck_title, p, item["title"],
                                  body, now)
         stats["chunks"] += n
@@ -993,8 +1009,11 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         _fig_skip(stats, (
             f"没有一页被识图：{len(want)} 页在规划阶段全部被判为不可处理"
             f"（页图或页语境取不到），0 页被送进视觉模型。"))
-    # 本轮没处理、但库里还留着块的页（课件改版后那页没图了）→ 清掉
-    stats["stale_dropped"] = _drop_stale_figure_chunks(conn, doc_id, handled)
+    # 本轮没处理、但库里还留着块的页（课件改版后那页没图了）→ 清掉。
+    # `store_chunks=False` 时本次一个识图块都不写，也就没有"哪些页处理过"
+    # 可言；调用方（整页切块）会用 `_write_chunks` 整体重建该文档的块。
+    stats["stale_dropped"] = (
+        _drop_stale_figure_chunks(conn, doc_id, handled) if store_chunks else 0)
     conn.commit()
     return stats
 
