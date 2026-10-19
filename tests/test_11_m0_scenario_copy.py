@@ -1,11 +1,13 @@
-"""M0-6a（文案/空态清理）+ M0-1（学习场景骨架）验收。
+"""M0-6a（文案/空态清理）验收 —— 回退后保留的排版/文案改动。
 
+用户实测后 M0 的功能型新增（场景预设 M0-1、新建知识点入口 M0-2、错题闭环 M0-4、
+导入看板入口 M0-6b）已回退；**M0-6a 的文案/排版/空态 CTA/摘要截断保留**。
 覆盖：
-  · M0-6a：用户可见的开发者术语被清掉（旧文案断言消失 + 首页真实渲染文本零命中）；
-    每个空态都有一个**真实可点**主按钮（图谱/笔记/复习/知识点/错题/名词/导图）；
-    需要保留的高级说明收进 `<details>` 折叠区；知识点列表摘要用 `.kpsum` 2 行截断。
-  · M0-1：设置中心有 A/B/C 学习场景三选一；localStorage 持久化；A/B 首屏默认总览、
-    C 首屏默认复习；C 精简导航（隐藏图谱/笔记）；切回 A 恢复全部 8 个页签。
+  · 用户可见的开发者术语被清掉（旧文案断言消失 + 首页真实渲染文本零命中）；
+  · 空态仍有真实可点主按钮（图谱/笔记/复习/总览/名词/导图；错题/知识点页的
+    功能型按钮已随回退移除）；
+  · 需要保留的高级说明收进 `<details>` 折叠区；知识点列表摘要 `.kpsum` 2 行截断；
+  · 回退负向断言：已撤销的入口/场景/导入按钮不再出现在页面里。
 
 隔离：用 `tests/env.py` 的沙箱服务 + 数据副本；关掉 AI 的两条长链路不触发（不调模型）。
 页面文字判断分两层：静态断言（源码里的旧文案与折叠区/CTA 结构）+ 首页真实渲染文本。
@@ -98,34 +100,42 @@ class TestCopyCleanup(unittest.TestCase):
         # 设置窗口本体：密钥说明是固定人话（不再渲染后端元数据），面板走过滤后的 setPaneHtml
         self.assertIn("API 密钥只保存在本机", _PAGE_CODE)
         self.assertIn("setPaneHtml(cur)", _PAGE_CODE)
-        self.assertIn("sceneSettingsHtml()", _PAGE_CODE)
 
     def test_empty_state_cta_buttons(self):
-        """每个空态都有真实可点主按钮（id 存在且绑了真实动作）。"""
+        """空态仍有真实可点主按钮（id 存在且绑了真实动作）。"""
         ctas = {
-            "kp-create-toggle": "新建知识点（知识点页空态）",
-            "mk-new": "＋ 记一道错题（错题页）",
-            "gr-go-kps": "去「知识点」新建（图谱空态）",
-            "nt-go-kps": "去「知识点」写笔记（笔记空态）",
-            "rv-go-kps": "去「知识点」新建（复习空态）",
+            "gr-go-kps": "去「知识点」页（图谱空态）",
+            "nt-go-kps": "去「知识点」页（笔记空态）",
+            "rv-go-kps": "去「知识点」页（复习空态）",
             "ov-go-review": "去「复习」开始（总览空态）",
             "term-go-build": "去整理这份课件（名词解释空态）",
             "mm-go-build": "去整理（思维导图未整理）",
         }
         for cid, why in ctas.items():
             self.assertIn(f'id="{cid}"', _PAGE, f"缺少按钮：{why}")
-        for action in ("go('kps')", "go('review')", "openMistakeForm(", "openKpBuild("):
+        for action in ("go('kps')", "go('review')", "openKpBuild("):
             self.assertIn(action, _PAGE, f"空态按钮没有绑定真实动作：{action}")
+        # 知识点页的空态主按钮是「选择课件批量整理」（新建入口已回退）
+        self.assertIn('id="kp-build-open"', _PAGE)
+
+    def test_removed_m0_entries_gone(self):
+        """回退负向断言：场景 / 新建知识点 / 记错题 / 导入按钮都不再出现。"""
+        for gone in ('id="scene-badge"', "SCENE_KEY", "sceneSettingsHtml(",
+                     'id="kp-create-toggle"', "kpCreateCard(",
+                     'id="kp-add-mistake"', "openMistakeForm(",
+                     'id="mk-new"', 'id="kp-import-open"', "kpImportOpen(",
+                     "/api/kp-import/preview"):
+            self.assertNotIn(gone, _PAGE, f"已回退的入口又出现了：{gone}")
 
     def test_overview_rendered_text_clean(self):
-        """真实渲染的首页（场景 A 默认总览）可见文本：开发者术语 0 命中。"""
+        """真实渲染的首页（M0 前默认问答页）可见文本：开发者术语 0 命中。"""
         dom = env.edge_dump_dom(_SRV.url, timeout=90, virtual_time_ms=6000)
         text = _visible_text(dom)
         self.assertGreater(len(text), 100, f"首页渲染文本过短，DOM 可能没渲染：{text[:120]}")
         hits = [p for p in FORBIDDEN_PATTERNS if p in text]
         self.assertEqual(hits, [], f"首页可见文本仍有开发者术语：{hits}")
-        # 空态主按钮在真实渲染里可见可用（总览的"最薄弱知识点"空态）
-        self.assertIn('id="ov-go-review"', dom, "总览空态主按钮未渲染")
+        # 回退后默认首屏 = 问答页，且不再有场景标识
+        self.assertNotIn('id="scene-badge"', dom, "场景标识应已回退")
 
     def test_kp_summary_truncated(self):
         """知识点列表摘要 2 行截断（视觉截断、详情仍看全文）。"""
@@ -141,49 +151,6 @@ class TestCopyCleanup(unittest.TestCase):
         kps = _SRV.get_json("/api/kps")[1]["knowledge_points"]
         kp = next(k for k in kps if k["id"] == kp_id)
         self.assertGreater(len(kp["summary"] or ""), 80, "后端摘要应保持全文")
-
-
-class TestScenePreset(unittest.TestCase):
-    """M0-1：学习场景骨架（A 日常 / B 备考 / C 冲刺）。"""
-
-    def test_scene_definitions(self):
-        """三种场景定义齐全；A/B 首屏总览，C 首屏复习且精简导航。"""
-        self.assertIn("const SCENE_KEY = 'kb_study_scene'", _PAGE,
-                      "场景持久化应使用 localStorage 键 kb_study_scene")
-        self.assertIn("localStorage.getItem(SCENE_KEY)", _PAGE)
-        self.assertIn("localStorage.setItem(SCENE_KEY", _PAGE)
-        for code in ("A:", "B:", "C:"):
-            self.assertIn(code, _PAGE, f"缺少场景 {code}")
-        self.assertIn("defaultView: 'overview'", _PAGE)
-        self.assertIn("defaultView: 'review'", _PAGE)
-        # C 场景精简导航：隐藏图谱与笔记（2 项），保留问答/资料/知识点/复习
-        c_start = _PAGE.index("C: {name: '冲刺'")
-        c_block = _PAGE[c_start:_PAGE.index("};", c_start)]
-        self.assertNotIn("'graph'", c_block, "C 场景应隐藏图谱")
-        self.assertNotIn("'notes'", c_block, "C 场景应隐藏笔记")
-        for keep in ("'review'", "'assistant'", "'docs'", "'kps'"):
-            self.assertIn(keep, c_block, f"C 场景应保留 {keep}")
-        # A 场景保留全部功能
-        a_start = _PAGE.index("A: {name: '日常'")
-        a_block = _PAGE[a_start:_PAGE.index("},", a_start)]
-        for view in ("'overview'", "'assistant'", "'docs'", "'review'", "'kps'",
-                     "'graph'", "'mistakes'", "'notes'"):
-            self.assertIn(view, a_block, f"A 场景应保留 {view}")
-
-    def test_scene_boot_and_switch(self):
-        """启动按场景默认页进；顶栏有场景标识；设置中心有 A/B/C 三选一。"""
-        self.assertIn("go(SCENES[SCENE].defaultView);", _PAGE,
-                      "启动没有按场景默认视图进首屏")
-        self.assertIn('id="scene-badge"', _PAGE, "顶栏缺少场景标识")
-        self.assertIn("function cycleScene()", _PAGE, "顶栏场景标识未绑定切换")
-        self.assertIn("function navViews()", _PAGE, "导航未按场景过滤/排序")
-        self.assertIn("function sceneSettingsHtml()", _PAGE,
-                      "设置中心缺少学习场景三选一")
-        for code in ("A · 日常", "B · 备考", "C · 冲刺"):
-            self.assertIn(code, _PAGE, f"设置中心缺少场景按钮：{code}")
-        # 切换场景时若当前页被隐藏，回到该场景默认页（不丢功能、不空白）
-        self.assertIn("cfg.views.indexOf(CURRENT) < 0", _PAGE,
-                      "切换场景后应处理被隐藏的当前页")
 
 
 if __name__ == "__main__":

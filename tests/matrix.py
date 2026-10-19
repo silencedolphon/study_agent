@@ -159,28 +159,15 @@ MATRIX = [
          entry="GET /api/raw + POST /api/ingest/batch/plan（x.ppt + x.pptx）",
          kind="read", priority="P0", tests=["test_converted_artifact_indexed"], evidence="json+db"),
 
-    # ---------------- M0 止血阶段（2026-10-18 wave1） ----------------
-    dict(id="F97", feature="M0-2 新建知识点入口（空库可建成→进复习流）",
-         entry="GET /api/kps + POST /api/kp + GET /api/queue", kind="write", priority="P0",
-         tests=["test_08_dashboard_fixes.TestM0CreateKp"], evidence="json"),
-    dict(id="F98", feature="M0-4 错题写入闭环（POST /api/mistake + 评分 0–2 自动记）",
-         entry="POST /api/mistake / POST /api/review", kind="write", priority="P0",
-         tests=["test_08_dashboard_fixes.TestM0Mistake"], evidence="json+db"),
+    # ---------------- M0 止血阶段（2026-10-18；2026-10-19 用户实测后回退功能型新增） ----------------
+    # 保留项：掌握度口径修复（F99）/ 文案与排版（F102）/ 移动端基础（F104）
+    # 已回退：F97 新建知识点入口、F98 错题写入闭环、F100 检索规则修复、F101 场景预设、F103 导入看板入口
     dict(id="F99", feature="M0-5 掌握度四处同口径（不写库）",
          entry="GET /api/kps + /api/kp + /api/graph + /api/stats", kind="read", priority="P0",
          tests=["test_08_dashboard_fixes.TestM0Mastery"], evidence="json"),
-    dict(id="F100", feature="M0-7 检索 10 题回归集 + 规则级排序修复",
-         entry="study.search（真实库只读副本；分类/机制/对比题）", kind="cli", priority="P0",
-         tests=["test_10_search_regression"], evidence="json"),
-    dict(id="F101", feature="M0-1 学习场景预设（A 日常/B 备考/C 冲刺，持久化 + 导航差异）",
-         entry="设置中心三选一 + 顶栏场景标识（localStorage kb_study_scene）",
-         kind="ui", priority="P1", tests=["test_11_m0_scenario_copy"], evidence="json+shot"),
     dict(id="F102", feature="M0-6a 用户可见文案去工程化 + 空态真实 CTA + 知识点摘要截断",
          entry="8 个视图可见文本 / 各空态主按钮 / 知识点列表 .kpsum",
          kind="ui", priority="P0", tests=["test_11_m0_scenario_copy"], evidence="json+shot"),
-    dict(id="F103", feature="M0-6b 产物导入看板入口（preview/apply + 按钮 + 幂等，零 AI 成本）",
-         entry="GET /api/kp-import/preview + POST /api/kp-import/apply + 知识点页按钮",
-         kind="write", priority="P0", tests=["test_12_m0_import_ui_mobile"], evidence="json+shot"),
     dict(id="F104", feature="M0-8 移动端基础（390 无横向滚动/首屏 scrollY=0/表格卡片式）",
          entry="≤560px 媒体查询 + safeFocus", kind="ui", priority="P1",
          tests=["test_12_m0_import_ui_mobile"], evidence="json+shot"),
@@ -249,23 +236,6 @@ FIXED_BUGS = [
         repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_bad_query_params_robust",
     ),
     dict(
-        id="BUG-4", severity="高", matrix_refs=["F97", "F98"],
-        title="知识点/错题写入闭环断裂（UI 无新建入口、POST /api/mistake 404、评分答错不记）",
-        symptom="三类学生评测（docs/三类学生评测报告 §4 P0-A）：知识点页无新建入口；"
-                "错题只能看/删、POST /api/mistake 返回 404；评分 0–2 后错题本仍为空；"
-                "空态文案指向不存在的按钮。",
-        root_cause="卡 C-0053 删除了知识点页的新建入口（后端 POST /api/kp 与 kpForm() 保留但无调用方）；"
-                   "do_POST 从未实现 /api/mistake；api_review 不写 mistakes 表。",
-        impact="学生无法建立可复习的知识点与错题，'写入→调度→反馈'闭环不存在。",
-        fixed_in="M0 wave1（2026-10-18，本批合并提交）",
-        fix_summary="恢复「＋新建知识点」入口；新增 POST /api/mistake；评分 0–2 自动记错题并返回 "
-                    "auto_mistake_id；知识点详情加「记一道错题」；空态文案改为真实入口。",
-        verify=("回归用例：test_08_dashboard_fixes.py::TestM0CreateKp、TestM0Mistake（7/7 全绿）\n"
-                "_work/m0/dash/report.md（浏览器实测截图与 API 证据）"),
-        repro=("venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_08_dashboard_fixes\n"
-               "venv\\Scripts\\python.exe -X utf8 _work\\m0\\gate\\gate_check.py --base <隔离实例>"),
-    ),
-    dict(
         id="BUG-5", severity="中", matrix_refs=["F99"],
         title="掌握度四处口径不一致（列表/图谱恒 0%，详情/总览 11–32%）",
         symptom="同一知识点：/api/kps、/api/graph 返回 mastery=0.0；/api/kp?id= 与 /api/stats 返回 "
@@ -278,22 +248,6 @@ FIXED_BUGS = [
         verify=("回归用例：test_08_dashboard_fixes.py::TestM0Mastery（四处 spread=0 断言）\n"
                 "_work/m0/dash/report.md §3 M0-5"),
         repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_08_dashboard_fixes",
-    ),
-    dict(
-        id="BUG-6", severity="高", matrix_refs=["F100", "F14"],
-        title="检索排序/漏召会让学生背错药（LIKE 归一化方向写反等重建缺陷）",
-        symptom="三类学生评测 §4 P0-B：问“镇静催眠药按化学结构分哪几类”答“资料里没有”（p.5 分类页存在）；"
-                "搜“苯二氮卓类 作用机制”Top-1 是巴比妥（目标 p.16 不在前 8）；对比题漏 p.18。",
-        root_cause="core/search.py 为 AI 重建版：关键词 LIKE 路覆盖率归一化方向写反（覆盖率越高反而 0 分）；"
-                   "LIKE 兜底不搜 heading_path；标题加权让通用词压过实体词；v1.1 的 _is_figure_hit 丢失；"
-                   "对比题无双实体检索。",
-        impact="考前学生分不清对错、可能背错药——比没有功能更危险。",
-        fixed_in="M0 wave1（2026-10-18，本批合并提交）",
-        fix_summary="5 条规则级修复（R1 LIKE 正向归一 / R2 实体词优先标题加权 / R3 LIKE 补搜 heading_path / "
-                    "R4 识图块正文降权 / R5 对比题双实体各检索再合并）；10 题回归 6/10→10/10、Top-1 1/10→8/10。",
-        verify=("回归用例：test_10_search_regression.py（13/13 全绿，含 10 题期望与契约）\n"
-                "_work/m0/search/report.md（before/after 表与逐题 Top-8 明细）"),
-        repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_10_search_regression",
     ),
     dict(
         id="BUG-7", severity="中", matrix_refs=["F102"],

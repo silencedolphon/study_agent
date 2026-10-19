@@ -252,35 +252,13 @@ def _corpus_filter(corpus: "str | list[str] | None",
 
 
 def _normalize(scores: dict[int, float]) -> dict[int, float]:
-    """把一路的原始分线性拉到 0~1。单命中给 1.0（无跨度可分）。
-
-    注意方向：本函数按 **原始分越小越好** 归一（bm25 的语义）。
-    关键词 LIKE 路的覆盖率是 **越大越好**，必须用 `_normalize_high`。
-    """
+    """把一路的原始分线性拉到 0~1。单命中给 1.0（无跨度可分）。"""
     if not scores:
         return {}
     vals = list(scores.values())
     lo, hi = min(vals), max(vals)
     span = (hi - lo) or 1.0
     return {k: 1.0 - (v - lo) / span for k, v in scores.items()}
-
-
-def _normalize_high(scores: dict[int, float]) -> dict[int, float]:
-    """把"越大越好"的原始分线性拉到 0~1。单命中/全相等时给 1.0。
-
-    [M0-7 R1] 关键词 LIKE 路的分数是"命中窗口数"（见 `_keyword_search`），
-    覆盖率越高越可信 ⇒ 必须正向归一。重建版误用了 `_normalize`（bm25 方向），
-    结果**命中窗口最多的块反而得 0 分被丢弃、只命中一个词碎片的块得 1.0**，
-    这是此前"关键词路把 generic 词块顶到 Top-1"的主因之一。
-    """
-    if not scores:
-        return {}
-    vals = list(scores.values())
-    lo, hi = min(vals), max(vals)
-    span = hi - lo
-    if span <= 0:
-        return {k: 1.0 for k in scores}
-    return {k: (v - lo) / span for k, v in scores.items()}
 
 
 def _keyword_search(conn: sqlite3.Connection, query: str, limit: int,
@@ -362,12 +340,6 @@ def _keyword_search(conn: sqlite3.Connection, query: str, limit: int,
     #
     # 与 FTS 的关系：同一路的两条子路径**取较高分**，不叠加（叠加会让
     # 既进 FTS 又进 LIKE 的块分数虚高，压掉真正的精确命中）。
-    #
-    # [M0-7 R3] LIKE 兜底同样要搜 `heading_path`：FTS 的索引列就是
-    # (text, heading_path)，而重建版的 LIKE 只搜正文 —— 于是"标题里有、正文里
-    # 没写"的页面在关键词路**完全不存在**（实测 1393「BDZ增强GABA抑制」的
-    # 祖先标题写着「作用机制」，正文却没有"作用机制"四个字，关键词分直接为 0）。
-    # 命中标题按 1 个窗口计分（与正文命中同权，标题本就是块的一部分）。
     if terms:
         covers: dict[int, int] = {}
         for t in terms[:LIKE_MAX_WINDOWS]:
@@ -386,25 +358,12 @@ def _keyword_search(conn: sqlite3.Connection, query: str, limit: int,
             for r in rows:
                 cid = int(r["cid"])
                 covers[cid] = covers.get(cid, 0) + 1
-            # [M0-7 R3] 标题路（FTS 有、LIKE 原来漏掉的那一半）
-            hsql = ("SELECT c.id AS cid FROM chunks c"
-                    " JOIN documents d ON d.id = c.doc_id"
-                    " WHERE c.heading_path LIKE ?" + ESCAPE_CLAUSE + cfilter
-                    + " LIMIT ?")
-            try:
-                hrows = conn.execute(hsql, (pat, *cparams, limit * 4)).fetchall()
-            except sqlite3.OperationalError:
-                hrows = []
-            for r in hrows:
-                cid = int(r["cid"])
-                covers[cid] = covers.get(cid, 0) + 1
 
         if covers:
             # 覆盖率越高越可信：命中 2 个以上极大窗口的块，分数再抬一档
             weighted = {cid: float(n) * (1.0 + (n - 1) * 0.5)
                         for cid, n in covers.items()}
-            # [M0-7 R1] 命中窗口数越大越好 → 正向归一（不能用 bm25 方向的 _normalize）
-            for cid, s in _normalize_high(weighted).items():
+            for cid, s in _normalize(weighted).items():
                 if s > scores.get(cid, 0.0):
                     scores[cid] = s
 
@@ -447,198 +406,6 @@ def _is_table_row(text: str) -> bool:
         if _ROW_RE.match(ln or ""):
             return True
     return False
-
-
-# ---------------- [M0-7 R2] 标题匹配：实体词 > 通用意图词 ----------------
-# 旧行为：查询与**叶子标题**的最长公共片段 >=2 就加分（上限 +0.024）。
-# 问题：「作用机制/分类/区别/不良反应」这类词每章都有，谁标题里带它们谁就涨分，
-# 于是"苯二氮卓类 作用机制"会把 p.29 巴比妥机制页、p.81 米氮平机制页顶上来，
-# 而真正的目标页（p.16）标题里没有"作用机制"四个字，一分都拿不到
-# （三类学生评测 P0-B：搜"苯二氮卓类 作用机制" top1 是巴比妥类 p.29）。
-# 新规则：药名/类名等**实体词**命中（叶子或整条面包屑）才按长度加权；
-# 通用意图词只给固定小额，且仅用于"同一实体下挑出机制/分类那一页"。
-_GENERIC_INTENT_WORDS = (
-    "作用机制", "作用机理", "药理作用", "临床应用", "不良反应", "作用", "机制", "机理",
-    "分类", "分型", "区别", "比较", "对比", "不同", "首选", "哪几类", "有哪些", "哪些",
-    "几类", "什么", "为什么", "如何", "怎样", "剂量", "特点", "注意", "过量", "中毒",
-    "解救", "应用", "治疗", "导致", "引起", "的", "和", "与", "及", "或",
-    "了", "吗", "呢", "是",
-)
-# 意图词：与上表重合，但这里只关心"这一页是不是问的那种页"，越具体越靠前
-_INTENT_WORDS = (
-    "作用机制", "作用机理", "机制", "机理", "分类", "分型", "区别", "不良反应",
-    "首选", "临床应用", "用途", "中毒", "解救", "过量", "剂量", "是什么", "为什么",
-)
-# 通用意图词命中的固定加分（与实体命中的 HEADING_BOOST*len 分开，量级更小）
-INTENT_BOOST = 0.006
-# 标题加权总上限（实体 + 意图），与旧版 0.024 同量级、只多一个意图小额
-HEADING_BOOST_MAX = 0.030
-
-
-# 分类题意图：`按化学结构分哪几类/分为哪几类/分类/分型` 是问法而非实体。
-_CLASSIFICATION_RE = re.compile(r"按.{0,10}?分|分(?:哪|几)?类|分为|分型|哪几类|几类|类型")
-_CLASSIFICATION_MARKS = ("分类", "分型", "种类", "类型", "分为")
-# 分类题里"标题含分类标记"的额外加分：专门把 p.5《镇静催眠药分类》这类
-# "分类页"从同实体的普通页里挑出来（评测 P0-B 的"按化学结构分哪几类"）。
-CLASSIFICATION_BOOST = 0.012
-# 机制题（问作用机制/机理）里"标题就是机制动作页"的额外加分：
-# p.16 的叶子是「BDZ增强GABA抑制」——既点名药物类（BDZ）又写了机制动作（增强/抑制），
-# 比同节的「GABAA受体亚单位」「GABAA受体结构图」更像"机制答案页"。
-MECHANISM_TITLE_BONUS = 0.010
-_MECHANISM_INTENT = ("作用机制", "作用机理", "机制", "机理", "原理")
-_ACTION_WORDS = ("增强", "抑制", "阻断", "开放", "促进", "激活", "激动", "拮抗",
-                 "降低", "增加", "减少", "释放", "超极化", "通透")
-# 实体词别名：同一药物/类在课件里可能写中文全名、拉丁缩写或异体字
-# （p.6 原文就写着"苯二氮卓类（Benzodiazepine，BDZ）"，图注里还有"苯二氮䓬"）。
-# 标题里只出现缩写时，不能因为"字面不同"就丢掉实体加权。
-_ENTITY_ALIASES = {
-    "苯二氮卓类": ("BDZ", "Benzodiazepine", "苯二氮䓬"),
-    "苯二氮䓬类": ("BDZ", "Benzodiazepine", "苯二氮卓"),
-    "巴比妥类": ("barbiturate", "barbiturates", "巴比妥"),
-    "地西泮": ("Diazepam", "安定"),
-    "新斯的明": ("neostigmine",),
-    "抗精神病药": ("antipsychotic",),
-    "胆碱受体": ("cholinoceptor", "cholinergic"),
-}
-
-
-def _is_classification_query(query: str) -> bool:
-    return bool(_CLASSIFICATION_RE.search(query or ""))
-
-
-def _specific_terms(query: str) -> "list[str]":
-    """查询里去掉通用意图词后的"实体部分"（药名/类名/症状名），供标题加权。
-
-    例：
-      "镇静催眠药按化学结构分哪几类" -> ["镇静催眠药"]
-      "苯二氮卓类的作用机制"         -> ["苯二氮卓类"]
-      "苯二氮卓类和巴比妥类的作用机制有什么区别" -> ["苯二氮卓类", "巴比妥类"]
-    """
-    q = query or ""
-    # 分类题的"按化学结构分…"是问法（化学结构不是要检索的实体名），先整段去掉
-    q = re.sub(r"按[^，,。？?\s]{0,10}?分", " ", q)
-    for w in sorted(_GENERIC_INTENT_WORDS, key=len, reverse=True):
-        q = q.replace(w, " ")
-    q = re.sub(r"[\s的了吗呢是有和与及或，,。？?！!、]", " ", q)
-    return [p for p in q.split() if len(p) >= 2]
-
-
-def _specific_query(query: str) -> str:
-    """`_specific_terms` 的拼接形式（给最长公共片段用）。"""
-    return " ".join(_specific_terms(query))
-
-
-def _entity_aliases(term: str) -> "list[str]":
-    """实体词 + 它的别名（中文全名/拉丁缩写/异体字）。"""
-    out = [term]
-    low = term.lower()
-    for k, vals in _ENTITY_ALIASES.items():
-        if k in term or k.lower() in low:
-            out.extend(v for v in vals if v not in out)
-    return out
-
-
-def _entity_in_text(term: str, text: str) -> int:
-    """实体词（含别名）在标题文本里的命中长度；没命中返回 0。"""
-    best = _heading_overlap(term, text)
-    if best >= len(term):
-        return best
-    for alias in _entity_aliases(term)[1:]:
-        if alias in (text or ""):
-            best = max(best, len(alias))
-    return best
-
-
-def _heading_boost(query: str, leaf: str, path: str) -> "tuple[float, list[str]]":
-    """[M0-7 R2] 标题加权：实体词优先，通用意图词只给固定小额。
-
-    返回 (加分, why 说明)。加分上限 HEADING_BOOST_MAX。
-    与旧实现的差别：
-      · 实体词命中**整条面包屑**也算（p.16 的目标页叶子是「BDZ增强GABA抑制」，
-        药名「苯二氮卓类」与意图词「作用机制」都在祖先标题里），且认别名（BDZ）；
-      · 只重合通用词时不再按长度给分，避免"任何机制页"都涨分；
-      · 分类题：标题含「分类/分型」再给一笔固定加分（把分类页挑出来）；
-      · 机制题：标题同时含"实体 + 机制动作词"再给一笔（把机制答案页挑出来）。
-    """
-    spec = _specific_query(query)
-    boost = 0.0
-    why: list[str] = []
-    if spec:
-        ov_leaf = _heading_overlap(spec, leaf)
-        ov_path = _heading_overlap(spec, path)
-        # 别名感知：标题里可能只有 BDZ / Benzodiazepine
-        hit_leaf = ov_leaf
-        for term in _specific_terms(query):
-            hit_leaf = max(hit_leaf, _entity_in_text(term, leaf))
-        if hit_leaf >= HEADING_MIN_MATCH:
-            boost += HEADING_BOOST * min(hit_leaf, 6)
-            why.append(f"标题命中实体「{leaf[:24]}」")
-        elif ov_path >= HEADING_MIN_MATCH:
-            boost += HEADING_BOOST * min(ov_path, 6)
-            why.append(f"章节归属命中实体「{path.split('>')[-2].strip()[:24] if '>' in path else path[:24]}」")
-    # 分类意图：标题里就写着「分类/分型」的页，才配当"分几类"的答案页
-    if _is_classification_query(query) and any(m in (leaf or "") for m in _CLASSIFICATION_MARKS):
-        boost += CLASSIFICATION_BOOST
-        why.append("分类页加权")
-    # 机制意图：标题里既有实体又有机制动作词（如「BDZ增强GABA抑制」）
-    if any(w in (query or "") for w in _MECHANISM_INTENT) and spec:
-        leaf_has_entity = any(
-            _entity_in_text(t, leaf) >= HEADING_MIN_MATCH for t in _specific_terms(query)
-        )
-        if leaf_has_entity and any(a in (leaf or "") for a in _ACTION_WORDS):
-            boost += MECHANISM_TITLE_BONUS
-            why.append("机制动作页加权")
-    intent = next((w for w in _INTENT_WORDS if w in (query or "")), "")
-    if intent and (intent in (leaf or "") or intent in (path or "")):
-        boost += INTENT_BOOST
-        why.append(f"意图词命中「{intent}」")
-    return min(boost, HEADING_BOOST_MAX), why
-
-
-# ---------------- [M0-7 R4] 识图块与"正文优先" ----------------
-# v1.1 真值里有 `_is_figure_hit`（审计 gap-report §5.2 列为重建丢失函数），
-# 重建版把它连同识图排序一起简化掉了。这里按 source_ref 的 "图" 后缀识别。
-_TEXT_INTENT_WORDS = (
-    "作用机制", "机制", "机理", "分类", "分型", "区别", "不良反应", "首选", "中毒",
-    "解救", "临床应用", "用途", "有哪些", "哪些", "是什么", "为什么", "如何", "怎样",
-)
-_FIGURE_QUERY_WORDS = ("图", "图示", "图注", "结构图", "看图", "长什么样", "画的是")
-# 问"机制/分类/不良反应"这类正文题时，识图块（视觉模型解读）降权，
-# 让"正文页"优先；问"图/结构图/长什么样"时不降权（那时图就是答案）。
-FIGURE_TEXT_PENALTY = 0.012
-
-
-def _is_figure_hit(source_ref: str) -> bool:
-    """是不是识图块：`source_ref` 形如 `p.15 图`（视觉模型对页图的解读）。"""
-    ref = (source_ref or "").strip()
-    return bool(ref) and "图" in ref
-
-
-def _prefers_text(query: str) -> bool:
-    """问句要的是正文（机制/分类/不良反应…）而不是图。"""
-    q = query or ""
-    if any(w in q for w in _FIGURE_QUERY_WORDS):
-        return False
-    return any(w in q for w in _TEXT_INTENT_WORDS)
-
-
-# ---------------- [M0-7 R5] 对比题：A 和/与 B 的区别 ----------------
-# 整句检索（尤其两实体同属一份课件时）容易只召回其中一侧：实测
-# "苯二氮卓类和巴比妥类的作用机制有什么区别" 前 8 条里全是 BDZ 侧，
-# 巴比妥机制页 p.29 只排到第 4，而 BDZ 的机制页 p.16 被单文档配额挤掉。
-_COMPARE_MARKS = ("区别", "不同", "比较", "对比", "异同", "差异", "vs", "VS", "Vs")
-# 每个实体保底代表命中数：2 条只够"各有一条"，但同实体下"机制页/机制要点页"
-# 常是相邻两页（p.16 机制 + p.18 增加 Cl- 通道开放频率），取 3 条才能都覆盖。
-COMPARE_REPS_PER_ENTITY = 3
-
-
-def _compare_entities(query: str) -> "list[str]":
-    """对比题里参与对比的实体列表；不是对比题返回 []。"""
-    q = query or ""
-    if not any(m in q for m in _COMPARE_MARKS):
-        return []
-    ents = _specific_terms(q)
-    return ents if len(ents) >= 2 else []
 
 
 # ---------------- 主检索 ----------------
@@ -797,23 +564,32 @@ def search(conn: sqlite3.Connection, query: str, top_k: int = 8,
             why.append(f"关键词命中 {kw_scores[cid]:.2f}")
         head = r["heading_path"] or ""
         boost = 0.0
-        # [M0-7 R2] 标题加权改成"实体词优先、通用意图词小额"（见 _heading_boost）。
-        # 旧版是"查询与叶子标题任意 >=2 字公共片段 → 最多 +0.024"，于是
-        # "作用机制/不良反应"这类通用词让一堆无关页涨分（p.29 巴比妥机制页、
-        # p.81 米氮平机制页都因标题带"作用机制"被顶上来）。
-        # 保留旧注释里的关键实测结论：**整条面包屑当普通重合用会变噪声放大器**
-        # （问「抗高血压药分为哪几类」时 "> (五) 血管扩张药" 因祖先层含"抗高血压"
-        # 被误加权；正文前3率 57.1% → 只认叶子后 85.7%）。所以：
-        #   · **实体词（药名/类名）**按长度加权，且允许沿面包屑认亲——p.16 目标页
-        #     叶子是「BDZ增强GABA抑制」，药名"苯二氮卓类"只出现在祖先层，不认就永远漏；
-        #   · **通用意图词**只给固定小额 +0.006（叶子或祖先层都算），它顶多把
-        #     "同一实体下的机制/分类页"往前挪半格，不会像旧版按长度加权那样一发
-        #     就是 +0.024，让任何带"作用机制"标题的无关页翻上来。
+        # 标题加权只认**叶子标题**，不认整条面包屑。
+        #
+        # 起因：原先传的是整条 `heading_path`，于是"查询命中面包屑里任意一层"
+        # 都算标题命中。实测这会把标题加权变成噪声放大器——
+        #   问「抗高血压药分为哪几类」，命中块 "第19章抗高血压药 > (五) 血管扩张药"，
+        #   而 `_heading_overlap` 认可了其中的 "抗高血压"，可**这条块讲的是血管扩张药**；
+        #   识图块更典型：叶子是通用的「图示说明」，真正被匹配上的是几层之上的页主题，
+        #   于是提示里写着"标题命中「图示说明」"——显示的那一层根本没命中。
+        #
+        # 后果不只是提示误导，而是**排序被带偏**：这份加权最大 +0.024，
+        # 相当于 RRF 里前进约 1.5 个名次，足以换掉第 1 名。
+        #
+        # 实测（同一进程内同批查询，28 题正文 + 18 题识图）：
+        #   整条面包屑  正文前3率 57.1%  平均名次 2.62  | 识图前3率 100%  平均名次 1.22
+        #   仅叶子      正文前3率 85.7%  平均名次 1.78  | 识图前3率 88.9% 平均名次 1.82
+        # 正文组大幅改善、识图组小退，合计前3率 157.1% → 174.6%。
+        #
+        # 为什么不按块型分流（识图块允许匹配父层）：实测那样做等于回到现状——
+        # 识图块的叶子是空壳，允许父层就等于允许祖先层，正文组又会掉回 57.1%。
+        # 复现脚本：tools/diag_heading_verdict.py
         leaf = head.split(">")[-1].strip() if head else ""
-        hb, hwhy = _heading_boost(query, leaf, head)
-        if hb:
-            boost += hb
-            why.extend(hwhy)
+        ov = _heading_overlap(query, leaf)
+        if ov >= HEADING_MIN_MATCH:
+            # 与最长公共片段长度成正比，上限 6 字符，避免长标题过度加权
+            boost = HEADING_BOOST * min(ov, 6)
+            why.append(f"标题命中「{leaf[:24]}」")
         # 表格块加权（见 OVERVIEW_BOOST / ROW_BOOST 的说明）
         body = r["text"] or ""
         if OVERVIEW_MARK in body and "行 ×" in body:
@@ -822,12 +598,6 @@ def search(conn: sqlite3.Connection, query: str, top_k: int = 8,
         elif _is_table_row(body):
             boost += ROW_BOOST
             why.append("表格行加权")
-        # [M0-7 R4] 问机制/分类/不良反应这类正文题时，识图块降权（正文页优先）。
-        # 识图块是视觉模型对页图的解读，适合"看图"类问题，但不该把 p.16 正文
-        # 机制页挤出 Top-1（评测 P0-B 的另一半根因）。
-        if _prefers_text(query) and _is_figure_hit(r["source_ref"] or ""):
-            boost -= FIGURE_TEXT_PENALTY
-            why.append("正文优先：识图块降权")
         hits.append(
             Hit(
                 chunk_id=cid, doc_id=did, doc_path=r["dpath"],
@@ -850,57 +620,6 @@ def search(conn: sqlite3.Connection, query: str, top_k: int = 8,
         capped.append(h)
         if len(capped) >= top_k:
             break
-
-    # ---------------- [M0-7 R5] 对比题：两个实体分别检索，各保底 3 条代表命中 ----------------
-    # 触发条件：查询同时含对比标记（区别/不同/比较/vs…）和至少两个实体词。
-    # 做法：整句结果不动，只把每个实体单独检索的前 3 条"代表命中"提到前面
-    # （已在前面的自然去重），然后**重新施加单文档配额**——否则代表命中会
-    # 被同一文档的其它块用配额挤掉（1498 之前 p.16 就是这么消失的）。
-    # 递归安全：代表用的实体查询里实体已被剔掉，不会再被识别成对比题。
-    entities = _compare_entities(query)
-    if entities and mode in ("hybrid", "vector"):
-        reps: list[Hit] = []
-        seen_rep: set[int] = set()
-        for ent in entities:
-            ent_q = query
-            for e in entities:
-                ent_q = ent_q.replace(e, " ")
-            ent_q = (ent + " " + ent_q).strip()
-            try:
-                e_hits = search(conn, ent_q, top_k=top_k, doc_ids=doc_ids,
-                                max_per_doc=max_per_doc,
-                                min_vec_score=min_vec_score, mode=mode,
-                                corpus=corpus)
-            except Exception:  # noqa: BLE001
-                e_hits = []
-            picked_n = 0
-            for h in e_hits:
-                if h.chunk_id in seen_rep:
-                    continue
-                h.why = list(h.why) + [f"对比题实体「{ent}」代表命中"]
-                reps.append(h)
-                seen_rep.add(h.chunk_id)
-                picked_n += 1
-                if picked_n >= COMPARE_REPS_PER_ENTITY:
-                    break
-        if reps:
-            merged: list[Hit] = []
-            seen: set[int] = set()
-            for h in reps + list(capped):
-                if h.chunk_id in seen:
-                    continue
-                seen.add(h.chunk_id)
-                merged.append(h)
-            capped2: list[Hit] = []
-            per_doc2: dict[int, int] = {}
-            for h in merged:
-                if per_doc2.get(h.doc_id, 0) >= max_per_doc:
-                    continue
-                per_doc2[h.doc_id] = per_doc2.get(h.doc_id, 0) + 1
-                capped2.append(h)
-                if len(capped2) >= top_k:
-                    break
-            capped = capped2
     return capped
 
 

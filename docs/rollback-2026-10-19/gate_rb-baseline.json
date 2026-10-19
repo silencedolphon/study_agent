@@ -1,0 +1,1305 @@
+{
+  "gate": "M0-rollback",
+  "gate_version": "1.0",
+  "label": "baseline",
+  "note": "baseline = HEAD 4046c2e 的 M0 完整代码（工作区当时处于回退施工中，实例沙箱先用 HEAD core/tools 覆盖后启动）",
+  "generated_at": "2026-10-19T18:30:55+0800",
+  "base": "http://127.0.0.1:8919",
+  "instance": {
+    "guard": {
+      "firstrun": {
+        "docs": 9,
+        "empty": false,
+        "credential": {
+          "ok": true,
+          "tail": "cb1e"
+        },
+        "raw_dir": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\raw",
+        "db_path": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\index\\study.db",
+        "settings_file": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\config.local.json",
+        "env_example": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\.env.example"
+      },
+      "port": 8919,
+      "db_path": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\index\\study.db",
+      "raw_dir": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox\\raw"
+    },
+    "code_fingerprint": {
+      "git_head": "4046c2e + 工作区改动",
+      "sandbox": "D:\\study_agent\\_work\\eval\\instances\\qa-rb2\\sandbox",
+      "tools/dashboard.py": {
+        "size": 640923,
+        "sha256": "26494a46d24b964f99ce69c597f908f590f4c5b615553156c8d72cc5c9307986"
+      },
+      "core/search.py": {
+        "size": 54891,
+        "sha256": "63f047e4be9d09d6957e0accac997587e457a23d1f82973ccb5b3c09ad5e8788"
+      },
+      "core/study.py": {
+        "size": 55684,
+        "sha256": "60f5d31bed98b1718e4b1b3d015fb7ee0085dd5d3501886c5742154d0506b5d9"
+      }
+    }
+  },
+  "groups": {
+    "feature_removed": [
+      {
+        "id": "RB-A",
+        "title": "功能已撤（HTTP 层）",
+        "criteria": "POST /api/mistake、GET /api/kp-import/preview、POST /api/kp-import/apply 均 404；评分 0–2 不再自动记错题",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "POST /api/mistake 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mistake_id\": 8, \"kp_id\": null}"
+          },
+          {
+            "name": "GET /api/kp-import/preview 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eva"
+          },
+          {
+            "name": "POST /api/kp-import/apply 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\"
+          },
+          {
+            "name": "评分 2 分不再自动新增错题（数量不变）",
+            "ok": false,
+            "detail": "before=7 after=8 review_status=200 review_body={\"kp_id\": 262, \"grade\": 2, \"interval_days\": 1.0, \"ease\": 2.18, \"reps\": 1, \"lapses\": 1, \"due_at\": 1792492218.5604053, \"name\": \"回退验收-自动错题核对-20261019-183017\", \"mastery\": 0.038, \"due_in_days\": 0, \"auto_mi"
+          }
+        ],
+        "evidence": {
+          "POST /api/mistake": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mistake_id\": 8, \"kp_id\": null}"
+          },
+          "GET /api/kp-import/preview": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\logs\\\\kno"
+          },
+          "POST /api/kp-import/apply": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\logs\\\\knowl"
+          },
+          "auto_mistake": {
+            "kp_id": 262,
+            "before": 7,
+            "after": 8,
+            "review_status": 200,
+            "review": {
+              "kp_id": 262,
+              "grade": 2,
+              "interval_days": 1.0,
+              "ease": 2.18,
+              "reps": 1,
+              "lapses": 1,
+              "due_at": 1792492218.5604053,
+              "name": "回退验收-自动错题核对-20261019-183017",
+              "mastery": 0.038,
+              "due_in_days": 0,
+              "auto_mistake_id": 9
+            }
+          },
+          "fixtures": {
+            "summary_kp_status": 200,
+            "mastery_kp_status": 200,
+            "mastery_kp_id": 260,
+            "mastery_review_status": 200,
+            "mastery_review": "{\"kp_id\": 260, \"grade\": 5, \"interval_days\": 16.2, \"ease\": 2.8, \"reps\": 3, \"lapses\": 0, \"due_at\": 1793805498.7245169, \"name\": \"回退验收-掌握度知识点\", \"mastery\": 0.4784, \"due_in_days\": 16, \"auto_mistake_id\": nul"
+          }
+        }
+      },
+      {
+        "id": "RB-A2",
+        "title": "功能已撤（DOM 层）",
+        "criteria": "知识点页无新建入口；错题页无记错题入口；无场景标识/设置场景项",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "知识点页无「＋新建知识点」入口",
+            "ok": false,
+            "detail": "{\"createToggle\":true,\"createTexts\":[\"＋ 新建知识点\"],\"importTexts\":[\"导入已整理好的知识点（0 费用）\"],\"hasFormInput\":true}"
+          },
+          {
+            "name": "知识点页无「导入已整理」入口",
+            "ok": false,
+            "detail": "[\"导入已整理好的知识点（0 费用）\"]"
+          },
+          {
+            "name": "错题页无「＋记一道错题」入口",
+            "ok": false,
+            "detail": "{\"newId\":true,\"texts\":[\"＋ 记一道错题\"],\"emptyText\":\"\"}"
+          },
+          {
+            "name": "页面无场景标识（#scene-badge）",
+            "ok": false,
+            "detail": "{\"badge\":true,\"bodySceneWord\":false,\"bodyHasSceneText\":\"场景 A · 日常\"}"
+          },
+          {
+            "name": "设置弹窗无场景选择项（.scene-opt / 「场景」文案）",
+            "ok": false,
+            "detail": "{\"opened\":true,\"sceneOpts\":3,\"sceneWord\":true,\"head\":\"⚙ 设置中心\\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\\n✕\\n🔒\\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\\n学习场景\\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\\nA · 日常\\nB · 备考\\nC · 冲刺\\n💬\\nAI 问答\\n🧩\\nAI 知识点总结\\n📥\\n入库\\n🎓\\n课件答疑\\n📖\\nAI 预习总结\\n设置只保存在本机\\n不会上传、不会进代码仓库\\n密钥留空＝不改动\\n💬\\nAI 问答\\n\\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着—\"}"
+          }
+        ],
+        "evidence": {
+          "kps": {
+            "createToggle": true,
+            "createTexts": [
+              "＋ 新建知识点"
+            ],
+            "importTexts": [
+              "导入已整理好的知识点（0 费用）"
+            ],
+            "hasFormInput": true
+          },
+          "mistakes": {
+            "newId": true,
+            "texts": [
+              "＋ 记一道错题"
+            ],
+            "emptyText": ""
+          },
+          "scene": {
+            "sceneDom": {
+              "badge": true,
+              "bodySceneWord": false,
+              "bodyHasSceneText": "场景 A · 日常"
+            },
+            "setDom": {
+              "opened": true,
+              "sceneOpts": 3,
+              "sceneWord": true,
+              "head": "⚙ 设置中心\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\n✕\n🔒\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\n学习场景\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\nA · 日常\nB · 备考\nC · 冲刺\n💬\nAI 问答\n🧩\nAI 知识点总结\n📥\n入库\n🎓\n课件答疑\n📖\nAI 预习总结\n设置只保存在本机\n不会上传、不会进代码仓库\n密钥留空＝不改动\n💬\nAI 问答\n\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着—"
+            }
+          }
+        }
+      }
+    ],
+    "layout_kept": [
+      {
+        "id": "RB-B1",
+        "title": "排版保留（桌面 1440）",
+        "criteria": "8 视图术语 0 命中；空态 CTA 在且无死链；摘要截断；掌握度四处一致",
+        "status": "PASS",
+        "subchecks": [
+          {
+            "name": "8 视图可见文本无开发者术语（logs//tools//卡 C-/doc_id/.json）",
+            "ok": true,
+            "detail": "[]"
+          },
+          {
+            "name": "空态 CTA 仍在 / 无死链（错题空态允许无按钮）",
+            "ok": true,
+            "detail": "[]"
+          },
+          {
+            "name": "知识点摘要截断（-webkit-line-clamp / ≤2 行）",
+            "ok": true,
+            "detail": "{\"found\":true,\"len\":207,\"endsEllipsis\":false,\"lineClamp\":\"2\",\"clientH\":40,\"scrollH\":119,\"overflow\":\"hidden\"}"
+          }
+        ],
+        "evidence": {
+          "views": {
+            "overview": {
+              "view": "overview",
+              "textLen": 371,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-overview.png"
+            },
+            "docs": {
+              "view": "docs",
+              "textLen": 3389,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 24,
+                  "head": "本库没有待入库的文件——都已入库，或格式不支持。",
+                  "btnCount": 0,
+                  "clickableCount": 0
+                }
+              ],
+              "actBtns": 5,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-docs.png"
+            },
+            "assistant": {
+              "view": "assistant",
+              "textLen": 360,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-assistant.png"
+            },
+            "review": {
+              "view": "review",
+              "textLen": 1447,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 10,
+                  "head": "这一天没有安排复习。",
+                  "btnCount": 0,
+                  "clickableCount": 0
+                }
+              ],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-review.png"
+            },
+            "kps": {
+              "view": "kps",
+              "textLen": 95063,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 54,
+                  "head": "这份课件还没有名词解释。\n用下面的「选择课件批量整理」整理这份课件后，这里就会显示它的名词。\n去整理这份课件",
+                  "btnCount": 1,
+                  "clickableCount": 1
+                }
+              ],
+              "actBtns": 6,
+              "sum": {
+                "found": true,
+                "len": 207,
+                "endsEllipsis": false,
+                "lineClamp": "2",
+                "clientH": 40,
+                "scrollH": 119,
+                "overflow": "hidden"
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-kps.png"
+            },
+            "mistakes": {
+              "view": "mistakes",
+              "textLen": 497,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-mistakes.png"
+            },
+            "graph": {
+              "view": "graph",
+              "textLen": 4089,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-graph.png"
+            },
+            "notes": {
+              "view": "notes",
+              "textLen": 65,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 65,
+                  "head": "还没有笔记。\n笔记会一直留在这里，下次打开还能看。\n在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。\n去「知识点」写笔记",
+                  "btnCount": 1,
+                  "clickableCount": 1
+                }
+              ],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-notes.png"
+            }
+          },
+          "empty": {
+            "docs#0": {
+              "view": "docs",
+              "len": 24,
+              "head": "本库没有待入库的文件——都已入库，或格式不支持。",
+              "btnCount": 0,
+              "clickableCount": 0,
+              "actBtns": 5
+            },
+            "kps#1": {
+              "view": "kps",
+              "len": 54,
+              "head": "这份课件还没有名词解释。\n用下面的「选择课件批量整理」整理这份课件后，这里就会显示它的名词。\n去整理这份课件",
+              "btnCount": 1,
+              "clickableCount": 1,
+              "actBtns": 6
+            },
+            "notes#2": {
+              "view": "notes",
+              "len": 65,
+              "head": "还没有笔记。\n笔记会一直留在这里，下次打开还能看。\n在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。\n去「知识点」写笔记",
+              "btnCount": 1,
+              "clickableCount": 1,
+              "actBtns": 1
+            }
+          },
+          "summary": {
+            "found": true,
+            "len": 207,
+            "endsEllipsis": false,
+            "lineClamp": "2",
+            "clientH": 40,
+            "scrollH": 119,
+            "overflow": "hidden"
+          }
+        }
+      },
+      {
+        "id": "RB-B2",
+        "title": "移动端 390×844",
+        "criteria": "8 视图无横向滚动 + 首屏 scrollY=0",
+        "status": "PASS",
+        "subchecks": [
+          {
+            "name": "390 宽无横向滚动：overview",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：overview",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：docs",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：docs",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：assistant",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：assistant",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：review",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：review",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：kps",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：kps",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：mistakes",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：mistakes",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：graph",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：graph",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：notes",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：notes",
+            "ok": true,
+            "detail": "scrollY=0"
+          }
+        ],
+        "evidence": {
+          "views": {
+            "overview": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-overview.png"
+            },
+            "docs": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-docs.png"
+            },
+            "assistant": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-assistant.png"
+            },
+            "review": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-review.png"
+            },
+            "kps": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-kps.png"
+            },
+            "mistakes": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-mistakes.png"
+            },
+            "graph": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-graph.png"
+            },
+            "notes": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-notes.png"
+            }
+          }
+        }
+      }
+    ],
+    "search_baseline": [
+      {
+        "id": "RB-C",
+        "title": "检索回基线",
+        "criteria": "core/search.py sha256 == 251886f 版本（10 题回归只记录不判定）",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "core/search.py 与 251886f 版本一致（sha256）",
+            "ok": false,
+            "detail": "inst=63f047e4be9d09d6 ref=637fae0824770a11"
+          }
+        ],
+        "evidence": {
+          "search_ref": "251886f",
+          "instance_sha256": "63f047e4be9d09d6957e0accac997587e457a23d1f82973ccb5b3c09ad5e8788",
+          "local_sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1",
+          "ref_sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1",
+          "ref": "251886f",
+          "search_10q": {
+            "hit": 10,
+            "total": 10,
+            "cases": [
+              {
+                "id": "Q01",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1382,
+                    "ref": "p.5"
+                  }
+                ]
+              },
+              {
+                "id": "Q02",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1400,
+                    "ref": "p.23"
+                  }
+                ]
+              },
+              {
+                "id": "Q03",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1393,
+                    "ref": "p.16"
+                  }
+                ]
+              },
+              {
+                "id": "Q04",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1393,
+                    "ref": "p.16"
+                  }
+                ]
+              },
+              {
+                "id": "Q05",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1391,
+                    "ref": "p.14"
+                  }
+                ]
+              },
+              {
+                "id": "Q06",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1384,
+                    "ref": "p.7"
+                  }
+                ]
+              },
+              {
+                "id": "Q07",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1397,
+                    "ref": "p.20"
+                  }
+                ]
+              },
+              {
+                "id": "Q08",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1401,
+                    "ref": "p.24"
+                  }
+                ]
+              },
+              {
+                "id": "Q09",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1410,
+                    "ref": "p.33"
+                  }
+                ]
+              },
+              {
+                "id": "Q10",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1910,
+                    "ref": "p.16"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "browser_error": "",
+  "summary": {
+    "groups_total": 3,
+    "groups_pass": 1,
+    "checks": [
+      {
+        "id": "RB-A",
+        "title": "功能已撤（HTTP 层）",
+        "criteria": "POST /api/mistake、GET /api/kp-import/preview、POST /api/kp-import/apply 均 404；评分 0–2 不再自动记错题",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "POST /api/mistake 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mistake_id\": 8, \"kp_id\": null}"
+          },
+          {
+            "name": "GET /api/kp-import/preview 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eva"
+          },
+          {
+            "name": "POST /api/kp-import/apply 返回 404",
+            "ok": false,
+            "detail": "status=200 body={\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\"
+          },
+          {
+            "name": "评分 2 分不再自动新增错题（数量不变）",
+            "ok": false,
+            "detail": "before=7 after=8 review_status=200 review_body={\"kp_id\": 262, \"grade\": 2, \"interval_days\": 1.0, \"ease\": 2.18, \"reps\": 1, \"lapses\": 1, \"due_at\": 1792492218.5604053, \"name\": \"回退验收-自动错题核对-20261019-183017\", \"mastery\": 0.038, \"due_in_days\": 0, \"auto_mi"
+          }
+        ],
+        "evidence": {
+          "POST /api/mistake": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mistake_id\": 8, \"kp_id\": null}"
+          },
+          "GET /api/kp-import/preview": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mode\": \"dry_run\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\logs\\\\kno"
+          },
+          "POST /api/kp-import/apply": {
+            "status": 200,
+            "body": "{\"ok\": true, \"mode\": \"apply\", \"db\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\index\\\\study.db\", \"artifacts_dir\": \"D:\\\\study_agent\\\\_work\\\\eval\\\\instances\\\\qa-rb2\\\\sandbox\\\\logs\\\\knowl"
+          },
+          "auto_mistake": {
+            "kp_id": 262,
+            "before": 7,
+            "after": 8,
+            "review_status": 200,
+            "review": {
+              "kp_id": 262,
+              "grade": 2,
+              "interval_days": 1.0,
+              "ease": 2.18,
+              "reps": 1,
+              "lapses": 1,
+              "due_at": 1792492218.5604053,
+              "name": "回退验收-自动错题核对-20261019-183017",
+              "mastery": 0.038,
+              "due_in_days": 0,
+              "auto_mistake_id": 9
+            }
+          },
+          "fixtures": {
+            "summary_kp_status": 200,
+            "mastery_kp_status": 200,
+            "mastery_kp_id": 260,
+            "mastery_review_status": 200,
+            "mastery_review": "{\"kp_id\": 260, \"grade\": 5, \"interval_days\": 16.2, \"ease\": 2.8, \"reps\": 3, \"lapses\": 0, \"due_at\": 1793805498.7245169, \"name\": \"回退验收-掌握度知识点\", \"mastery\": 0.4784, \"due_in_days\": 16, \"auto_mistake_id\": nul"
+          }
+        }
+      },
+      {
+        "id": "RB-A2",
+        "title": "功能已撤（DOM 层）",
+        "criteria": "知识点页无新建入口；错题页无记错题入口；无场景标识/设置场景项",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "知识点页无「＋新建知识点」入口",
+            "ok": false,
+            "detail": "{\"createToggle\":true,\"createTexts\":[\"＋ 新建知识点\"],\"importTexts\":[\"导入已整理好的知识点（0 费用）\"],\"hasFormInput\":true}"
+          },
+          {
+            "name": "知识点页无「导入已整理」入口",
+            "ok": false,
+            "detail": "[\"导入已整理好的知识点（0 费用）\"]"
+          },
+          {
+            "name": "错题页无「＋记一道错题」入口",
+            "ok": false,
+            "detail": "{\"newId\":true,\"texts\":[\"＋ 记一道错题\"],\"emptyText\":\"\"}"
+          },
+          {
+            "name": "页面无场景标识（#scene-badge）",
+            "ok": false,
+            "detail": "{\"badge\":true,\"bodySceneWord\":false,\"bodyHasSceneText\":\"场景 A · 日常\"}"
+          },
+          {
+            "name": "设置弹窗无场景选择项（.scene-opt / 「场景」文案）",
+            "ok": false,
+            "detail": "{\"opened\":true,\"sceneOpts\":3,\"sceneWord\":true,\"head\":\"⚙ 设置中心\\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\\n✕\\n🔒\\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\\n学习场景\\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\\nA · 日常\\nB · 备考\\nC · 冲刺\\n💬\\nAI 问答\\n🧩\\nAI 知识点总结\\n📥\\n入库\\n🎓\\n课件答疑\\n📖\\nAI 预习总结\\n设置只保存在本机\\n不会上传、不会进代码仓库\\n密钥留空＝不改动\\n💬\\nAI 问答\\n\\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着—\"}"
+          }
+        ],
+        "evidence": {
+          "kps": {
+            "createToggle": true,
+            "createTexts": [
+              "＋ 新建知识点"
+            ],
+            "importTexts": [
+              "导入已整理好的知识点（0 费用）"
+            ],
+            "hasFormInput": true
+          },
+          "mistakes": {
+            "newId": true,
+            "texts": [
+              "＋ 记一道错题"
+            ],
+            "emptyText": ""
+          },
+          "scene": {
+            "sceneDom": {
+              "badge": true,
+              "bodySceneWord": false,
+              "bodyHasSceneText": "场景 A · 日常"
+            },
+            "setDom": {
+              "opened": true,
+              "sceneOpts": 3,
+              "sceneWord": true,
+              "head": "⚙ 设置中心\n四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；保存后立刻生效，不用重启看板（正在跑的任务不受影响）\n✕\n🔒\nAPI 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。\n学习场景\n决定首屏与导航排序；只存本机浏览器，切回 A 恢复全部功能\nA · 日常\nB · 备考\nC · 冲刺\n💬\nAI 问答\n🧩\nAI 知识点总结\n📥\n入库\n🎓\n课件答疑\n📖\nAI 预习总结\n设置只保存在本机\n不会上传、不会进代码仓库\n密钥留空＝不改动\n💬\nAI 问答\n\n先在库里检索相关片段，再让模型只依据这些片段作答并给出处。这条管线的推理默认关着—"
+            }
+          }
+        }
+      },
+      {
+        "id": "RB-B1",
+        "title": "排版保留（桌面 1440）",
+        "criteria": "8 视图术语 0 命中；空态 CTA 在且无死链；摘要截断；掌握度四处一致",
+        "status": "PASS",
+        "subchecks": [
+          {
+            "name": "8 视图可见文本无开发者术语（logs//tools//卡 C-/doc_id/.json）",
+            "ok": true,
+            "detail": "[]"
+          },
+          {
+            "name": "空态 CTA 仍在 / 无死链（错题空态允许无按钮）",
+            "ok": true,
+            "detail": "[]"
+          },
+          {
+            "name": "知识点摘要截断（-webkit-line-clamp / ≤2 行）",
+            "ok": true,
+            "detail": "{\"found\":true,\"len\":207,\"endsEllipsis\":false,\"lineClamp\":\"2\",\"clientH\":40,\"scrollH\":119,\"overflow\":\"hidden\"}"
+          }
+        ],
+        "evidence": {
+          "views": {
+            "overview": {
+              "view": "overview",
+              "textLen": 371,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-overview.png"
+            },
+            "docs": {
+              "view": "docs",
+              "textLen": 3389,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 24,
+                  "head": "本库没有待入库的文件——都已入库，或格式不支持。",
+                  "btnCount": 0,
+                  "clickableCount": 0
+                }
+              ],
+              "actBtns": 5,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-docs.png"
+            },
+            "assistant": {
+              "view": "assistant",
+              "textLen": 360,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-assistant.png"
+            },
+            "review": {
+              "view": "review",
+              "textLen": 1447,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 10,
+                  "head": "这一天没有安排复习。",
+                  "btnCount": 0,
+                  "clickableCount": 0
+                }
+              ],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-review.png"
+            },
+            "kps": {
+              "view": "kps",
+              "textLen": 95063,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 54,
+                  "head": "这份课件还没有名词解释。\n用下面的「选择课件批量整理」整理这份课件后，这里就会显示它的名词。\n去整理这份课件",
+                  "btnCount": 1,
+                  "clickableCount": 1
+                }
+              ],
+              "actBtns": 6,
+              "sum": {
+                "found": true,
+                "len": 207,
+                "endsEllipsis": false,
+                "lineClamp": "2",
+                "clientH": 40,
+                "scrollH": 119,
+                "overflow": "hidden"
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-kps.png"
+            },
+            "mistakes": {
+              "view": "mistakes",
+              "textLen": 497,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-mistakes.png"
+            },
+            "graph": {
+              "view": "graph",
+              "textLen": 4089,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [],
+              "actBtns": 0,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-graph.png"
+            },
+            "notes": {
+              "view": "notes",
+              "textLen": 65,
+              "terms": [],
+              "termCtx": [],
+              "evalError": "",
+              "empties": [
+                {
+                  "len": 65,
+                  "head": "还没有笔记。\n笔记会一直留在这里，下次打开还能看。\n在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。\n去「知识点」写笔记",
+                  "btnCount": 1,
+                  "clickableCount": 1
+                }
+              ],
+              "actBtns": 1,
+              "sum": {
+                "found": false
+              },
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-view-notes.png"
+            }
+          },
+          "empty": {
+            "docs#0": {
+              "view": "docs",
+              "len": 24,
+              "head": "本库没有待入库的文件——都已入库，或格式不支持。",
+              "btnCount": 0,
+              "clickableCount": 0,
+              "actBtns": 5
+            },
+            "kps#1": {
+              "view": "kps",
+              "len": 54,
+              "head": "这份课件还没有名词解释。\n用下面的「选择课件批量整理」整理这份课件后，这里就会显示它的名词。\n去整理这份课件",
+              "btnCount": 1,
+              "clickableCount": 1,
+              "actBtns": 6
+            },
+            "notes#2": {
+              "view": "notes",
+              "len": 65,
+              "head": "还没有笔记。\n笔记会一直留在这里，下次打开还能看。\n在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。\n去「知识点」写笔记",
+              "btnCount": 1,
+              "clickableCount": 1,
+              "actBtns": 1
+            }
+          },
+          "summary": {
+            "found": true,
+            "len": 207,
+            "endsEllipsis": false,
+            "lineClamp": "2",
+            "clientH": 40,
+            "scrollH": 119,
+            "overflow": "hidden"
+          }
+        }
+      },
+      {
+        "id": "RB-B2",
+        "title": "移动端 390×844",
+        "criteria": "8 视图无横向滚动 + 首屏 scrollY=0",
+        "status": "PASS",
+        "subchecks": [
+          {
+            "name": "390 宽无横向滚动：overview",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：overview",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：docs",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：docs",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：assistant",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：assistant",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：review",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：review",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：kps",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：kps",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：mistakes",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：mistakes",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：graph",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：graph",
+            "ok": true,
+            "detail": "scrollY=0"
+          },
+          {
+            "name": "390 宽无横向滚动：notes",
+            "ok": true,
+            "detail": "{\"sw\":390,\"cw\":390,\"scrollY\":0,\"viewSw\":366,\"viewCw\":366}"
+          },
+          {
+            "name": "390 宽首屏 scrollY=0：notes",
+            "ok": true,
+            "detail": "scrollY=0"
+          }
+        ],
+        "evidence": {
+          "views": {
+            "overview": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-overview.png"
+            },
+            "docs": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-docs.png"
+            },
+            "assistant": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-assistant.png"
+            },
+            "review": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-review.png"
+            },
+            "kps": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-kps.png"
+            },
+            "mistakes": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-mistakes.png"
+            },
+            "graph": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-graph.png"
+            },
+            "notes": {
+              "sw": 390,
+              "cw": 390,
+              "scrollY": 0,
+              "viewSw": 366,
+              "viewCw": 366,
+              "ok": true,
+              "shot": "D:\\study_agent\\_work\\rollback\\rb-shots\\BASE-mobile-notes.png"
+            }
+          }
+        }
+      },
+      {
+        "id": "RB-C",
+        "title": "检索回基线",
+        "criteria": "core/search.py sha256 == 251886f 版本（10 题回归只记录不判定）",
+        "status": "FAIL",
+        "subchecks": [
+          {
+            "name": "core/search.py 与 251886f 版本一致（sha256）",
+            "ok": false,
+            "detail": "inst=63f047e4be9d09d6 ref=637fae0824770a11"
+          }
+        ],
+        "evidence": {
+          "search_ref": "251886f",
+          "instance_sha256": "63f047e4be9d09d6957e0accac997587e457a23d1f82973ccb5b3c09ad5e8788",
+          "local_sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1",
+          "ref_sha256": "637fae0824770a114cdd6da4be2d873759fbe10c40696db7ad8dac19edc0b1b1",
+          "ref": "251886f",
+          "search_10q": {
+            "hit": 10,
+            "total": 10,
+            "cases": [
+              {
+                "id": "Q01",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1382,
+                    "ref": "p.5"
+                  }
+                ]
+              },
+              {
+                "id": "Q02",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1400,
+                    "ref": "p.23"
+                  }
+                ]
+              },
+              {
+                "id": "Q03",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1393,
+                    "ref": "p.16"
+                  }
+                ]
+              },
+              {
+                "id": "Q04",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1393,
+                    "ref": "p.16"
+                  }
+                ]
+              },
+              {
+                "id": "Q05",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1391,
+                    "ref": "p.14"
+                  }
+                ]
+              },
+              {
+                "id": "Q06",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1384,
+                    "ref": "p.7"
+                  }
+                ]
+              },
+              {
+                "id": "Q07",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1397,
+                    "ref": "p.20"
+                  }
+                ]
+              },
+              {
+                "id": "Q08",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1401,
+                    "ref": "p.24"
+                  }
+                ]
+              },
+              {
+                "id": "Q09",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1410,
+                    "ref": "p.33"
+                  }
+                ]
+              },
+              {
+                "id": "Q10",
+                "status": "PASS",
+                "top1": [
+                  {
+                    "chunk_id": 1910,
+                    "ref": "p.16"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "result": "FAIL"
+  }
+}
