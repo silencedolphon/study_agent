@@ -830,7 +830,7 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
   .pv-card{padding:10px 11px}
   .pv-ch-title{max-width:none}
   .pv-ch-meta{width:100%;padding-left:17px}
-}
+}
 /* ---------------- 遗忘曲线月历（卡 C-0061） ----------------
    纯手写网格（零 CDN / 零第三方库），全部用既有 CSS 变量，不引入新色。
    颜色来源：--accent（今天/选中）、#33191a + --bad（逾期，与 .badge.bad 同族）、
@@ -3288,7 +3288,7 @@ async function openCleanup(){
     <h2>清理无出处的记录</h2>
     <div class="sub" style="margin-top:10px;line-height:1.9">
       知识点靠切块作为出处。资料删掉后，切块随之消失，
-      知识点就变成"没有任何原文支撑"的孤儿——留在总览与图谱里看着还在，
+      知识点就变成"没有任何原文支撑"的孤儿——留在总览与列表里看着还在，
       但已经无法用检索验证，也回链不到原文。<br>
       这里把这类记录清掉。当前库中文档数：<b>${pv.documents ?? 0}</b>
     </div>
@@ -6453,7 +6453,7 @@ async function openNote(name){
 }
 
 
-
+
 // ---------------- 检索 ----------------
 async function doSearch(q){
   const d = await api('/api/search?q='+encodeURIComponent(q)+'&k=8');
@@ -8632,7 +8632,7 @@ def api_preview_doc(doc_id, chapter):
     return {"ok": True, "doc_id": doc_id, "chapter_no": chapter,
             "artifact": hit["data"], "source": hit["path"]}
 
-
+
 def _outline_dir():
     return Path(config.LOG_DIR) / 'outline'
 
@@ -12400,7 +12400,7 @@ def cleanup_orphans(conn, dry_run=False, expected_kp=None):
 
     为什么必须做这件事：
     知识点的出处（kp_sources）指向 chunks，而 chunks 随文档级联删除。
-    删掉资料后，知识点会变成"没有任何原文支撑"的孤儿——它挂在总览与图谱里
+    删掉资料后，知识点会变成"没有任何原文支撑"的孤儿——它挂在总览与列表里
     看着还在，但已经无法用检索验证，也没法回链原文。
     早期版本的删除只摘掉了 kp_sources 的引用，没清理这些孤儿，
     于是用户删完资料后仍看到 17 个知识点、13 条依赖边、35 条复习记录，
