@@ -723,6 +723,114 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
   .set-foot .sstat{flex:1 1 100%;margin-left:0;text-align:left;order:5;font-size:11.5px}
   .spedit textarea{min-height:26vh}
 }
+/* ---------- 预习页（task-24：替换原「知识图谱」页签） ----------
+   用户要求：教材按章显示；每章可让外接大模型生成预习；预习先细分小节、
+   再按小节给内容；查看方式沿用"知识点小窗"的左树 + 右文。
+   桌面两栏（左章节目录 340px + 右查看器）；<900px 单栏 + 「返回章节」。
+   全部沿用既有 CSS 变量，暗色对比度不降。 */
+.pv-top{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.pv-top h2{margin:0;font-size:20px}
+.pv-top .pdesc{color:var(--dim);font-size:12.5px;line-height:1.7;margin-top:4px}
+.pv-tools{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pv-tools select{max-width:340px}
+.pv-docname{font-size:13px;color:var(--fg)}
+.pv-banner{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;
+  border:1px solid #3d3218;background:#211b10;color:#ffd48a;border-radius:10px;
+  padding:10px 12px;margin-bottom:12px;font-size:12.5px;line-height:1.7}
+.pv-banner-hint{color:#d8c69a;margin-top:3px;line-height:1.7}
+.pv-wrapspacer{height:1px}
+.pv-wrap{display:flex;gap:14px;align-items:flex-start}
+.pv-side{flex:0 0 340px;min-width:0;border:1px solid var(--line);border-radius:10px;
+  background:#151920;overflow:hidden}
+.pv-side-h{display:flex;align-items:center;justify-content:space-between;
+  padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.pv-side-h .muted{font-size:11.5px}
+.pv-chaps{max-height:calc(100vh - 270px);overflow:auto;padding:6px}
+.pv-chap{border:1px solid var(--line);border-radius:8px;margin-bottom:6px;
+  background:var(--panel2)}
+.pv-chap.on{border-color:var(--accent)}
+.pv-chap-head{display:flex;align-items:center;gap:7px;padding:8px 9px;cursor:pointer;
+  font-size:13px;flex-wrap:wrap}
+.pv-chap-head:hover{background:#1b2028}
+.pv-caret{color:var(--dim);font-size:11px;width:10px;flex:0 0 auto}
+.pv-ch-title{font-weight:600;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:148px}
+.pv-ch-meta{color:var(--dim);font-size:11px;white-space:nowrap}
+.pv-badge{font-size:10.5px;padding:1px 7px;border-radius:20px;
+  border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.pv-badge.ok{color:var(--ok);border-color:#1c3a24}
+.pv-badge.run{color:#cfe0ff;border-color:#233047;background:#1a2434}
+.pv-badge.bad{color:var(--bad);border-color:#4a1f1c}
+.pv-ch-act{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.pv-ch-act button{font-size:11.5px;padding:3px 8px}
+.pv-ch-body{border-top:1px dashed var(--line);padding:6px}
+.pv-secs{display:flex;flex-direction:column;gap:4px}
+.pv-sec{display:flex;align-items:center;gap:7px;text-align:left;width:100%;
+  background:transparent;border:1px solid transparent;color:var(--fg);
+  border-radius:6px;padding:5px 7px;cursor:pointer;font:inherit;font-size:12.5px}
+.pv-sec:hover{background:#1b2028}
+.pv-sec.on{background:#1b2430;border-color:var(--accent);color:var(--accent)}
+.pv-sec-no{color:var(--dim);font-size:11px;min-width:16px;flex:0 0 auto}
+.pv-sec-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.pv-sec-pg{color:var(--dim);font-size:10.5px;white-space:nowrap;flex:0 0 auto}
+.pv-hint{color:var(--dim);font-size:12px;line-height:1.7;padding:6px}
+.pv-main{flex:1;min-width:0}
+.pv-crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px;
+  color:var(--dim);margin-bottom:10px}
+.pv-crumb b{color:var(--fg)}
+.pv-crumb-pg{margin-left:auto}
+.pv-back{display:none}
+.pv-card{border:1px solid var(--line);border-radius:10px;background:#151920;
+  padding:12px 14px;margin-bottom:10px}
+.pv-card h3{margin:0 0 8px;font-size:14px;display:flex;align-items:center;
+  gap:8px;flex-wrap:wrap}
+.pv-sec-head h3{font-size:16px}
+.pv-sec-meta{color:var(--dim);font-size:11.5px;margin-bottom:8px}
+.pv-why{margin:8px 0 2px;padding:8px 10px;border-left:2px solid var(--accent);
+  background:#171e28;border-radius:0 6px 6px 0;font-size:12.5px;line-height:1.8}
+.pv-why b{display:block;margin-bottom:3px;color:var(--accent)}
+.pv-text{font-size:13px;line-height:1.9;color:var(--fg)}
+.pv-sub{margin-top:10px;font-size:12.5px;line-height:1.9}
+.pv-sub ol,.pv-sub ul{margin:4px 0;padding-left:20px}
+.pv-cols{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px}
+.pv-cols>div{flex:1 1 180px;line-height:1.85;min-width:0}
+.pv-cols ul{margin:4px 0;padding-left:18px}
+.pv-core{display:flex;flex-direction:column;gap:6px}
+.pv-core-row{display:flex;gap:10px;font-size:13px;line-height:1.8;
+  border-bottom:1px dashed rgba(42,47,58,.7);padding:5px 0}
+.pv-core-row:last-child{border-bottom:none}
+.pv-core-row b{flex:0 0 120px;color:var(--accent);word-break:break-word}
+.pv-lecture,.pv-pit{margin:0;padding-left:20px;font-size:13px;line-height:1.9}
+.pv-qa{border:1px solid var(--line);border-radius:8px;margin:6px 0;
+  background:#131720}
+.pv-qa>summary{cursor:pointer;padding:8px 10px;font-size:13px;line-height:1.7}
+.pv-ans{padding:8px 10px 9px;color:#cfe0ff;font-size:12.5px;line-height:1.85;
+  border-top:1px dashed var(--line)}
+.pv-srcs{display:flex;gap:6px;flex-wrap:wrap}
+.pv-chip{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;
+  border:1px solid var(--line);color:var(--dim);text-decoration:none}
+.pv-chip:hover{color:var(--accent);border-color:var(--accent)}
+.pv-empty{line-height:2}
+/* 窄屏单栏切换用 JS 类（不依赖 @media 里的 display:none，避免和布局媒体查询互相干扰） */
+.pv-wrap.pv-mob-hide-main .pv-main{display:none}
+.pv-wrap.pv-mob-hide-side .pv-side{display:none}
+.pv-wrap.pv-mob-hide-side .pv-back{display:inline-block}
+@media (max-width:900px){
+  .pv-wrap{flex-direction:column}
+  .pv-side{flex:1 1 auto;width:100%}
+  .pv-chaps{max-height:none}
+  .pv-main{width:100%}
+  .pv-top{align-items:flex-start}
+  .pv-top h2{font-size:18px}
+  .pv-tools{width:100%;margin-left:0}
+  .pv-tools select{flex:1;max-width:none;min-width:0}
+  .pv-crumb{font-size:12px}
+  .pv-crumb-pg{margin-left:0}
+  .pv-card{padding:10px 11px}
+  .pv-ch-title{max-width:none}
+  .pv-ch-meta{width:100%;padding-left:17px}
+}
 /* ---------------- 遗忘曲线月历（卡 C-0061） ----------------
    纯手写网格（零 CDN / 零第三方库），全部用既有 CSS 变量，不引入新色。
    颜色来源：--accent（今天/选中）、#33191a + --bad（逾期，与 .badge.bad 同族）、
@@ -875,7 +983,7 @@ const VIEWS = {
   assistant:{label:'问答',  render: viewAssistant},
   overview: {label:'总览',  render: viewOverview},
   review:   {label:'复习',  render: viewReview},
-  graph:    {label:'图谱',  render: viewGraph},
+  preview:  {label:'预习',  render: viewPreview},
   docs:     {label:'资料',  render: viewDocs},
   kps:      {label:'知识点', render: viewKps},
   mistakes: {label:'错题',  render: viewMistakes},
@@ -5649,179 +5757,703 @@ function confirmBox(title, text){
   });
 }
 
-// ---------------- 知识图谱 ----------------
-// 手工分层布局：按前置依赖做拓扑分层，逐层横向铺开。
-// 不引入 d3 之类的库，保持离线可用、零依赖。
-async function viewGraph(){
-  const {nodes, edges} = await api('/api/graph');
-  if (!nodes.length){
-    $('#view').innerHTML = `<div class="empty">还没有知识点，所以图谱是空的。<br>
-      <span class="small">整理课件里的知识点后会在这里连成图。</span><br>
-      <button class="act" id="gr-go-kps">去「知识点」页</button></div>`;
-    const b = $('#gr-go-kps');
-    if (b) b.onclick = () => go('kps');
-    return;
-  }
-  const byId = {}; nodes.forEach(n => byId[n.id] = n);
-  // 只保留两端都存在的边，避免脏数据让布局崩掉
-  const es = edges.filter(e => byId[e.src_id] && byId[e.dst_id]);
-  const prereq = es.filter(e => e.kind === 'prereq');
+// ---------------- 预习（task-24：替换原「知识图谱」页签） ----------------
+// 用户要求：教材入库后按章显示；每章可让外接大模型生成预习；预习先细分小节、
+// 再按小节给内容；查看方式沿用"知识点小窗"的左树 + 右文。
+//
+// 后端契约（core/preview.py，另一位智能体并行重写；这里防御式调用）：
+//   GET  /api/preview/options            教材列表 + 开关状态
+//   GET  /api/preview/chapters?doc_id=   章列表（含每章产物状态）
+//   GET  /api/preview/estimate?...       dry-run 估价（0 调用 0 写盘）
+//   POST /api/preview/start              起后台任务
+//   GET  /api/preview/progress           后台进度（必须不进写锁）
+//   GET  /api/preview/doc?...            读某章产物（查看器数据）
+// 生成前必须先看估价再确认——不替用户花钱。
+const PV = {docs:[], docId:0, title:'', enabled:null, chapters:[], err:'',
+            open:{}, sel:{ch:0, sec:null}, arts:{}, prog:null, timer:null,
+            mobile:false, busy:{}, loading:false};
 
-  // 拓扑分层：depth[dst] = max(depth[src] + 1)
-  const depth = {}; nodes.forEach(n => depth[n.id] = 0);
-  for (let i = 0; i < nodes.length; i++){
-    let moved = false;
-    prereq.forEach(e => {
-      if (depth[e.dst_id] < depth[e.src_id] + 1){
-        depth[e.dst_id] = depth[e.src_id] + 1; moved = true;
+function pvText(s){
+  return esc(String(s == null ? '' : s)).replace(/\n/g, '<br>');
+}
+function pvList(v, fmt){
+  if (v == null || v === '') return '';
+  const arr = Array.isArray(v) ? v : [v];
+  return arr.map(x => (typeof x === 'string') ? pvText(x) : (fmt ? fmt(x) : pvText(x)))
+    .filter(x => x !== '').join('');
+}
+function pvPageLabel(ch){
+  if (!ch) return '';
+  if (ch.page_label) return ch.page_label;
+  const a = ch.page_start, b = ch.page_end;
+  if (a && b && a !== b) return 'p.' + a + '–p.' + b;
+  if (a) return 'p.' + a;
+  return '';
+}
+function pvChapKey(ch){ return 'ch' + (ch && ch.no || 0); }
+
+async function viewPreview(){
+  const box = $('#view');
+  if (!box) return;
+  if (PV.timer){ clearInterval(PV.timer); PV.timer = null; }
+  box.innerHTML = `<div class="pv-top"><div><h2>📖 预习</h2>
+      <div class="pdesc">教材按章显示；每章先细分小节再生成预习，生成后按小节查看。</div></div></div>
+    <div class="empty" id="pv-loading">正在读取教材与章节…</div>`;
+  PV.loading = true;
+  await pvLoadOptions();
+  PV.loading = false;
+  // 窗口尺寸变化时重渲染一次，保证窄屏单栏/宽屏两栏切换正确（用 matchMedia，
+  // 它比 resize 事件更可靠：headless 截图工具可能在页面加载后才改视口）
+  if (!PV._mq){
+    PV._mq = window.matchMedia('(max-width: 900px)');
+    PV._mqH = () => { if (document.querySelector('.pv-wrap')) pvRender(); };
+    if (PV._mq.addEventListener) PV._mq.addEventListener('change', PV._mqH);
+    else if (PV._mq.addListener) PV._mq.addListener(PV._mqH);
+  }
+  // 若后台已经有预习任务在跑（例如刚刷新页面），把进度条接回来
+  try {
+    const p = await api('/api/preview/progress');
+    if (p && p.active){ PV.prog = p; pvWatchProgress(); }
+  } catch(e){ /* 进度接口不可用不影响页面 */ }
+}
+
+async function pvLoadOptions(){
+  try {
+    const d = await api('/api/preview/options');
+    PV.enabled = d.enabled || {enabled:false, hint:'', switch:'PREVIEW_ENABLED'};
+    PV.docs = d.textbooks || [];
+    if (!PV.docs.length){ pvRenderNoTextbook(); return; }
+    if (!PV.docs.some(t => t.doc_id === PV.docId)){
+      const withPv = PV.docs.find(t => t.has_preview);
+      PV.docId = (withPv || PV.docs[0]).doc_id;
+    }
+    await pvLoadChapters();
+  } catch(e){
+    $('#view').innerHTML = `<div class="pv-top"><div><h2>📖 预习</h2></div></div>
+      <div class="empty">读不到预习数据：${esc(e.message)}<br>
+      <span class="small">后端预习模块可能还在准备，稍后点「刷新」再试。</span><br>
+      <button class="ghost" onclick="viewPreview()">刷新</button></div>`;
+  }
+}
+
+function pvRenderNoTextbook(){
+  $('#view').innerHTML = `<div class="pv-top"><div><h2>📖 预习</h2>
+      <div class="pdesc">教材按章显示；每章先细分小节再生成预习，生成后按小节查看。</div></div></div>
+    <div class="empty">还没有教材入库，所以没有可预习的章节。<br>
+      <span class="small">去「资料」页选择「教材入库（PDF）」；入库完成后这里会按章列出。</span><br>
+      <button class="act" onclick="go('docs')">去资料页入库教材</button></div>`;
+}
+
+async function pvLoadChapters(){
+  try {
+    const d = await api('/api/preview/chapters?doc_id=' + encodeURIComponent(PV.docId));
+    if (d.ok === false){
+      PV.chapters = [];
+      PV.err = d.error || '这份教材未见章节结构（可能是扫描版或还没做完章级切块）。';
+      pvRender();
+      return;
+    }
+    PV.err = '';
+    PV.title = d.title || (PV.docs.find(t => t.doc_id === PV.docId) || {}).title || '';
+    PV.chapters = d.chapters || [];
+    if (d.enabled) PV.enabled = d.enabled;
+    // 默认选中：第一章有产物的章 + 它的第一节；没有产物就停在第一章的章级空态
+    let ch = PV.chapters[0];
+    if (PV.sel.ch && PV.chapters.some(c => c.no === PV.sel.ch)) ch = PV.chapters.find(c => c.no === PV.sel.ch);
+    const firstDone = PV.chapters.find(c => (c.preview || {}).exists) || ch;
+    if (!PV.sel.ch || !PV.chapters.some(c => c.no === PV.sel.ch)){
+      PV.sel = {ch: firstDone ? firstDone.no : 0, sec: null};
+    }
+    if (firstDone && (firstDone.preview || {}).exists){
+      PV.open[firstDone.no] = PV.open[firstDone.no] !== false;
+      if (PV.sel.sec == null && PV.sel.ch === firstDone.no && !PV.arts[pvKeyOf(PV.sel.ch)]){
+        await pvEnsureArt(PV.sel.ch);
+        const art = PV.arts[pvKeyOf(PV.sel.ch)];
+        if (art && art.ok && art.sections.length) PV.sel.sec = 0;  // 默认第一节
       }
-    });
-    if (!moved) break;  // 已收敛；有环时靠迭代上限兜住
+    }
+    pvRender();
+  } catch(e){
+    PV.chapters = []; PV.err = '读不到章节：' + e.message;
+    pvRender();
   }
+}
 
-  const levels = {};
-  nodes.forEach(n => { (levels[depth[n.id]] ||= []).push(n); });
-  const keys = Object.keys(levels).map(Number).sort((a,b)=>a-b);
-  const W = 980, PAD = 30, NW = 132, NH = 42;
-  const rowH = 110;
-  const pos = {};
-  keys.forEach((k, li) => {
-    const row = levels[k].sort((a,b) => (a.mastery||0) - (b.mastery||0));
-    const step = Math.min(180, (W - PAD*2) / Math.max(1, row.length));
-    const startX = PAD + (W - PAD*2 - step*(row.length-1)) / 2;
-    row.forEach((n, i) => {
-      pos[n.id] = {x: startX + i*step, y: PAD + li*rowH, w: NW, h: NH};
-    });
-  });
-  const H = PAD*2 + (keys.length-1)*rowH + NH;
-  const col = m => m >= .75 ? '#3fb950' : (m >= .4 ? '#d29922' : '#f85149');
+function pvKeyOf(chNo){ return String(PV.docId) + ':' + String(chNo); }
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-height:62vh">`;
-  svg += '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" '
-       + 'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-       + '<path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5264"/></marker></defs>';
-  es.forEach(e => {
-    const a = pos[e.src_id], b = pos[e.dst_id];
-    if (!a || !b) return;
-    const x1 = a.x + a.w/2, y1 = a.y + a.h, x2 = b.x + b.w/2, y2 = b.y;
-    const my = (y1 + y2) / 2;
-    const dash = e.kind === 'prereq' ? '' : ' stroke-dasharray="4 4"';
-    svg += `<path d="M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}" `
-         + `fill="none" stroke="#4a5264" stroke-width="1.4"${dash} `
-         + `marker-end="url(#ar)"/>`;
-  });
-  nodes.forEach(n => {
-    const p = pos[n.id]; if (!p) return;
-    const c = col(n.mastery || 0);
-    svg += `<g style="cursor:pointer" onclick="openKp(${n.id})">`
-         + `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" `
-         + `fill="#1e222b" stroke="${c}" stroke-width="1.6"/>`
-         + `<text x="${p.x + p.w/2}" y="${p.y + 18}" fill="#e6e9ef" `
-         + `font-size="12" text-anchor="middle" font-family="inherit">`
-         + `${esc((n.name||'').slice(0,11))}</text>`
-         + `<text x="${p.x + p.w/2}" y="${p.y + 33}" fill="${c}" `
-         + `font-size="11" text-anchor="middle">掌握 ${pct(n.mastery)}%</text>`
-         + `</g>`;
-  });
-  svg += '</svg>';
+// 章级状态徽标
+function pvBadge(ch){
+  const p = ch.preview || {};
+  const running = PV.prog && PV.prog.active &&
+    Number(PV.prog.doc_id) === Number(PV.docId) &&
+    String(PV.prog.chapter || '').indexOf(String(ch.no)) >= 0;
+  if (running) return {cls:'run', text:'⏳ 生成中'};
+  if (p.status === 'failed') return {cls:'bad', text:'✗ 失败'};
+  if (p.exists) return {cls:'ok', text:'✓ 已预习' + (p.n_subsections ? ' · ' + p.n_subsections + ' 小节' : '')};
+  return {cls:'', text:'未预习'};
+}
 
-  const orphans = nodes.filter(n => !prereq.some(e => e.dst_id===n.id || e.src_id===n.id));
-  $('#view').innerHTML = `
-    <div class="card">
-      <h2>知识点图谱 · ${nodes.length} 个节点 / ${prereq.length} 条前置依赖</h2>
-      <div class="row small muted" style="margin:8px 0 14px">
-        <span>箭头方向：前置 → 后继</span>
-        <span>节点颜色：<span style="color:#3fb950">■</span> 已掌握 ≥75%
-          <span style="color:#d29922">■</span> 进行中
-          <span style="color:#f85149">■</span> 薄弱 &lt;40%</span>
-        ${orphans.length ? `<span>孤立节点 ${orphans.length} 个</span>` : ''}
+function pvRender(){
+  const box = $('#view');
+  if (!box) return;
+  const chs = PV.chapters || [];
+  const cur = chs.find(c => c.no === PV.sel.ch) || null;
+  const art = PV.arts[pvKeyOf(PV.sel.ch)];
+  const banner = (PV.enabled && PV.enabled.enabled === false) ? `
+    <div class="pv-banner">
+      <div><b>🔒 预习功能未开启</b>
+        <div class="pv-banner-hint">${em(humanize(PV.enabled.hint || '可在「设置中心 → AI 预习总结」里打开。'))}</div></div>
+      <button class="act" onclick="PVTOSET()">去设置开启</button>
+    </div>` : '';
+  const sel = PV.docs.length > 1
+    ? `<select id="pv-doc">${PV.docs.map(t => `<option value="${t.doc_id}"${t.doc_id === PV.docId ? ' selected' : ''}>${esc(t.title)}（${t.n_chapters || 0} 章）</option>`).join('')}</select>`
+    : `<span class="pv-docname">📚 ${esc(PV.title || (PV.docs[0] || {}).title || '')}</span>`;
+  const narrow = PV._mq ? PV._mq.matches : (window.innerWidth <= 900);
+  const wrapCls = 'pv-wrap' + (narrow ? (PV.mobile ? ' pv-mob-hide-side' : ' pv-mob-hide-main') : '');
+  box.innerHTML = `
+    <div class="pv-top">
+      <div><h2>📖 预习</h2>
+        <div class="pdesc">教材按章显示；每章先细分小节再生成预习，生成后按小节查看。</div></div>
+      <div class="pv-tools">${sel}
+        <button class="ghost" onclick="pvReload()" title="重新读取章节与产物状态">刷新</button></div>
+    </div>
+    ${banner}
+    <div id="pv-progress"></div>
+    ${PV.err ? `<div class="empty">${esc(PV.err)}<br>
+      <span class="small">教材需要先完成章级切块（PDF 入库时会做），再来预习。</span></div>` : ''}
+    ${(!PV.err && !chs.length) ? '<div class="empty">这份教材没有列出任何章。</div>' : ''}
+    ${chs.length ? `<div class="${wrapCls}">
+      <aside class="pv-side">
+        <div class="pv-side-h"><b>章节目录</b><span class="muted">${chs.length} 章</span></div>
+        <div class="pv-chaps">${chs.map(c => pvChapHtml(c)).join('')}</div>
+      </aside>
+      <div class="pv-main">${pvViewerHtml(cur, art)}</div>
+    </div>` : ''}`;
+  pvBind();
+  if (PV.prog) renderProgress(PV.prog, '#pv-progress');
+}
+
+function pvChapHtml(ch){
+  const open = !!PV.open[ch.no];
+  const b = pvBadge(ch);
+  const p = ch.preview || {};
+  const selCls = (ch.no === PV.sel.ch) ? ' on' : '';
+  let body = '';
+  if (open){
+    if (p.exists){
+      const art = PV.arts[pvKeyOf(ch.no)];
+      if (!art) body = '<div class="pv-hint">正在读取小节…</div>';
+      else if (art.ok === false) body = `<div class="pv-hint">读不到这一章的预习产物：${esc(art.error || '')}</div>`;
+      else {
+        body = `<div class="pv-secs">
+          <button class="pv-sec${PV.sel.ch === ch.no && PV.sel.sec === null ? ' on' : ''}"
+            data-pvact="overview" data-ch="${ch.no}">章概览 · ${art.sections.length} 小节</button>
+          ${art.sections.map((s, i) => `<button class="pv-sec${PV.sel.ch === ch.no && PV.sel.sec === i ? ' on' : ''}"
+            data-pvact="sec" data-ch="${ch.no}" data-i="${i}">
+            <span class="pv-sec-no">${esc(s.no || (i + 1))}</span>
+            <span class="pv-sec-name">${esc(s.title || ('第' + (i + 1) + '小节'))}</span>
+            <span class="pv-sec-pg">${esc(s.page_label || '')}</span></button>`).join('')}
+        </div>`;
+      }
+    } else {
+      body = `<div class="pv-hint">还没预习。点右侧「预习本章」生成（先看费用预估再确认）。</div>`;
+    }
+  }
+  return `<div class="pv-chap${selCls}" data-ch="${ch.no}">
+    <div class="pv-chap-head" data-pvact="toggle" data-ch="${ch.no}">
+      <span class="pv-caret">${open ? '▾' : '▸'}</span>
+      <span class="pv-ch-title">第${ch.no}章 ${esc(ch.name || '')}</span>
+      <span class="pv-ch-meta">${esc(pvPageLabel(ch))}${ch.n_sections ? ' · ' + ch.n_sections + ' 小节' : ''}</span>
+      <span class="pv-badge ${b.cls}">${b.text}</span>
+      <span class="pv-ch-act">
+        ${p.exists
+          ? `<button class="ghost" data-pvact="view" data-ch="${ch.no}">查看预习</button>
+             <button class="ghost" data-pvact="regen" data-ch="${ch.no}">重新预习</button>`
+          : `<button class="act" data-pvact="gen" data-ch="${ch.no}"
+               ${PV.busy[ch.no] || (PV.prog && PV.prog.active) ? 'disabled' : ''}>
+               ${PV.busy[ch.no] ? '估算中…' : '预习本章'}</button>`}
+      </span>
+    </div>
+    ${open ? `<div class="pv-ch-body">${body}</div>` : ''}
+  </div>`;
+}
+
+// 产物归一：兼容后端 v2（artifact:{meta,chapter,summary,subsections,terms,sources}）
+// 与旧版/其它字段名；前端只看归一后的 {overview, sections, terms, legacy, warnings}。
+function pvNormArtifact(raw){
+  const env = (raw && (raw.artifact || raw.preview)) ? (raw.artifact || raw.preview) : (raw || {});
+  const r = (env && typeof env === 'object') ? env : {};
+  const meta = (r.meta && typeof r.meta === 'object') ? r.meta : {};
+  const sm = (r.summary && typeof r.summary === 'object') ? r.summary : {};
+  const chInfo = (r.chapter && typeof r.chapter === 'object') ? r.chapter : {};
+  const str = v => (v == null) ? '' : String(v);
+  const list = v => {
+    if (v == null || v === '') return [];
+    return (Array.isArray(v) ? v : [v]).map(x => {
+      if (typeof x === 'string') return x;
+      if (x && typeof x === 'object') return str(x.text || x.name || x.title || x.point || x.desc || '');
+      return str(x);
+    }).filter(Boolean);
+  };
+  const coreOf = v => (Array.isArray(v) ? v : []).map(x => {
+    if (typeof x === 'string') return {term: '', desc: x};
+    return {term: str(x.name || x.term || ''),
+            desc: str(x.explain || x.desc || x.text || x.detail || '')};
+  }).filter(x => x.term || x.desc);
+  const scOf = v => (Array.isArray(v) ? v : []).map(x => {
+    if (typeof x === 'string') return {q: x, a: ''};
+    return {q: str(x.q || x.question || x.text || ''),
+            a: str(x.a || x.answer || x.explain || '')};
+  }).filter(x => x.q || x.a);
+  const secs = (Array.isArray(r.subsections) ? r.subsections
+    : (Array.isArray(r.sections) ? r.sections
+    : (Array.isArray(sm.sections) ? sm.sections : []))).map((s, i) => {
+    const pages = Array.isArray(s.pages) ? s.pages : [];
+    const pgLabel = str(s.page_label) || (pages.length
+      ? (pages.length > 1 ? 'p.' + pages[0] + '–p.' + pages[pages.length - 1]
+                          : 'p.' + pages[0]) : '');
+    const ids = Array.isArray(s.chunk_ids) ? s.chunk_ids
+      : (Array.isArray(s.material_block_ids) ? s.material_block_ids : []);
+    const sources = (Array.isArray(s.sources) && s.sources.length) ? s.sources
+      : ids.map(id => ({page: pages[0] || '', chunk_ids: [id]}));
+    return {
+      no: s.no || (i + 1),
+      title: str(s.title || s.name || ('第' + (i + 1) + '小节')),
+      page_label: pgLabel,
+      why: str(s.why || s.why_text || s.position || ''),
+      core: coreOf(s.core || s.concepts || s.key_terms || []),
+      lecture: Array.isArray(s.lecture) ? s.lecture
+        : (s.lecture ? [str(s.lecture)] : []),
+      pitfalls: list(s.pitfalls || s.common_mistakes || []),
+      self_check: scOf(s.self_check || s.questions || []),
+      sources,
+    };
+  });
+  const terms = (Array.isArray(r.terms) ? r.terms : []).map(t => ({
+    term: str(t.term || t.name || ''), en: str(t.en || ''),
+    def: str(t.def || t.desc || t.explain || ''), why: str(t.why || ''),
+  })).filter(t => t.term || t.def);
+  const warnings = Array.isArray(raw && raw.warnings) ? raw.warnings
+    : (Array.isArray(meta.warnings) ? meta.warnings : []);
+  return {
+    ok: true, sections: secs, terms,
+    legacy: !!(raw && raw.legacy),
+    warnings,
+    meta, chapter: chInfo,
+    overview: {
+      summary: str(sm.overview || sm.summary
+        || (typeof r.overview === 'string' ? r.overview : '')),
+      study_order: list(sm.study_order || sm.order),
+      difficulties: list(sm.difficulties),
+      prerequisites: list(sm.prerequisites),
+      exam_points: list(sm.exam_focus || sm.exam_points),
+    },
+  };
+}
+
+async function pvEnsureArt(chNo){
+  const key = pvKeyOf(chNo);
+  if (PV.arts[key]) return PV.arts[key];
+  try {
+    const d = await api('/api/preview/doc?doc_id=' + encodeURIComponent(PV.docId) +
+                        '&chapter=' + encodeURIComponent(chNo));
+    PV.arts[key] = (d && d.ok === false) ? {ok:false, error:d.error || '读不到产物'} : pvNormArtifact(d, chNo);
+  } catch(e){
+    PV.arts[key] = {ok:false, error:e.message};
+  }
+  return PV.arts[key];
+}
+
+function pvViewerHtml(ch, art){
+  if (!ch) return '<div class="empty">从左侧选一章开始。</div>';
+  const p = ch.preview || {};
+  const secIdx = (PV.sel.ch === ch.no) ? PV.sel.sec : null;
+  const crumb = `<div class="pv-crumb">
+    <button class="ghost pv-back" data-pvact="back">← 返回章节</button>
+    <span class="muted">${esc(PV.title || '')}</span> ›
+    <b>第${ch.no}章 ${esc(ch.name || '')}</b>
+    ${secIdx != null && art && art.sections[secIdx] ? ` › ${esc(art.sections[secIdx].title)}` : ''}
+    <span class="pv-crumb-pg">${esc(pvPageLabel(ch))}</span></div>`;
+  if (!p.exists){
+    return crumb + `<div class="empty pv-empty">这一章还没预习。<br>
+      <span class="small">点左侧「预习本章」：先看费用预估，确认后由外接大模型生成；生成完这里按小节显示。</span></div>`;
+  }
+  if (!art) return crumb + '<div class="empty">正在读取这一章的预习产物…</div>';
+  if (art.ok === false) return crumb + `<div class="empty">读不到这一章产物：${esc(art.error || '')}</div>`;
+  const ov = art.overview || {};
+  const warnHtml = (art.legacy || (art.warnings || []).length)
+    ? `<div class="pv-banner"><div><b>⚠ ${art.legacy ? '旧版产物（只读显示）' : '产物提示'}</b>
+        <div class="pv-banner-hint">${(art.warnings || []).slice(0, 3).map(w => esc(w)).join('<br>')
+          || '这一章是旧版产物；重新预习后会升级为 v2 按小节产物。'}</div></div></div>`
+    : '';
+  const termsHtml = (art.terms || []).length ? `
+    <div class="pv-card"><h3>本章关键名词</h3>
+      <div class="pv-core">${art.terms.map(t => `<div class="pv-core-row">
+        <b>${esc(t.term)}${t.en ? '<span class="muted" style="font-weight:400"> ' + esc(t.en) + '</span>' : ''}</b>
+        <span>${pvText(t.def)}${t.why ? '<br><span class="muted">为什么重要：' + pvText(t.why) + '</span>' : ''}</span>
+      </div>`).join('')}</div></div>` : '';
+  const ovHtml = `
+    <div class="pv-card">
+      <h3>第${ch.no}章 章概览</h3>
+      ${ov.summary ? `<div class="pv-text">${pvText(ov.summary)}</div>` : '<div class="muted small">（这一章没有单独的章概览，直接看小节即可。）</div>'}
+      ${ov.study_order.length ? `<div class="pv-sub"><b>学习顺序</b><ol>${ov.study_order.map(x => `<li>${pvText(x)}</li>`).join('')}</ol></div>` : ''}
+      <div class="pv-cols">
+        ${ov.difficulties.length ? `<div><b>难点</b><ul>${ov.difficulties.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
+        ${ov.prerequisites.length ? `<div><b>前置知识</b><ul>${ov.prerequisites.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
+        ${ov.exam_points.length ? `<div><b>考点</b><ul>${ov.exam_points.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
       </div>
-      ${svg}
-      <div class="sub" style="margin-top:10px">
-        点击任一节点可查看它的原文出处并直接评分。虚线表示"相关"（非前置）关系。
+      <div class="row" style="margin-top:10px">
+        <button class="act" data-pvact="sec" data-ch="${ch.no}" data-i="0">从第一节开始</button>
       </div>
     </div>`;
+  if (secIdx == null) return crumb + warnHtml + ovHtml + termsHtml;
+  const s = art.sections[secIdx];
+  if (!s) return crumb + ovHtml;
+  const coreHtml = s.core.length ? `
+    <div class="pv-card"><h3>核心概念</h3>
+      <div class="pv-core">${s.core.map(x => `<div class="pv-core-row">
+        ${x.term ? `<b>${esc(x.term)}</b>` : ''}<span>${pvText(x.desc)}</span></div>`).join('')}</div>
+    </div>` : '';
+  const lectHtml = s.lecture.length ? `
+    <div class="pv-card"><h3>老师会怎么讲</h3>
+      <ol class="pv-lecture">${s.lecture.map(x => `<li>${pvText(x)}</li>`).join('')}</ol>
+    </div>` : '';
+  const pitHtml = s.pitfalls.length ? `
+    <div class="pv-card"><h3>易错点</h3>
+      <ul class="pv-pit">${s.pitfalls.map(x => `<li>${pvText(x)}</li>`).join('')}</ul>
+    </div>` : '';
+  const scHtml = s.self_check.length ? `
+    <div class="pv-card"><h3>自测（答案默认收起）</h3>
+      ${s.self_check.map(x => `<details class="pv-qa"><summary>${esc(x.q)}</summary>
+        <div class="pv-ans">${pvText(x.a || '（本题没有给答案）')}</div></details>`).join('')}
+    </div>` : '';
+  const srcs = [];
+  (s.sources || []).forEach(x => {
+    const page = (typeof x === 'object') ? (x.page || x.page_no || '') : x;
+    const ids = (typeof x === 'object') ? (x.chunk_ids || x.blocks || []) : [];
+    if (ids && ids.length){
+      ids.forEach(id => srcs.push(`<a class="pv-chip" href="#" onclick="openChunk(${Number(id)});return false">p.${esc(page || '?')} · 块 ${Number(id)}</a>`));
+    } else if (page){
+      srcs.push(`<span class="pv-chip">p.${esc(page)}</span>`);
+    }
+  });
+  return crumb + warnHtml + `
+    <div class="pv-card pv-sec-head">
+      <h3>${esc(s.title)}</h3>
+      <div class="pv-sec-meta">${esc(s.page_label || '')}
+        <span class="muted">· 小节 ${secIdx + 1} / ${art.sections.length}</span></div>
+      ${s.why ? `<div class="pv-why"><b>这一小节要解决什么</b><div>${pvText(s.why)}</div></div>` : ''}
+    </div>` + coreHtml + lectHtml + pitHtml + scHtml +
+    (srcs.length ? `<div class="pv-card"><h3>出处</h3><div class="pv-srcs">${srcs.join('')}</div></div>` : '') +
+    termsHtml;
 }
+
+function pvBind(){
+  const root = $('#view');
+  if (!root) return;
+  const sel = $('#pv-doc');
+  if (sel) sel.onchange = async () => {
+    PV.docId = parseInt(sel.value, 10) || 0;
+    PV.chapters = []; PV.sel = {ch:0, sec:null}; PV.arts = {}; PV.open = {};
+    await pvLoadChapters();
+  };
+  root.onclick = async (e) => {
+    const el = e.target.closest('[data-pvact]');
+    if (!el) return;
+    const act = el.getAttribute('data-pvact');
+    const chNo = parseInt(el.getAttribute('data-ch') || '0', 10);
+    const ch = PV.chapters.find(c => c.no === chNo);
+    if (act === 'toggle'){
+      if (!ch) return;
+      PV.open[chNo] = !PV.open[chNo];
+      if (ch.no !== PV.sel.ch){ PV.sel = {ch:ch.no, sec:null}; }
+      if (PV.open[chNo] && (ch.preview || {}).exists && !PV.arts[pvKeyOf(chNo)]){
+        await pvEnsureArt(chNo);
+        const art = PV.arts[pvKeyOf(chNo)];
+        if (art && art.ok && art.sections.length && PV.sel.sec == null) PV.sel.sec = 0;
+      }
+      pvRender();
+    } else if (act === 'view'){
+      if (!ch) return;
+      PV.open[chNo] = true;
+      if (!PV.arts[pvKeyOf(chNo)]) await pvEnsureArt(chNo);
+      const art = PV.arts[pvKeyOf(chNo)];
+      PV.sel = {ch:chNo, sec: (art && art.ok && art.sections.length) ? 0 : null};
+      PV.mobile = true;
+      pvRender();
+    } else if (act === 'overview'){
+      PV.sel = {ch:chNo, sec:null};
+      PV.open[chNo] = true;
+      if (!PV.arts[pvKeyOf(chNo)]) await pvEnsureArt(chNo);
+      PV.mobile = true;
+      pvRender();
+    } else if (act === 'sec'){
+      const i = parseInt(el.getAttribute('data-i') || '0', 10);
+      PV.sel = {ch:chNo, sec:i};
+      PV.open[chNo] = true;
+      PV.mobile = true;
+      if (!PV.arts[pvKeyOf(chNo)]) await pvEnsureArt(chNo);
+      pvRender();
+    } else if (act === 'back'){
+      PV.mobile = false;
+      pvRender();
+    } else if (act === 'gen'){
+      await pvStart(chNo, false);
+    } else if (act === 'regen'){
+      await pvStart(chNo, true);
+    }
+  };
+}
+
+// 生成：先 estimate（dry-run，0 调用 0 写盘）→ 确认框（先看钱）→ 启动 → 轮询进度
+async function pvStart(chNo, force){
+  if (PV.busy[chNo]) return;
+  PV.busy[chNo] = true;
+  pvRender();
+  try {
+    const est = await api('/api/preview/estimate?doc_id=' + encodeURIComponent(PV.docId) +
+                          '&chapter=' + encodeURIComponent(chNo));
+    if (est.ok === false){
+      toast('估算失败：' + (est.error || '未知原因'));
+      return;
+    }
+    const calls = Number(est.calls || est.est_calls || 1);
+    const cost = Number(est.cost_cny_max != null ? est.cost_cny_max : (est.est_cost_cny || 0));
+    const pages = Number(est.n_pages || est.pages || 0);
+    const costTxt = cost > 0 ? ('≤¥' + cost.toFixed(4)) : '无法估算（按实际计）';
+    const lines = [
+      '预计 ' + calls + ' 次调用｜成本上界 ' + costTxt + '｜章 ' + (pages ? (pages + ' 页') : '若干页'),
+      '模型：' + (est.model || '默认配置') + (est.page_label ? '｜' + est.page_label : ''),
+      force ? '⚠ 这一章已有产物：重新预习会覆盖（旧产物会先备份）。' : '',
+      est.skip_would_happen ? '产物与材料都没变，后端可能直接跳过（0 调用、0 花费）。' : '',
+      '确认后才开始调用外接大模型。'
+    ].filter(Boolean);
+    const ok = await confirmBox(force ? '重新预习这一章？' : '现在预习这一章？', lines.join('\n'));
+    if (!ok) return;
+    const r = await api('/api/preview/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: PV.docId, chapter: chNo, force: !!force})});
+    if (!r.started){
+      toast('没能开始：' + (r.error || '未知原因'));
+      if (r.hint) toast(r.hint);
+      return;
+    }
+    toast('已开始预习，生成中…');
+    pvWatchProgress();
+  } catch(e){
+    toast('启动失败：' + e.message);
+  } finally {
+    PV.busy[chNo] = false;
+    pvRender();
+  }
+}
+
+function pvWatchProgress(){
+  if (PV.timer) return;
+  const tick = async () => {
+    if (!$('#view') || !document.querySelector('.pv-wrap')){
+      clearInterval(PV.timer); PV.timer = null; return;   // 离开页面就停
+    }
+    try {
+      const p = await api('/api/preview/progress');
+      PV.prog = p;
+      renderProgress(p, '#pv-progress');
+      if (!p || !p.active){
+        clearInterval(PV.timer); PV.timer = null;
+        const done = p && p.status === 'done';
+        if (done) toast('预习完成：第' + (p.chapter || '') + '章已生成' + (p.cost_cny ? ' · CNY' + Number(p.cost_cny).toFixed(4) : ''));
+        else if (p && p.status === 'failed') toast('预习失败：' + (p.error || '未知原因'));
+        // 刷新章节状态，并自动选中刚生成的章
+        await pvLoadChapters();
+        const lastCh = parseInt(String(p && p.chapter || '').replace(/[^0-9]/g, ''), 10);
+        if (done && lastCh && PV.chapters.some(c => c.no === lastCh)){
+          PV.sel = {ch: lastCh, sec: null};
+          PV.open[lastCh] = true;
+          await pvEnsureArt(lastCh);
+          const art = PV.arts[pvKeyOf(lastCh)];
+          if (art && art.ok && art.sections.length) PV.sel.sec = 0;
+          pvRender();
+        }
+      } else {
+        pvRender();
+      }
+    } catch(e){
+      clearInterval(PV.timer); PV.timer = null;
+    }
+  };
+  tick();
+  PV.timer = setInterval(tick, 800);
+}
+
+async function pvReload(){
+  PV.arts = {};
+  await pvLoadOptions();
+  toast('已刷新章节与产物状态');
+}
+function PVTOSET(){
+  SET_TAB = 'preview';
+  openSettings();
+}
+
 
 // ---------------- 笔记 ----------------
+
 // 人拍板（卡 C-0052）：「笔记页签用来收集在知识点窗口和对整个课件提问和总结时
+
 // 产出的笔记。笔记条目要带有记录的时间和来源。点进条目后不光可以看到笔记原文，
+
 // 还可以按按钮跳转出绑定了该笔记的知识点窗口。」
+
 //
+
 // 时间与来源都在笔记文件的 front-matter 里（created / origin / kp_id / doc_id /
+
 // source_label，格式见 core/study.py::save_note 的头注释），这里只负责显示与跳转。
+
 // **不猜来源**：老笔记没有这些键就写"—"，绝不替它安一个"来自某个知识点"。
+
 const NOTE_ORIGIN_LABEL = {knowledge_point: '知识点窗口', deck_chat: '课件问答'};
 
+
+
 function noteSourceText(n){
+
   return (n && (n.source_label || NOTE_ORIGIN_LABEL[n.origin])) || '—';
+
 }
+
+
 
 async function viewNotes(){
+
   const {notes} = await api('/api/notes');
+
   if (!notes.length){
+
     $('#view').innerHTML = `<div class="empty">还没有笔记。<br>
+
       <span class="small">笔记会一直留在这里，下次打开还能看。<br>
+
       在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。</span><br>
+
       <button class="act" id="nt-go-kps">去「知识点」页</button></div>`;
+
     const b = $('#nt-go-kps');
+
     if (b) b.onclick = () => go('kps');
+
     return;
+
   }
+
   const rows = notes.map(n => {
+
     const canJump = !!(n.kp_id && n.doc_id);
+
     return `<tr>
+
       <td><a href="#" data-note="${esc(n.file)}">${esc(n.title)}</a></td>
+
       <td class="small">${esc(noteSourceText(n))}${canJump ? `<br>
+
         <button class="ghost" style="margin-top:4px" data-jump="${esc(n.doc_id)}"
+
           data-kp="${esc(n.kp_id)}"
+
           title="打开绑定了这条笔记的知识点窗口">跳到知识点窗口</button>` : ''}</td>
+
       <td class="small muted">${esc(fmtTime(n.created || n.mtime))}</td>
+
       <td class="small">${n.chars}</td>
+
       <td class="small muted">${esc(n.file)}</td></tr>`;
+
   }).join('');
+
   $('#view').innerHTML = `
+
     <div class="card"><h2>笔记 · ${notes.length} 篇</h2>
+
       <div class="small muted" style="margin-bottom:8px">
+
         时间 = 这条笔记<b>记下的时刻</b>（front-matter 的 created；老笔记回落到文件
+
         修改时间）· 来源 = 从哪个知识点窗口写的，或是哪份课件的 AI 答疑。</div>
+
     <table><thead><tr><th>标题</th><th>来源</th><th>记录时间</th><th>字数</th>
+
       <th>文件</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+
   $('#view').querySelectorAll('a[data-note]').forEach(a => {
+
     a.onclick = e => { e.preventDefault(); openNote(a.dataset.note); };
+
   });
+
   $('#view').querySelectorAll('button[data-jump]').forEach(b => {
+
     b.onclick = () => mmJumpToKp(parseInt(b.dataset.jump), b.dataset.kp, '');
+
   });
+
 }
+
+
 
 async function openNote(name){
+
   const d = await api('/api/note?name='+encodeURIComponent(name));
+
   if (d.error){ toast('读不到这篇笔记：' + d.error); return; }
+
   const n = d.note || {};
+
   // 「跳到知识点窗口」只在**真的绑定了知识点**时给：课件问答笔记本来就不属于
+
   // 任何一条知识点（没有 kp_id），给它一个跳不过去的按钮比不给更坏。
+
   const canJump = !!(n.kp_id && n.doc_id);
+
   // 卡 C-0082：正文显示的是 `body`——**只有人自己写进去的那部分**
+
   // （剥掉 front-matter、自动生成的一级标题、「## 出处」段，见
+
   // `core/study.py::note_body`）。后端没给 body 时回落 `content`（原文），
+
   // 宁可多显示几行机器壳，也不能显示成空白。
+
   // 渲染方式刻意不动：仍是 `esc()` + CSS `white-space:pre-wrap`（`.note-body`），
+
   // 换取值就够，别顺手改成 mdToHtml——那会给自己开一个注入面。
+
   modal(`<h2>${esc(n.title || name)}</h2>
+
     <div class="small muted">${esc(n.file || '')} ·
+
       记录时间 ${esc(fmtTime(n.created || n.mtime))} ·
+
       来源 ${esc(noteSourceText(n))}${n.question ? ' · 问：' + esc(n.question) : ''}${
+
       (n.tags || []).length ? ' · 标签 ' + esc(n.tags.join(' / ')) : ''}</div>
+
     <div class="note-body">${esc(d.body ?? d.content ?? '')}</div>
+
     <div class="row" style="margin-top:14px">
+
       ${canJump ? `<button class="act" id="note-jump">跳到知识点窗口（${
+
         esc(n.kp_id)}）</button>` : ''}
+
       <button class="ghost" onclick="closeModal()">关闭</button></div>`);
+
   const jb = $('#note-jump');
+
   if (jb) jb.onclick = () => mmJumpToKp(parseInt(n.doc_id), n.kp_id, n.title || '');
+
 }
 
+
+
 // ---------------- 检索 ----------------
 async function doSearch(q){
   const d = await api('/api/search?q='+encodeURIComponent(q)+'&k=8');
@@ -7646,30 +8278,361 @@ def api_kp_detail(conn, kp_id):
     return {'kp': kp}
 
 
-def api_graph(conn):
-    """知识点图谱：节点 + 依赖边。
+# ---------------- 预习（task-24）：教材按章 + 小节查看器 后端胶水 ----------------
+# 真正的模型调用/产物读写都在 `core/preview.py`（另一位智能体并行重写）。这里只做：
+#   ① 从 DB 取教材与章（零模型）；② 把产物状态归一成前端要的形状；
+#   ③ 转调 preview 的新函数；后端还没就绪时**防御式降级**（不 500、不阻塞 HTTP）。
+# 所有接口错误一律 200/400 带 `ok:false` + `error`（人话）。
 
-    节点带掌握度，前端据此上色；边区分 prereq（前置）与 related（相关）。
-    M0-5：`mastery` 与其他接口同口径（`study.compute_mastery` 现算，不写库），
-    否则列表里 32% 的节点在图谱上还是全红。
+
+def _preview_mod():
+    from core import preview as _pm
+    return _pm
+
+
+def _preview_enabled_state():
+    """开关状态：`{enabled, hint, switch}`；后端坏了也不 500。"""
+    try:
+        st = _preview_mod().enabled_state()
+        if isinstance(st, dict):
+            return {"enabled": bool(st.get("enabled")),
+                    "hint": str(st.get("hint") or ""),
+                    "switch": str(st.get("switch") or "PREVIEW_ENABLED")}
+    except Exception as e:  # noqa: BLE001
+        return {"enabled": False, "switch": "PREVIEW_ENABLED",
+                "hint": "预习后端还没就绪（%s）。稍后回来再试。" % e}
+    return {"enabled": False, "switch": "PREVIEW_ENABLED", "hint": ""}
+
+
+def _preview_pages_label(ch):
+    """页码范围 → `p.19–p.39`（与其它页一致的中文写法）。"""
+    a, b = ch.get("page_start"), ch.get("page_end")
+    if a and b and int(a) != int(b):
+        return "p.%d–p.%d" % (int(a), int(b))
+    if a:
+        return "p.%d" % int(a)
+    return ""
+
+
+def _preview_artifact_candidates(doc_id, chapter_no):
+    """多章产物路径候选（新命名优先，兼容旧单文件）。只读，不写盘。"""
+    base = Path(config.LOG_DIR) / "knowledge"
+    no = int(chapter_no or 0)
+    cands = [
+        base / ("%d-预习总结-第%d章.json" % (int(doc_id), no)),
+    ]
+    if no:
+        cands += sorted(base.glob("%d-预习总结-第%d章*.json" % (int(doc_id), no)))
+    cands.append(base / ("%d-预习总结.json" % int(doc_id)))
+    seen, out = set(), []
+    for p in cands:
+        s = str(p)
+        if s not in seen:
+            seen.add(s)
+            out.append(p)
+    return out
+
+
+def _preview_read_artifact_file(doc_id, chapter_no):
+    """读某章产物文件并归一（后端 `read_preview_artifact` 未就绪时的兜底）。"""
+    for p in _preview_artifact_candidates(doc_id, chapter_no):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        # 旧单文件是"一份一份"的：章号对不上就跳过
+        if p.name.endswith("%d-预习总结.json" % int(doc_id)):
+            m_ch = int(meta.get("chapter_no") or 0)
+            if chapter_no and m_ch and m_ch != int(chapter_no):
+                continue
+        return {"data": data, "path": str(p), "meta": meta}
+    return None
+
+
+def _preview_empty_status():
+    return {"exists": False, "status": "", "n_subsections": 0,
+            "cost_cny": 0.0, "generated_at": "", "is_current_version": False,
+            "legacy": False}
+
+
+def _preview_status_map(doc_id):
+    """这份教材**每一章**的产物状态：`{chapter_no: {...}}`。
+
+    优先后端 v2 的 `preview.preview_status(doc_id)`（一次扫描、返回整份教材的章号字典）；
+    老版本 / 未就绪时退回逐个产物文件判定。零模型、零写入。
     """
-    kps = conn.execute(
-        'SELECT id, name, subject, mastery, reps, lapses, interval_days\n           FROM knowledge_points ORDER BY id'
-    ).fetchall()
-    edges = conn.execute(
-        'SELECT src_id, dst_id, kind FROM kp_edges'
-    ).fetchall()
-    nodes = []
-    for r in kps:
-        d = dict(r)
-        d['mastery'] = study.compute_mastery(r)
-        nodes.append(d)
+    doc_id = int(doc_id or 0)
+    fn = getattr(_preview_mod(), "preview_status", None)
+    if callable(fn):
+        try:
+            st = fn(doc_id)
+        except Exception:  # noqa: BLE001
+            st = None
+        if isinstance(st, dict):
+            out = {}
+            for k, v in st.items():
+                if str(k).startswith("_") or not isinstance(v, dict):
+                    continue
+                try:
+                    no = int(k)
+                except (TypeError, ValueError):
+                    continue
+                exists = bool(v.get("exists"))
+                out[no] = {
+                    "exists": exists,
+                    "status": str(v.get("status") or ("done" if exists else "")),
+                    "n_subsections": int(v.get("n_subsections")
+                                         or v.get("n_sections") or 0),
+                    "cost_cny": round(float(v.get("cost_cny") or 0), 6),
+                    "generated_at": str(v.get("generated_at") or ""),
+                    "is_current_version": bool(v.get("is_current_version")),
+                    "legacy": False,
+                }
+            old = st.get("_old_single")
+            if isinstance(old, dict) and old.get("exists"):
+                no = int(old.get("chapter_no") or 0)
+                if no and no not in out:
+                    out[no] = {
+                        "exists": True,
+                        "status": str(old.get("status") or "done"),
+                        "n_subsections": 0,
+                        "cost_cny": round(float(old.get("cost_cny") or 0), 6),
+                        "generated_at": str(old.get("generated_at") or ""),
+                        "is_current_version": bool(old.get("is_current_version")),
+                        "legacy": True,
+                    }
+            return out
+    # 兜底：按产物文件命名扫一遍（新按章文件优先）
+    out = {}
+    base = Path(config.LOG_DIR) / "knowledge"
+    try:
+        files = sorted(base.glob("%d-预习总结-第*章.json" % doc_id))
+    except OSError:
+        files = []
+    for p in files:
+        m = re.match(r"^%d-预习总结-第(\d+)章\.json$" % doc_id, p.name)
+        if not m:
+            continue
+        hit = _preview_read_artifact_file(doc_id, int(m.group(1)))
+        if not hit:
+            continue
+        data = hit["data"]
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        subs = data.get("subsections") if isinstance(data.get("subsections"), list) else []
+        out[int(m.group(1))] = {
+            "exists": True, "status": str(meta.get("status") or "done"),
+            "n_subsections": len(subs),
+            "cost_cny": round(float(meta.get("cost_cny") or 0), 6),
+            "generated_at": str(meta.get("generated_at") or ""),
+            "is_current_version": bool(meta.get("preview_version")),
+            "legacy": False,
+        }
+    return out
+
+
+def _preview_list_chapters(doc_id):
+    """列章（零模型）：优先后端新 `list_chapters`，报错原样带回。"""
+    fn = getattr(_preview_mod(), "list_chapters", None)
+    if not callable(fn):
+        return {"ok": False, "error": "预习后端还没就绪（缺 list_chapters）"}
+    try:
+        r = fn(int(doc_id))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "列出章节失败：%s" % e}
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "列出章节失败：后端返回异常"}
+    return r
+
+
+def api_preview_options(conn):
+    """教材列表（只列 role='textbook'）：选项 + 每份的章数 / 是否已有预习。"""
+    en = _preview_enabled_state()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, kind, role FROM documents "
+            "WHERE role='textbook' ORDER BY id"
+        ).fetchall()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "读教材列表失败：%s" % e,
+                "enabled": en, "textbooks": []}
+    docs = []
+    for r in rows:
+        did = int(r["id"] if hasattr(r, "keys") else r[0])
+        title = r["title"] if hasattr(r, "keys") else r[1]
+        kind = r["kind"] if hasattr(r, "keys") else r[2]
+        role = r["role"] if hasattr(r, "keys") else r[3]
+        lc = _preview_list_chapters(did)
+        chs = lc.get("chapters") or []
+        st_map = _preview_status_map(did)
+        has = any(v.get("exists") for v in st_map.values())
+        docs.append({
+            "doc_id": did, "title": str(title or ""),
+            "kind": str(kind or ""), "role": str(role or "textbook"),
+            "n_chapters": int(len(chs) if lc.get("ok") else 0),
+            "has_preview": has,
+        })
+    return {"ok": True, "enabled": en, "textbooks": docs}
+
+
+def api_preview_chapters(conn, doc_id):
+    """章节目录（含每章产物状态）：前端左栏章节目录的数据源。"""
+    doc_id = int(doc_id or 0)
+    if doc_id <= 0:
+        return {"ok": False, "doc_id": 0, "error": "缺少 doc_id", "chapters": []}
+    lc = _preview_list_chapters(doc_id)
+    if not lc.get("ok"):
+        return {"ok": False, "doc_id": doc_id,
+                "error": str(lc.get("error") or "这份教材列不出章节"),
+                "enabled": _preview_enabled_state(), "chapters": []}
+    chapters = []
+    st_map = _preview_status_map(doc_id)
+    for ch in (lc.get("chapters") or []):
+        no = int(ch.get("no") or 0)
+        item = {
+            "no": no,
+            "name": str(ch.get("name") or ""),
+            "heading_path": str(ch.get("heading_path") or ""),
+            "page_start": ch.get("page_start"),
+            "page_end": ch.get("page_end"),
+            "page_label": _preview_pages_label(ch),
+            "n_blocks": int(ch.get("n_blocks") or 0),
+            "n_sections": int(ch.get("n_sections") or 0),
+            "preview": st_map.get(no) or _preview_empty_status(),
+        }
+        chapters.append(item)
+    title = str(lc.get("title") or "")
+    if not title:
+        try:
+            row = conn.execute("SELECT title FROM documents WHERE id=?",
+                               (doc_id,)).fetchone()
+            title = str((row["title"] if row else "") or "")
+        except Exception:  # noqa: BLE001
+            title = ""
+    return {"ok": True, "doc_id": doc_id, "title": title,
+            "enabled": _preview_enabled_state(), "chapters": chapters}
+
+
+def api_preview_estimate(doc_id, chapter):
+    """dry-run 估价（0 调用、0 写盘）：前端"先看钱再跑"的确认框数据。"""
+    try:
+        doc_id, chapter = int(doc_id or 0), int(chapter or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id/chapter 必须是整数"}
+    fn = getattr(_preview_mod(), "estimate_preview", None)
+    if not callable(fn):
+        return {"ok": False, "error": "预习后端还没就绪（缺 estimate_preview）"}
+    try:
+        est = fn(doc_id, chapter)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "估算失败：%s" % e}
+    if not isinstance(est, dict):
+        return {"ok": False, "error": "估算失败：后端返回异常"}
+    if est.get("ok") is False:
+        return {"ok": False, "error": str(est.get("error") or "估算失败"),
+                "doc_id": doc_id, "chapter": chapter}
+    pages = est.get("pages") or []
+    n_pages = int(est.get("n_pages") or len(pages) or 0)
     return {
-        "nodes": nodes,
-        "edges": [dict(r) for r in edges],
+        "ok": True, "doc_id": doc_id, "chapter": chapter,
+        "chapter_no": int(est.get("chapter_no") or chapter),
+        "chapter_name": str(est.get("chapter_name") or ""),
+        "chapter": str(est.get("chapter") or ""),
+        "page_label": str(est.get("page_label") or ""),
+        "n_pages": n_pages,
+        "calls": int(est.get("est_calls") or est.get("calls") or 1),
+        "cost_cny_max": round(float(est.get("est_cost_cny")
+                                    or est.get("cost_cny_max") or 0), 6),
+        "est_tokens_in": int(est.get("est_tokens_in") or 0),
+        "est_tokens_out": int(est.get("est_tokens_out") or 0),
+        "model": str(est.get("model") or ""),
+        "enabled": bool(est.get("enabled")),
+        "skip_would_happen": bool(est.get("skip_would_happen")),
+        "exists": bool(est.get("exists") or (est.get("prev") or {}).get("exists")),
+        "est_rule": str(est.get("est_rule") or ""),
     }
 
 
+def api_preview_start(payload):
+    """起后台预习任务：不阻塞 HTTP；不启用/已有任务时如实返回。"""
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+        chapter = int(payload.get("chapter") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "started": False, "error": "doc_id/chapter 必须是整数"}
+    if doc_id <= 0 or chapter <= 0:
+        return {"ok": False, "started": False, "error": "缺少 doc_id 或 chapter"}
+    force = bool(payload.get("force"))
+    fn = getattr(_preview_mod(), "start_background", None)
+    if not callable(fn):
+        return {"ok": False, "started": False,
+                "error": "预习后端还没就绪（缺 start_background）",
+                "hint": "后端智能体完成后即可在这里生成；联调由 Lead 统一做。"}
+    try:
+        try:
+            r = fn(doc_id, chapter, force=True) if force else fn(doc_id, chapter)
+        except TypeError:
+            r = fn(doc_id, chapter)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "started": False, "error": "启动失败：%s" % e}
+    if not isinstance(r, dict):
+        return {"ok": False, "started": False, "error": "启动失败：后端返回异常"}
+    return {"ok": True, "started": bool(r.get("started")),
+            "error": str(r.get("error") or ""),
+            "hint": str(r.get("hint") or "")}
+
+
+def api_preview_progress():
+    """进度快照（与 kp-build 同构，前端复用 renderProgress）。"""
+    fn = getattr(_preview_mod(), "progress_snapshot", None)
+    if not callable(fn):
+        return {"kind": "preview", "active": False, "status": "",
+                "error": "预习后端还没就绪（缺 progress_snapshot）"}
+    try:
+        p = fn()
+    except Exception as e:  # noqa: BLE001
+        return {"kind": "preview", "active": False, "status": "", "error": str(e)}
+    return p if isinstance(p, dict) else {"kind": "preview", "active": False,
+                                          "status": ""}
+
+
+def api_preview_doc(doc_id, chapter):
+    """读某章预习产物（查看器数据）：优先后端 new API，读不到用产物文件兜底。"""
+    try:
+        doc_id, chapter = int(doc_id or 0), int(chapter or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id/chapter 必须是整数"}
+    if doc_id <= 0 or chapter <= 0:
+        return {"ok": False, "error": "缺少 doc_id 或 chapter"}
+    fn = getattr(_preview_mod(), "read_preview_artifact", None)
+    if callable(fn):
+        for args in ((doc_id, chapter), (doc_id, chapter, None)):
+            try:
+                r = fn(*args)
+            except TypeError:
+                continue
+            except Exception:  # noqa: BLE001
+                r = None
+            if isinstance(r, dict):
+                if r.get("ok") is False:
+                    return {"ok": False, "error": str(r.get("error") or "读不到产物")}
+                art = r.get("artifact") if isinstance(r.get("artifact"), dict) else r
+                meta = art.get("meta") if isinstance(art.get("meta"), dict) else {}
+                return {"ok": True, "doc_id": doc_id, "chapter_no": chapter,
+                        "artifact": art,
+                        "legacy": bool(r.get("legacy") or meta.get("legacy")),
+                        "is_current_version": bool(r.get("is_current_version")),
+                        "warnings": list(meta.get("warnings") or [])}
+            break
+    hit = _preview_read_artifact_file(doc_id, chapter)
+    if not hit:
+        return {"ok": False, "error": "这一章还没有预习产物（先点「预习本章」生成）"}
+    return {"ok": True, "doc_id": doc_id, "chapter_no": chapter,
+            "artifact": hit["data"], "source": hit["path"]}
+
+
 def _outline_dir():
     return Path(config.LOG_DIR) / 'outline'
 
@@ -12961,6 +13924,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(progress_mod.snapshot())
             if path == "/api/kp-build/progress":
                 return self._json(api_kp_build_progress())
+            # 预习进度（task-24）：与 kp-build 同构；必须进锁之前，否则生成中读不到进度
+            if path == "/api/preview/progress":
+                return self._json(api_preview_progress())
             if path == "/api/ingest/batch/progress":
                 return self._json(pool_mod.snapshot(qs.get("batch") or None))
             if path == "/api/kp-build/batch/progress":
@@ -13026,8 +13992,19 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(api_deck_calendar(conn, qs.get("ym", "")))
                     if path == "/api/mistakes":
                         return self._json(api_mistakes(conn))
-                    if path == "/api/graph":
-                        return self._json(api_graph(conn))
+                    # ---------------- 预习（task-24） ----------------
+                    # 章节/产物状态都来自只读 DB + 产物文件，零模型调用。
+                    if path == "/api/preview/options":
+                        return self._json(api_preview_options(conn))
+                    if path == "/api/preview/chapters":
+                        return self._json(api_preview_chapters(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
+                    if path == "/api/preview/estimate":
+                        return self._json(api_preview_estimate(
+                            qs.get("doc_id"), qs.get("chapter")))
+                    if path == "/api/preview/doc":
+                        return self._json(api_preview_doc(
+                            qs.get("doc_id"), qs.get("chapter")))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -13167,6 +14144,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api_kp_build_batch_cancel(payload))
             if u.path == "/api/kp-build/clear":
                 return self._json(api_kp_clear(payload))
+
+            # ---------------- 预习（task-24） ----------------
+            # 起后台线程跑 core/preview.py，HTTP 立刻返回；进度走 /api/preview/progress。
+            if u.path == "/api/preview/start":
+                return self._json(api_preview_start(payload))
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":

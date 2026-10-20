@@ -48,8 +48,6 @@ MATRIX = [
          priority="P1", tests=["test_deck_calendar"], evidence="json"),
     dict(id="F19", feature="错题本列表与统计", entry="GET /api/mistakes", kind="read",
          priority="P1", tests=["test_mistakes"], evidence="json"),
-    dict(id="F20", feature="知识点依赖图谱", entry="GET /api/graph", kind="read", priority="P2",
-         tests=["test_graph"], evidence="json"),
     dict(id="F21", feature="思维导图数据", entry="GET /api/mindmap?doc_id=", kind="read",
          priority="P1", tests=["test_mindmap"], evidence="json"),
     dict(id="F22", feature="名词解释产物状态", entry="GET /api/terms?doc_id=", kind="read",
@@ -79,7 +77,7 @@ MATRIX = [
          priority="P1", tests=["test_chat_status"], evidence="json"),
 
     # ---------------- 写操作（仅临时副本） ----------------
-    dict(id="F40", feature="知识点新建/详情/图谱联动", entry="POST /api/kp", kind="write",
+    dict(id="F40", feature="知识点新建/详情联动", entry="POST /api/kp", kind="write",
          priority="P0", tests=["test_kp_create"], evidence="json+db"),
     dict(id="F41", feature="复习评分与统计联动", entry="POST /api/review", kind="write",
          priority="P0", tests=["test_review"], evidence="json"),
@@ -183,6 +181,12 @@ MATRIX = [
     dict(id="F108", feature="设置中心改版（5 管线分组/入库方式突出/搜索/未保存计数/响应式）",
          entry="⚙ 设置中心（前端）", kind="ui", priority="P1",
          tests=["test_16_settings_ui"], evidence="json+shot"),
+    dict(id="F109", feature="预习后端 v2（教材按章多产物 / 小节 schema / 新提示词）",
+         entry="core/preview.py::build_chapter_preview + CLI preview_build", kind="read",
+         priority="P1", tests=["test_17_preview_core"], evidence="json"),
+    dict(id="F110", feature="预习页签（图谱下线 / 章节目录可收起 / 每章预习按钮 / 左树右文查看器）",
+         entry="预习页 + /api/preview/{options,chapters,estimate,progress,doc} + POST /api/preview/start",
+         kind="ui", priority="P1", tests=["test_18_preview_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
@@ -249,15 +253,15 @@ FIXED_BUGS = [
     ),
     dict(
         id="BUG-5", severity="中", matrix_refs=["F99"],
-        title="掌握度四处口径不一致（列表/图谱恒 0%，详情/总览 11–32%）",
-        symptom="同一知识点：/api/kps、/api/graph 返回 mastery=0.0；/api/kp?id= 与 /api/stats 返回 "
+        title="掌握度多处口径不一致（列表恒 0%，详情/总览 11–32%）",
+        symptom="同一知识点：/api/kps 返回 mastery=0.0；/api/kp?id= 与 /api/stats 返回 "
                 "compute_mastery 结果（0.1144/0.3246）；界面同屏 toast 13% 与列表 0% 矛盾。",
-        root_cause="api_kps / api_graph 直接读库列 mastery（评分流程不写该列），"
+        root_cause="api_kps 直接读库列 mastery（评分流程不写该列），"
                    "而详情/总览用 core/study.compute_mastery(row) 现算。",
-        impact="知识点排序、图谱着色、掌握度可视化全部失真，学生不信任数据。",
+        impact="知识点排序、掌握度可视化全部失真，学生不信任数据。",
         fixed_in="M0 wave1（2026-10-18，本批合并提交）",
-        fix_summary="api_kps / api_graph 改用 study.compute_mastery(row) 现算（不写库）；列表排序移到 Python 侧。",
-        verify=("回归用例：test_08_dashboard_fixes.py::TestM0Mastery（四处 spread=0 断言）\n"
+        fix_summary="api_kps 改用 study.compute_mastery(row) 现算（不写库）；列表排序移到 Python 侧。",
+        verify=("回归用例：test_08_dashboard_fixes.py::TestM0Mastery（三处 spread=0 断言；图谱页已下线）\n"
                 "_work/m0/dash/report.md §3 M0-5"),
         repro="venv\\Scripts\\python.exe -X utf8 tests\\run_all.py --only test_08_dashboard_fixes",
     ),

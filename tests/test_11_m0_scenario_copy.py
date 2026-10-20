@@ -104,7 +104,6 @@ class TestCopyCleanup(unittest.TestCase):
     def test_empty_state_cta_buttons(self):
         """空态仍有真实可点主按钮（id 存在且绑了真实动作）。"""
         ctas = {
-            "gr-go-kps": "去「知识点」页（图谱空态）",
             "nt-go-kps": "去「知识点」页（笔记空态）",
             "rv-go-kps": "去「知识点」页（复习空态）",
             "ov-go-review": "去「复习」开始（总览空态）",

@@ -56,10 +56,10 @@ def _create_kp(name, **extra):
 
 
 class TestM0Mastery(unittest.TestCase):
-    """M0-5（回退后保留）：掌握度四处同口径、列表排序、不写库列。"""
+    """M0-5（回退后保留）：掌握度多处同口径、列表排序、不写库列。"""
 
     def test_mastery_consistent_across_surfaces(self):
-        """评分 5 后 /api/kps、/api/kp?id=、/api/graph、/api/stats 四处差值 ≤0.01。"""
+        """评分 5 后 /api/kps、/api/kp?id=、/api/stats 三处差值 ≤0.01（图谱页已下线）。"""
         kp_id = _create_kp("M0-5-掌握度口径知识点")
         st, r = _post("/api/review", {"kp_id": kp_id, "grade": 5})
         self.assertEqual(st, 200, f"评分接口返回 {st}: {r}")
@@ -69,21 +69,18 @@ class TestM0Mastery(unittest.TestCase):
         m_list = next(k["mastery"] for k in _get("/api/kps")["knowledge_points"]
                       if k["id"] == kp_id)
         m_detail = _get("/api/kp", id=kp_id)["kp"]["mastery"]
-        graph = _get("/api/graph")
-        m_graph = next(n["mastery"] for n in graph["nodes"] if n["id"] == kp_id)
         stats = _get("/api/stats")
         m_stats = next((w["mastery"] for w in (stats.get("weakest") or [])
                         if w["id"] == kp_id), None)
         self.assertIsNotNone(m_stats, "/api/stats 的 weakest 应包含刚评分的知识点")
 
         values = {"review": m_review, "kps": m_list, "kp_detail": m_detail,
-                  "graph": m_graph, "stats": m_stats}
+                  "stats": m_stats}
         spread = max(values.values()) - min(values.values())
         self.assertLessEqual(spread, 0.01,
-                             f"同一 KP 掌握度四处口径不一致（差 {spread:.4f}）：{values}")
+                             f"同一 KP 掌握度多处口径不一致（差 {spread:.4f}）：{values}")
         self.assertGreater(m_list, 0.0,
                            "/api/kps 不再返回库里恒为 0 的 mastery 列")
-        self.assertGreater(m_graph, 0.0, "/api/graph 节点掌握度应同步")
 
         # 不写库：库列 mastery 保持原值（0），接口是"现算"而不是回写
         with sqlite3.connect(str(_MAIN_DB)) as c:

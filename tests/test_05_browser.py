@@ -41,7 +41,7 @@ class TestBrowser(unittest.TestCase):
         self.assertIn("<title>学习看板 · study_agent</title>", _DOM)
         # 静态 HTML 里 nav 是空的；这些标记只有 JS 执行后才会出现
         self.assertIn('data-v="assistant"', _DOM, "导航未渲染：前端 JS 可能报错/未执行")
-        for label in ("问答", "总览", "复习", "图谱", "资料", "知识点", "错题", "笔记"):
+        for label in ("问答", "总览", "复习", "预习", "资料", "知识点", "错题", "笔记"):
             self.assertIn(label, _DOM, f"主界面缺页签：{label}")
         # 学科切换器与搜索框也来自页面骨架 + JS 填充
         self.assertIn('id="subj-name"', _DOM)

@@ -1,4 +1,4 @@
-"""只读 API 覆盖：文档/检索/知识点/复习/图谱/预导/分享/学科/设置。
+"""只读 API 覆盖：文档/检索/知识点/复习/思维导图/预导/分享/学科/设置。
 
 被测实例使用真实库的**副本**（main.db 来自 subjects/生药药动，含 3 文档/1135 切块）。
 所有断言只看「接口是否按约定返回数据」，不在只读模块里做任何写操作。
@@ -120,12 +120,6 @@ class TestReadApi(unittest.TestCase):
         d = self._ok("/api/mistakes")
         self.assertEqual(d["mistakes"], [])
         self.assertEqual(d["stats"]["total"], 0)
-
-    def test_graph(self):
-        """知识点依赖图谱：空库返回空 nodes/edges。"""
-        d = self._ok("/api/graph")
-        self.assertEqual(d["nodes"], [])
-        self.assertEqual(d["edges"], [])
 
     def test_mindmap(self):
         """思维导图：单文档返回 artifact 状态与树结构。"""

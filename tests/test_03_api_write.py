@@ -53,7 +53,7 @@ def _create_kp(name, **extra):
 
 class TestWriteApi(unittest.TestCase):
     def test_kp_create(self):
-        """知识点新建：写入成功、详情可读、同名 upsert 不重复、图谱联动。"""
+        """知识点新建：写入成功、详情可读、同名 upsert 不重复、列表可读。"""
         kp_id = _create_kp("验收-KP-创建")
         d = _get("/api/kp", id=kp_id)
         self.assertEqual(d["kp"]["name"], "验收-KP-创建")
@@ -61,8 +61,6 @@ class TestWriteApi(unittest.TestCase):
         # 同名再次创建 → upsert 返回同一个 id
         same = _create_kp("验收-KP-创建")
         self.assertEqual(same, kp_id, "同名知识点应 upsert 而不是新建")
-        g = _get("/api/graph")
-        self.assertIn(kp_id, {n["id"] for n in g["nodes"]})
         # 列表里能看到
         kps = _get("/api/kps")["knowledge_points"]
         self.assertIn(kp_id, {k["id"] for k in kps})

@@ -71,7 +71,9 @@ from . import kp_build
 #   （`_KP_READABLE_VERSIONS`，`dashboard.py:1544-1549`）是给「末级知识点总结」那套产物
 #   用的；预习产物不是知识点产物，混进那个版本号体系只会让"哪个白名单管哪个文件"
 #   变得含糊。这里用独立字段，看板/CLI 判"是不是本版产物"一律读它。
-PREVIEW_VERSION = "C-0094-preview-v1"
+PREVIEW_VERSION = "C-0110-preview-v2"
+PREVIEW_VERSION_LEGACY = "C-0094-preview-v1"
+PREVIEW_SCHEMA = "preview-v2"
 PREVIEW_SUFFIX = "-预习总结.json"
 PREVIEW_PROMPT_NAME = "提示词-预习总结.md"
 PREVIEW_STAGES = ("读取章节", "渲染材料", "预习总结", "写入产物")
@@ -123,8 +125,8 @@ def max_tokens() -> int:
 
 
 def enabled() -> bool:
-    """★ 默认**关闭**（`_FIELDS` 里 `PREVIEW_ENABLED` 的 default 是 0）。"""
-    return bool(_cfg_int("PREVIEW_ENABLED", 0))
+    """★ 默认**开启**（2026-10-20 用户要求可用；`_FIELDS` 的 default 已同步为 1）。"""
+    return bool(_cfg_int("PREVIEW_ENABLED", 1))
 
 
 def enabled_state() -> dict:
@@ -133,9 +135,9 @@ def enabled_state() -> dict:
     return {
         "enabled": on,
         "hint": ("预习功能已开启。" if on else
-                 "预习功能**默认关闭**：请到「设置中心 → AI 预习总结」把「开启预习功能」"
+                 "预习功能已被关闭：请到「设置中心 → AI 预习总结」把「开启预习功能」"
                  "打开（写入本机 config.local.json 的 PREVIEW_ENABLED=1）后再来。"
-                 "这条开关默认关着，是为了不让它在没人要的时候花掉调用与时间。"),
+                 "2026-10-20 起该开关默认开启；关着时入口会直接拒绝，不会静默花钱。"),
         "switch": "PREVIEW_ENABLED",
         "pipeline": "preview",
     }
@@ -146,6 +148,21 @@ def preview_out_file(doc_id: int, out_path: str | os.PathLike | None = None) -> 
     """产物路径：`<当前学科 logs>/knowledge/<doc_id>-预习总结.json`。"""
     if out_path:
         return Path(out_path)
+    return config.LOG_DIR / "knowledge" / ("%d%s" % (int(doc_id), PREVIEW_SUFFIX))
+
+
+def preview_out_file_per_chapter(doc_id: int, chapter_no: int) -> Path:
+    """**按章产物路径**：`<logs/knowledge>/<doc_id>-预习总结-第<N>章.json`。
+
+    多章并存、互不覆盖；`out_path` 显式传参时由调用方决定路径。
+    旧单文件 `<doc_id>-预习总结.json` 只保留**只读兼容**（读取时兜底）。
+    """
+    return (config.LOG_DIR / "knowledge"
+            / ("%d-预习总结-第%d章.json" % (int(doc_id), int(chapter_no))))
+
+
+def legacy_preview_out_file(doc_id: int) -> Path:
+    """旧单文件产物（C-0094-v1）的路径，**只用于只读兼容**。"""
     return config.LOG_DIR / "knowledge" / ("%d%s" % (int(doc_id), PREVIEW_SUFFIX))
 
 
@@ -269,6 +286,9 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
         "sections_artifact": {
             "read": bool(detail.get("ok")), "path": str(sections_out_file(doc_id)),
             "version": str((detail.get("meta") or {}).get("version") or ""),
+            # 缺产物时**不在这里写文件**（list 是零写入路径）；真正 build 时会自动
+            # 用 core.sections 纯本地生成（0 次模型调用，见 ensure_sections_artifact）。
+            "would_auto_build": not bool(detail.get("ok")),
             "note": detail.get("note") or "",
         },
     }
@@ -863,7 +883,18 @@ def _preview_meta(doc_id: int, info: dict, prompt: dict, est: dict, calls: list,
 # ---------------------------------------------------------------- dry-run / 产物状态
 def estimate_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None,
                      db_path=None) -> dict:
-    """dry-run：只读库里的文本，给出**调用次数（恒为 1）**与成本上界（不调模型、不写文件）。"""
+    """dry-run：只读库 → **调用次数与成本上界**（不调模型、不写文件）。
+
+    v2（2026-10-20）变化：
+
+    - 产物是**按章**文件 `logs/knowledge/<doc>-预习总结-第<N>章.json`；
+      `out_path` 默认就是它，另给 `out_path_per_chapter`（同值）与
+      `old_out_path`（旧单文件，只读兼容）。
+    - **缺《章节细目》时不写文件**：只把 `sections_would_build=True` 报出来；
+      真跑 `build_chapter_preview()` 时才会用 `core.sections` 纯本地生成
+      （0 次模型调用，见 `ensure_sections_artifact`）。
+    - 调用数恒为 **1 次/章**：无小节细分调用、无结构分析调用。
+    """
     prompt = load_preview_prompts(prompt_path)
     ch, info, material, inv, stats = read_chapter_ch(doc_id, chapter, db_path=db_path)
     if not info.get("ok"):
@@ -876,31 +907,56 @@ def estimate_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None,
     est_out = int(est_in * kp_build.REASON_RATIO) + 1200
     est_cost = round(est_in / 1e6 * kp_build.PRICE_IN * kp_build.FX
                      + est_out / 1e6 * kp_build.PRICE_OUT * kp_build.FX, 6)
-    out = preview_out_file(doc_id, out_path)
+    no = int(info.get("no") or 0)
+    legacy = legacy_preview_out_file(doc_id)
+    # 章号 0（理论上不该出现：定位不到章时 info.ok 已是 False）→ 退回旧单文件路径，
+    # 绝不生成 `第0章` 这种怪文件名。
+    path_per = preview_out_file_per_chapter(doc_id, no) if no else legacy
+    out = Path(out_path) if out_path else path_per
     prev = kp_build._load_prev(out)
+    prev_from_legacy = False
+    if not prev and legacy.exists():
+        lp = kp_build._load_prev(legacy)
+        lm = lp.get("meta") if isinstance(lp.get("meta"), dict) else {}
+        if int(lm.get("chapter_no") or 0) == no:
+            prev, prev_from_legacy = lp, True
     pmeta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+    summ = prev.get("summary") if isinstance(prev.get("summary"), dict) else {}
+    n_points = len(prev.get("subsections") or [])
+    if not n_points:
+        n_points = len([x for x in ((summ.get("key_points") or [])
+                                    if isinstance(summ.get("key_points"), list) else [])
+                        if isinstance(x, dict)])
     same = (str(pmeta.get("preview_version") or "") == PREVIEW_VERSION
-            and int(pmeta.get("chapter_no") or 0) == int(info.get("no") or 0))
+            and int(pmeta.get("chapter_no") or 0) == no)
     cur_sha = hashlib.sha256((material + "\n" + outline).encode("utf-8")).hexdigest()
     fresh = bool(same and str((pmeta.get("inputs") or {}).get("material_sha256") or "")
                  == cur_sha and str(pmeta.get("status") or "") == "done")
     return {
         "doc_id": int(doc_id), "ok": True, "preview_version": PREVIEW_VERSION,
-        "out_path": str(out), "exists": out.exists(),
+        "preview_schema": PREVIEW_SCHEMA,
+        "out_path": str(out),
+        "out_path_per_chapter": str(path_per),
+        "old_out_path": str(legacy),
+        "exists": out.exists() or prev_from_legacy,
         "title": kp_build.doc_title_v2(doc_id, db_path),
-        "chapter": "第%d章 %s" % (int(info["no"]), info.get("name") or ""),
-        "chapter_no": int(info["no"]), "chapter_name": info.get("name") or "",
+        "chapter": "第%d章 %s" % (no, info.get("name") or ""),
+        "chapter_no": no, "chapter_name": info.get("name") or "",
         "heading_path": info.get("heading_path") or "",
         "chapter_source": info.get("source") or "",
         "pages": list(info.get("pages") or []),
         "page_label": kp_build._pages_label(info.get("pages") or []),
         "n_pages": len(info.get("pages") or []), "n_blocks": int(ch.get("n_blocks") or 0),
+        "n_sections": int(sec.get("n_sections") or 0),
+        "sections_read": bool(sec.get("read")),
+        "sections_fallback": bool(sec.get("fallback")),
+        "sections_would_build": not bool(sec.get("read")),
+        "sections_source": ("卡 C-0092《章节细目》（纯正则，0 次模型调用）"
+                            if sec.get("read") else
+                            "缺《章节细目》→ build 时用 core.sections 纯本地生成"
+                            "（0 次模型调用，不伪造节）"),
         "material_chars": len(material), "material_mode": stats.get("mode"),
         "n_sources": len(inv),
-        "sections_source": "卡 C-0092《章节细目》（纯正则，0 次模型调用）",
-        "n_sections": int(sec.get("n_sections") or 0),
-        "sections_fallback": bool(sec.get("fallback")),
-        "sections_read": bool(sec.get("read")),
         "prompt_path": prompt["path"], "prompt_sha256": prompt["sha256"],
         "model": model_name(), "thinking": thinking_on(), "reasoning_effort": effort(),
         "max_tokens": max_tokens(),
@@ -908,40 +964,76 @@ def estimate_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None,
         "est_calls": 1,
         "est_calls_breakdown": {"chapter_summary": 1, "sections_regex": 0},
         "est_tokens_in": est_in, "est_tokens_out": est_out, "est_cost_cny": est_cost,
-        "est_rule": ("整章 **1 次**调用（不切段、不并发）；成本上界按 "
-                     "(输入 %d 字符 / %.1f 字符每 token) 与思考链 ≈ 输入 %s 倍 + 1200 正文估；"
-                     "真实花费见产物 meta.cost_cny（只记真账）"
+        "est_rule": ("整章 **1 次**调用（不切段、不并发；小节细分是同一份输入里的事，"
+                     "不额外调用）；成本上界按 (输入 %d 字符 / %.1f 字符每 token) 与"
+                     "思考链 ≈ 输入 %s 倍 + 1200 正文估；真实花费见产物 meta.cost_cny"
                      % (user_len, kp_build.CHARS_PER_TOKEN, kp_build.REASON_RATIO)),
         "material_sha256": cur_sha,
-        "prev": {"exists": out.exists(),
+        "prev": {"exists": out.exists() or prev_from_legacy,
+                 "path": str(out),
                  "preview_version": str(pmeta.get("preview_version") or ""),
                  "chapter_no": int(pmeta.get("chapter_no") or 0),
-                 "n_points": len([p for p in ((prev.get("summary") or {}).get("key_points")
-                                              if isinstance(prev.get("summary"), dict) else [])
-                                  or [] if isinstance(p, dict)]),
+                 "n_points": n_points,
+                 "n_subsections": len(prev.get("subsections") or []),
                  "generated_at": str(pmeta.get("generated_at") or ""),
-                 "cost_cny": float(pmeta.get("cost_cny") or 0.0)},
+                 "cost_cny": float(pmeta.get("cost_cny") or 0.0),
+                 "from_legacy_single": bool(prev_from_legacy)},
         "skip_would_happen": fresh,
-        "skip_rule": ("产物已存在、版本/章号/材料 sha256 都没变且 status=done 时，"
+        "skip_rule": ("同一章产物已存在、版本/章号/材料 sha256 都没变且 status=done 时，"
                       "force=False 直接跳过：**0 次调用、0 花费**"),
     }
 
 
 def prev_info_preview(doc_id: int, chapter=None, out_path=None) -> dict:
-    """预习产物状态（看板/CLI 判"要不要重新生成"用）。"""
-    out = preview_out_file(doc_id, out_path)
+    """预习产物状态（看板/CLI 判"要不要重新生成"用）。零模型、零写入。
+
+    `chapter` 省略 → 汇总所有按章产物；给定章 → 只报该章（优先按章文件，
+    回退旧单文件；字段与旧版尽量兼容）。
+    """
+    if chapter is None or (isinstance(chapter, str) and not chapter.strip()):
+        st = preview_status(doc_id)
+        arts = {k: v for k, v in st.items() if not str(k).startswith("_")}
+        total = round(sum(float(v.get("cost_cny") or 0) for v in arts.values()), 6)
+        return {"exists": bool(arts), "path": str(config.LOG_DIR / "knowledge"),
+                "chapters": arts, "n_chapters_with_artifact": len(arts),
+                "preview_version": PREVIEW_VERSION, "preview_schema": PREVIEW_SCHEMA,
+                "cost_cny": total, "is_current_version": bool(arts),
+                "chapter": "", "chapter_no": 0, "pages": [], "n_points": 0,
+                "n_subsections": sum(int(v.get("n_subsections") or 0)
+                                     for v in arts.values()),
+                "n_sections": 0, "generated_at": "", "cost_cny_all_calls": total,
+                "status": "done" if arts else "", "model": model_name(),
+                "reasoning_effort": effort(), "elapsed_s": 0.0}
+    want = _norm_chapter_arg(chapter)
+    no = int(want.get("no") or 0)
+    if not no:
+        info = locate_chapter(doc_id, chapter)
+        no = int(info.get("no") or 0) if info.get("ok") else 0
+    out = Path(out_path) if out_path else preview_out_file_per_chapter(doc_id, no)
     prev = kp_build._load_prev(out)
+    if not prev and no:
+        read = read_preview_artifact(doc_id, no)
+        if read.get("ok"):
+            art = read.get("artifact") or {}
+            prev = art
+            out = Path(read.get("path") or out)
     meta = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
     summ = prev.get("summary") if isinstance(prev.get("summary"), dict) else {}
+    n_points = len([x for x in ((summ.get("key_points") or [])
+                                if isinstance(summ.get("key_points"), list) else [])
+                    if isinstance(x, dict)])
     return {
-        "exists": out.exists(), "path": str(out),
+        "exists": bool(prev), "path": str(out),
         "preview_version": str(meta.get("preview_version") or ""),
         "is_current_version": str(meta.get("preview_version") or "") == PREVIEW_VERSION,
+        "legacy": bool(prev) and str(meta.get("preview_version") or "") != PREVIEW_VERSION,
         "chapter": str(meta.get("chapter") or ""),
-        "chapter_no": int(meta.get("chapter_no") or 0),
+        "chapter_no": int(meta.get("chapter_no") or no),
         "pages": list(meta.get("pages") or []),
-        "n_points": len([p for p in (summ.get("key_points") or []) if isinstance(p, dict)]),
-        "n_sections": int((meta.get("sections_regex") or {}).get("n_sections") or 0),
+        "n_points": n_points,
+        "n_subsections": len(prev.get("subsections") or []),
+        "n_sections": int((meta.get("sections_regex") or {}).get("n_sections") or 0)
+                      or int(meta.get("n_sections") or 0),
         "generated_at": str(meta.get("generated_at") or ""),
         "cost_cny": float(meta.get("cost_cny") or 0.0),
         "cost_cny_all_calls": float(meta.get("cost_cny_all_calls") or 0.0),
@@ -956,166 +1048,15 @@ def prev_info_preview(doc_id: int, chapter=None, out_path=None) -> dict:
 def build_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None, db_path=None,
                   dry_run: bool = False, force: bool = False, ignore_switch: bool = False,
                   log=print, on_progress=None) -> dict:
-    """**独立管线**：给一份教材的某一章做预习总结（整章 1 次调用）。
+    """旧名保留（CLI `tools/preview_build.py` 与既有调用方继续可用）。
 
-    流程：校验开关 → 章级取块（`heading_path`，0 成本）→ 渲染整章材料 →
-    读卡 C-0092 的《章节细目》当节级骨架（0 成本）→ **1 次**总结调用 →
-    逐条校验（必须出自本章材料）→ 把要点按页归位到节 → 原子落盘。
-
-    - `dry_run=True`：只预估，不调模型、不写文件；
-    - `force=False` 且产物未变（版本/章号/材料 sha256）时**直接跳过**（0 花费）；
-    - `ignore_switch=True`：**只在开发/验证时用**，绕过 `PREVIEW_ENABLED`。
-      看板入口（`start_background`）**永远不传它**——人要的"默认关闭"就是这么保证的；
-    - 本函数**只写 `<logs/knowledge>/<doc_id>-预习总结.json` 一个文件**，
-      不写任何数据库表、不碰知识点产物、不碰名词解释产物。
+    2026-10-20 起转调 `build_chapter_preview()`：**按章产物、每章 1 次调用、
+    小节细分**。参数/返回结构尽量与旧版兼容（`out_path` 显式给定时照旧写到该路径）。
     """
-    started = time.perf_counter()
-    est = estimate_preview(doc_id, chapter, prompt_path=prompt_path,
-                           out_path=out_path, db_path=db_path)
-    if not est.get("ok"):
-        return {"ok": False, "error": est.get("error"), "doc_id": int(doc_id),
-                "chapter": str(chapter)}
-    if dry_run:
-        return {"ok": True, "dry_run": True, **est}
-
-    # ★ 默认关闭：关着时**拒绝**并给可操作提示（不是静默什么都不做）
-    st = enabled_state()
-    if not st["enabled"] and not ignore_switch:
-        return {"ok": False, "error": "预习功能未开启", "doc_id": int(doc_id),
-                "chapter": str(chapter), "enabled": False,
-                "hint": st["hint"], "switch": st["switch"]}
-
-    out = Path(est["out_path"])
-    if est.get("skip_would_happen") and not force:
-        log("预习总结：本章产物已是最新（材料 sha256 未变）→ **跳过，0 次调用 0 花费**")
-        log("产物：%s" % out)
-        return {"ok": True, "status": "skipped", "out_path": str(out),
-                "meta": (kp_build._load_prev(out).get("meta") or {}), "estimate": est}
-
-    _stage(0, "读取第 %s 章" % est["chapter"], on_progress)
-    prompt = load_preview_prompts(prompt_path)
-    ch, info, material, inv, stats = read_chapter_ch(doc_id, chapter, db_path=db_path)
-    if not info.get("ok"):
-        return {"ok": False, "error": info.get("error"), "doc_id": int(doc_id)}
-    sec = chapter_sections(doc_id, info)
-    outline = render_sections_outline(sec)
-    material_sha = hashlib.sha256((material + "\n" + outline).encode("utf-8")).hexdigest()
-
-    calls: list = []
-    prev_meta = {}
-    if out.exists():
-        try:
-            prev_meta = (kp_build._load_prev(out).get("meta") or {})
-        except Exception:  # noqa: BLE001
-            prev_meta = {}
-    if not force and int(prev_meta.get("chapter_no") or 0) == int(info.get("no") or 0):
-        # ⚠ 只有**同一章**才把旧账带过来（续跑口径，见 `kp_build._v2_call()` 的说明）。
-        #   换章时旧产物是**另一章**的账，带过来会让"这一章的产物"显示成两章的花费。
-        for _c in (prev_meta.get("calls") or []):
-            if isinstance(_c, dict):
-                _c = dict(_c)
-                _c.setdefault("run", 1)
-                calls.append(_c)
-    run_no = max([int(c.get("run") or 1) for c in calls] or [0]) + 1
-
-    log("预习总结（独立管线）：%s（doc#%d）· %s · %d 页 / %d 块 · 材料 %d 字符"
-        % (est.get("title") or "", doc_id, est["chapter"], est["n_pages"],
-           est["n_blocks"], len(material)))
-    log("  ├ 节级细拆：%d 节（%s，**0 次模型调用**）"
-        % (sec.get("n_sections") or 0,
-           "来自卡 C-0092《章节细目》" if sec.get("read") else "无可用的《章节细目》→ 降级为空"))
-    log("  ├ 材料模式：%s%s" % (stats.get("mode"),
-                              ("（丢了 %d 个图注块）" % stats["dropped_fig_blocks"])
-                              if stats.get("dropped_fig_blocks") else ""))
-    log("  └ 调用：**整章 1 次**（%s / thinking=%s / reasoning_effort=%s / max_tokens=%d）"
-        % (est["model"], est["thinking"], est["reasoning_effort"], est["max_tokens"]))
-    if calls:
-        log("  ⚠ 这份产物里已有 %d 次历史调用（%d 轮），本轮记为第 %d 轮"
-            % (len(calls), len(kp_build._v2_runs(calls)), run_no))
-
-    # ⚠ 产物路径按卡面口径就是 `<doc_id>-预习总结.json`（**不带章号**），
-    #   所以换一章预习会覆盖上一章。覆盖前**自动备份**（与看板对知识点产物的做法一致：
-    #   `api_kp_build_start` 在整份重写前先 copy 一份 `.bak-<时间戳>`）。
-    #   同一章重跑不备份（那是同一份的迭代，留一堆 .bak 没有意义）。
-    prev_backup = ""
-    if out.exists() and int(prev_meta.get("chapter_no") or 0) != int(info.get("no") or 0):
-        bak = out.with_name(out.name + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
-        try:
-            shutil.copy2(out, bak)
-            prev_backup = str(bak)
-            log("  ├ 换章预习：上一章（第 %s 章）的产物已备份 → %s"
-                % (prev_meta.get("chapter_no") or "?", bak.name))
-        except OSError as e:
-            log("  ├ ⚠ 旧产物备份失败：%s（仍继续写新产物，旧内容会被覆盖）" % e)
-
-    status, err = "done", ""
-    points: list = []
-    terms: list = []
-    rejected: list = []
-    raw_summary: dict = {}
-    _stage(1, "渲染整章材料（%d 字符）" % len(material), on_progress)
-    _stage(2, "预习总结（1 次调用）", on_progress)
-    try:
-        user = (prompt["user"].replace("{deck}", est.get("title") or "")
-                .replace("{chapter}", est["chapter"])
-                .replace("{heading_path}", info.get("heading_path") or "")
-                .replace("{n_pages}", str(est["n_pages"]))
-                .replace("{page_label}", est.get("page_label") or "")
-                .replace("{sections_outline}", outline)
-                .replace("{chapter_material}", material))
-        res = _preview_call(calls, "preview.chapter", prompt["sys"], user,
-                            max_tokens=est["max_tokens"], retry=1, log=log,
-                            note="第 %s 章整章总结（p.%s）" % (est["chapter"],
-                                                              est.get("page_label") or ""),
-                            run_no=run_no, thinking=est["thinking"],
-                            reasoning_effort=est["reasoning_effort"],
-                            model=est["model"])
-        if not res["ok"]:
-            raise RuntimeError("预习总结调用失败：%s" % res["error"])
-        raw_summary = res["parsed"] if isinstance(res["parsed"], dict) else {}
-        points, rejected = _clean_points(
-            raw_summary.get("key_points") or raw_summary.get("points") or [],
-            list(ch["pages_all"]), dict(ch["cover"]), material, sec.get("sections") or [])
-        terms = _clean_terms_list(
-            raw_summary.get("key_terms") or raw_summary.get("terms") or [], material)
-        log("  ├ 模型给了 %d 条要点 → 校验后留 %d 条（剔 %d 条）"
-            % (len(raw_summary.get("key_points") or raw_summary.get("points") or []),
-               len(points), len(rejected)))
-        if rejected and len(rejected) > len(points):
-            # 剔除数超过保留数时，把模型原文的头一段打进日志——判据太严还是模型跑偏，
-            # 一眼能看出来（C-0094 首版就是靠这个发现"照抄判据误杀概括"的）。
-            log("    ⚠ 剔除多于保留 → 原始输出前 300 字：%s"
-                % re.sub(r"\s+", " ", str(res.get("raw") or ""))[:300])
-        log("  └ 关键名词 %d 个" % len(terms))
-    except Exception as e:  # noqa: BLE001
-        status, err = "failed", "%s: %s" % (type(e).__name__, e)
-        log("★预习总结中止：%s" % err)
-
-    summary = _build_summary(raw_summary, points, terms, material)
-    sec_doc = _attach_points(sec.get("sections") or [], points)
-    meta = _preview_meta(doc_id, info, prompt, est, calls, started=started, status=status,
-                         err=err, inv=inv, render_stats=stats, sec=sec,
-                         points=points, terms=terms, rejected=rejected,
-                         material_sha=material_sha, run_no=run_no)
-    meta["prev_backup"] = prev_backup
-    _stage(3, "写入产物", on_progress)
-    kp_build._save({"meta": meta, "sources": _sources(inv), "chapter": {
-        "no": int(info.get("no") or 0), "name": info.get("name") or "",
-        "heading_path": info.get("heading_path") or "",
-        "page_start": meta["page_start"], "page_end": meta["page_end"],
-        "page_label": meta["page_label"], "pages": list(meta["pages"]),
-        "n_blocks": meta["n_blocks"], "material_chars": meta["material"]["chars"],
-        "chapter_source": meta["chapter_source"],
-    }, "summary": summary, "sections": sec_doc,
-        "sections_stats": meta["sections_regex"]}, out)
-    log("完成：状态 %s · 要点 %d 条 · 名词 %d 个 · %d 次调用 · 本次 CNY%.6f"
-        % (status, len(points), len(terms), meta["usage_this_run"]["calls"],
-           meta["cost_cny"]))
-    log("      累计（这份产物从头到现在）：%d 次调用 · CNY%.6f · 用时 %.0fs"
-        % (meta["usage_total"]["calls"], meta["cost_cny_all_calls"], meta["elapsed_s"]))
-    log("产物：%s" % out)
-    return {"ok": True, "status": status, "error": err, "out_path": str(out),
-            "meta": meta, "estimate": est}
+    return build_chapter_preview(
+        doc_id, chapter, prompt_path=prompt_path, out_path=out_path, db_path=db_path,
+        dry_run=dry_run, force=force, ignore_switch=ignore_switch,
+        log=log, on_progress=on_progress)
 
 
 def _sources(inv: list) -> list:
@@ -1272,7 +1213,7 @@ def start_background(doc_id: int, chapter, **kw) -> dict:
     def _run() -> None:
         rep: dict = {}
         try:
-            rep = build_preview(doc_id, chapter, **kw)
+            rep = build_chapter_preview(doc_id, chapter, **kw)
         except Exception as e:  # noqa: BLE001
             rep = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
         finally:
@@ -1292,3 +1233,644 @@ def start_background(doc_id: int, chapter, **kw) -> dict:
     th = threading.Thread(target=_run, name="preview-%d" % int(doc_id), daemon=True)
     th.start()
     return {"started": True, "doc_id": int(doc_id), "chapter": str(chapter)}
+
+
+# ==========================================================================
+# v2（2026-10-20 按用户要求重做）：按章多产物 + 小节细分 + 新提示词/schema
+# ==========================================================================
+# 设计口径：
+#   · 每章一份产物 `logs/knowledge/<doc_id>-预习总结-第<N>章.json`，多章并存；
+#     旧单文件 `<doc_id>-预习总结.json` 只做**只读兼容**；
+#   · 节级细目缺产物时用 core/sections.py 纯正则本地生成（0 次模型调用）；
+#   · 每章仍然**只做 1 次模型调用**（小节细分在这一次调用里完成）；
+#   · 模型 schema 见 `logs/knowledge/提示词-预习总结.md`（v2 重写，含旧 key_points 兼容兜底）。
+MAX_SUBSECTIONS = 30
+EXPECT_SUBSECTIONS = (3, 10)          # 提示词建议范围（只用于 warning，不硬卡）
+
+
+def _list_str(value) -> list:
+    """把任意输入折成"去空白的字符串列表"（v2 parser 用，绝不抛）。"""
+    if isinstance(value, (list, tuple)):
+        return [str(x).strip() for x in value if str(x or "").strip()]
+    s = str(value or "").strip()
+    return [s] if s else []
+
+
+def ensure_sections_artifact(doc_id: int, db_path: str | os.PathLike | None = None,
+                             *, dry_run: bool = False) -> dict:
+    """确保卡 C-0092 的《章节细目》存在；缺则用 core.sections **纯本地**生成。
+
+    **0 次模型调用**（纯正则）。行为契约：
+
+    - 已存在 → 直接复用，返回 `created=False / read=True`，**不读库、不写文件**；
+    - 缺产物 + `dry_run=False` → `core.sections.load_blocks()` → `detect_sections()`
+      → `dump_sections()` 写到 `logs/knowledge/<doc>-章节细目.json`；
+    - 缺产物 + `dry_run=True` → **不写任何文件**，只返回 `would_generate=True`；
+    - 抽不出任何节（OCR 噪声/正则失败）→ **如实返回 note、不伪造节、不写空产物**；
+    - 本地生成失败 → `ok=False` + `error`（不阻断章级预习：小节可让模型自拟）。
+    """
+    p = sections_out_file(doc_id)
+    existing = _load_sections_artifact(doc_id)
+    if existing.get("ok"):
+        n = sum(len([x for x in (c.get("sections") or []) if isinstance(x, dict)])
+                for c in existing["chapters"])
+        return {"ok": True, "created": False, "read": True, "path": str(p),
+                "n_sections": int(n), "n_chapters": len(existing["chapters"]),
+                "source": "artifact", "note": existing.get("note") or ""}
+    if dry_run:
+        return {"ok": True, "created": False, "read": False, "dry_run": True,
+                "path": str(p), "n_sections": 0, "n_chapters": 0,
+                "source": "missing", "would_generate": True,
+                "note": ("缺《章节细目》产物；真跑 build 时会用 core.sections 纯本地生成"
+                         "（0 次模型调用）。dry-run 不写任何文件。")}
+    try:
+        from . import sections as _sections
+        blocks, spans, meta = _sections.load_blocks(int(doc_id), db_path)
+        title = str(meta.get("title") or "")
+        res = _sections.detect_sections(blocks, None, book_title=title,
+                                        doc_id=int(doc_id), block_pages=spans)
+        n_sec = int(getattr(res, "n_sections", 0) or 0)
+        n_ch = len(getattr(res, "chapters", []) or [])
+        if n_sec <= 0:
+            note = ("纯本地切分抽不出任何节（%d 块 / %d 章）——如实留空，不伪造节；"
+                    "章级预习照常可做（小节由模型按内容逻辑自拟）"
+                    % (len(blocks), n_ch))
+            warns = list(getattr(res, "warnings", []) or [])
+            if warns:
+                note += "；切分告警：" + "；".join(str(w) for w in warns[:2])
+            return {"ok": True, "created": False, "read": False, "path": str(p),
+                    "n_sections": 0, "n_chapters": n_ch, "source": "generated_empty",
+                    "note": note}
+        _sections.dump_sections(res, p)
+        return {"ok": True, "created": True, "read": False, "path": str(p),
+                "n_sections": n_sec, "n_chapters": n_ch, "source": "generated",
+                "warnings": list(getattr(res, "warnings", []) or []),
+                "note": "已用 core.sections 纯本地生成《章节细目》（0 次模型调用）"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "created": False, "read": False, "path": str(p),
+                "error": "%s: %s" % (type(e).__name__, e),
+                "note": "本地生成《章节细目》失败；章级预习仍可做（小节由模型自拟）"}
+
+
+def _clean_subsections(raw, pages_all, cover_map, mat_text, warnings) -> list:
+    """校验模型给的 `subsections`：页码 ⊆ 本章 / 标题必填 / 空小节丢弃 / 去重 / ≤30。
+
+    - `pages` 越界（出现本章页范围外的页号）→ **该小节 pages 清空**并记 warning；
+    - `title` 空 → 丢弃；
+    - `why/core/lecture/pitfalls/self_check` 全空 → 视为空小节丢弃；
+    - 同名小节（归一化后）只留第一个；最多 `MAX_SUBSECTIONS` 个；
+    - **不采信模型给的 chunk_ids**：出处由管线按 pages 从本章材料里自己算。
+    """
+    pages_ok = {int(p) for p in (pages_all or [])}
+    by_page = {int(p): sorted({int(c) for c in (cover_map.get(int(p)) or [])})
+               for p in (pages_all or [])}
+    out, seen = [], set()
+    for i, r in enumerate(raw or [], 1):
+        if not isinstance(r, dict):
+            warnings.append("小节 %d 不是对象，已丢弃" % i)
+            continue
+        title = str(r.get("title") or r.get("name") or "").strip()
+        if not title:
+            warnings.append("小节 %d 没有 title，已丢弃" % i)
+            continue
+        key = kp_build._norm_term_key(title)
+        if key in seen:
+            warnings.append("小节「%s」重复，已去重" % title[:20])
+            continue
+        raw_pages = r.get("pages")
+        if isinstance(raw_pages, (int, str)):
+            raw_pages = [raw_pages]
+        pages, bad = [], []
+        for x in (raw_pages or []):
+            try:
+                n = int(str(x).strip())
+            except (TypeError, ValueError):
+                bad.append(str(x)[:10])
+                continue
+            if n in pages_ok:
+                if n not in pages:
+                    pages.append(n)
+            else:
+                bad.append(n)
+        if bad:
+            warnings.append("小节「%s」页码不在本章范围（%s）→ pages 已清空"
+                            % (title[:20], bad[:5]))
+            pages = []
+        pages.sort()
+        core = []
+        for c in (r.get("core") or []):
+            if not isinstance(c, dict):
+                continue
+            name = str(c.get("name") or c.get("term") or "").strip()
+            if not name:
+                continue
+            core.append({"name": name,
+                         "explain": str(c.get("explain") or c.get("detail") or "").strip()})
+        pitfalls = _list_str(r.get("pitfalls") or r.get("易错点"))
+        self_check = []
+        for q in (r.get("self_check") or r.get("questions") or []):
+            if isinstance(q, dict):
+                qq = str(q.get("q") or q.get("question") or "").strip()
+                aa = str(q.get("a") or q.get("answer") or "").strip()
+                if qq:
+                    self_check.append({"q": qq, "a": aa})
+            elif str(q or "").strip():
+                self_check.append({"q": str(q).strip(), "a": ""})
+        why = str(r.get("why") or r.get("position") or "").strip()
+        lecture = str(r.get("lecture") or r.get("how_teacher_teaches") or "").strip()
+        if not any([why, core, lecture, pitfalls, self_check]):
+            warnings.append("小节「%s」没有任何内容字段（why/core/lecture/…），已丢弃"
+                            % title[:20])
+            continue
+        ids = []
+        for p in pages:
+            ids.extend(by_page.get(p) or [])
+        out.append({
+            "no": len(out) + 1, "title": title, "pages": pages,
+            "page_label": kp_build._pages_label(pages),
+            "why": why, "core": core, "lecture": lecture,
+            "pitfalls": pitfalls, "self_check": self_check,
+            "chunk_ids": sorted(set(ids)),
+            "material_block_ids": sorted(set(ids)),
+        })
+        seen.add(key)
+        if len(out) >= MAX_SUBSECTIONS:
+            warnings.append("小节超过 %d 个，只保留前 %d 个"
+                            % (MAX_SUBSECTIONS, MAX_SUBSECTIONS))
+            break
+    if out and not (EXPECT_SUBSECTIONS[0] <= len(out) <= EXPECT_SUBSECTIONS[1]):
+        warnings.append("小节数 %d 不在提示词建议的 %d~%d 个范围内（不阻断，仅提示）"
+                        % (len(out), EXPECT_SUBSECTIONS[0], EXPECT_SUBSECTIONS[1]))
+    return out
+
+
+def _subsections_from_key_points(points, pages_all, cover_map, sections, warnings) -> list:
+    """**旧 schema 兜底**：模型只给了 `key_points` 时，按 section/pages 归组成小节。"""
+    pages_ok = {int(p) for p in (pages_all or [])}
+    by_page = {int(p): sorted({int(c) for c in (cover_map.get(int(p)) or [])})
+               for p in (pages_all or [])}
+    groups: dict = {}
+    order: list = []
+    for r in (points or []):
+        if not isinstance(r, dict):
+            continue
+        name = str(r.get("point") or r.get("name") or r.get("title") or "").strip()
+        if not name:
+            continue
+        raw_pages = r.get("pages")
+        if isinstance(raw_pages, (int, str)):
+            raw_pages = [raw_pages]
+        pages = []
+        for x in (raw_pages or []):
+            try:
+                n = int(str(x).strip())
+            except (TypeError, ValueError):
+                continue
+            if n in pages_ok and n not in pages:
+                pages.append(n)
+        pages.sort()
+        sec_no = 0
+        try:
+            sec_no = int(str(r.get("section") if r.get("section") is not None
+                             else r.get("section_index") or "0").strip())
+        except (TypeError, ValueError):
+            sec_no = 0
+        gkey = ("sec", sec_no) if sec_no else ("page", pages[0] if pages else 0)
+        if gkey not in groups:
+            groups[gkey] = {"title": "", "pages": [], "core": []}
+            order.append(gkey)
+        g = groups[gkey]
+        g["core"].append({"name": name,
+                          "explain": str(r.get("detail") or r.get("desc") or "").strip()})
+        g["pages"] = sorted(set(g["pages"]) | set(pages))
+    by_sec = {int(s.get("index") or 0): s for s in (sections or [])
+              if isinstance(s, dict)}
+    out = []
+    for gkey in order:
+        g = groups[gkey]
+        sec = by_sec.get(int(gkey[1])) if gkey[0] == "sec" else None
+        title = str((sec or {}).get("title") or "").strip()
+        if not title:
+            title = "小节 %d" % (len(out) + 1)
+        ids = []
+        for p in g["pages"]:
+            ids.extend(by_page.get(p) or [])
+        out.append({"no": len(out) + 1, "title": title, "pages": g["pages"],
+                    "page_label": kp_build._pages_label(g["pages"]),
+                    "why": "", "core": g["core"], "lecture": "",
+                    "pitfalls": [], "self_check": [],
+                    "chunk_ids": sorted(set(ids)),
+                    "material_block_ids": sorted(set(ids)),
+                    "from_legacy_key_points": True})
+        if len(out) >= MAX_SUBSECTIONS:
+            break
+    if out:
+        warnings.append("模型给的是旧 schema key_points（没有 subsections）→ 已按"
+                        " section/页码归组兜底生成 %d 个小节（why/lecture/pitfalls 为空）"
+                        % len(out))
+    return out
+
+
+def _build_summary_v2(raw: dict, material: str) -> dict:
+    """章级 summary（前端查看器顶部）：overview / study_order / difficulties /
+    prerequisites / exam_focus（+ 旧字段兼容 questions）。"""
+    raw = raw if isinstance(raw, dict) else {}
+    overview = str(raw.get("overview") or raw.get("summary") or "").strip()
+    if len(overview) > 2000:
+        overview = overview[:2000].rstrip() + "…"
+    return {
+        "overview": overview,
+        "study_order": _list_str(raw.get("study_order") or raw.get("order")),
+        "difficulties": _list_str(raw.get("difficulties") or raw.get("难点")),
+        "prerequisites": _list_str(raw.get("prerequisites") or raw.get("先修")),
+        "exam_focus": _list_str(raw.get("exam_focus") or raw.get("考点")),
+        "questions": _list_str(raw.get("questions") or raw.get("自测题")),
+        "material_chars": len(material),
+    }
+
+
+def _v2_meta(doc_id, info, est, prompt, calls, *, started, status, err, inv,
+             render_stats, sec, subs, terms, warnings, material_sha, run_no,
+             sections_source, parser, prev_backup, skipped=False) -> dict:
+    """产物 meta（前端查看器 + 验收都要用；字段见任务契约）。"""
+    agg = kp_build._v2_cost(calls)
+    run_agg = kp_build._v2_cost(calls, run=run_no)
+    return {
+        "preview_version": PREVIEW_VERSION,
+        "preview_schema": PREVIEW_SCHEMA,
+        "doc_id": int(doc_id),
+        "title": est.get("title") or "",
+        "chapter": "第%d章 %s" % (int(info.get("no") or 0), info.get("name") or ""),
+        "chapter_no": int(info.get("no") or 0),
+        "chapter_name": info.get("name") or "",
+        "heading_path": info.get("heading_path") or "",
+        "pages": list(info.get("pages") or []),
+        "page_label": kp_build._pages_label(info.get("pages") or []),
+        "page_start": int(info.get("page_start") or 0),
+        "page_end": int(info.get("page_end") or 0),
+        "n_blocks": int(est.get("n_blocks") or 0),
+        "chapter_source": info.get("source") or "",
+        "status": status, "error": err,
+        "model": model_name(), "thinking": thinking_on(),
+        "reasoning_effort": effort(), "max_tokens": max_tokens(),
+        "prompt_path": prompt.get("path") or "",
+        "prompt_sha256": prompt.get("sha256") or "",
+        "usage_this_run": {"calls": run_agg["calls"],
+                           "calls_failed": run_agg["calls_failed"],
+                           "tokens_in": run_agg["tokens_in"],
+                           "tokens_out": run_agg["tokens_out"],
+                           "reasoning_tokens": run_agg["reasoning_tokens"]},
+        "usage_total": {"calls": agg["calls"], "calls_failed": agg["calls_failed"],
+                        "tokens_in": agg["tokens_in"], "tokens_out": agg["tokens_out"],
+                        "reasoning_tokens": agg["reasoning_tokens"]},
+        "cost_cny": run_agg["cost_cny"],
+        "cost_cny_all_calls": agg["cost_cny"],
+        "n_subsections": len(subs or []),
+        "n_terms": len(terms or []),
+        "sections_source": sections_source,   # artifact | generated | none
+        "parser": parser,                    # v2_subsections | legacy_key_points
+        "warnings": list(warnings or []),
+        "created_at": time.time(),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "run_no": int(run_no), "calls": calls, "runs": kp_build._v2_runs(calls),
+        "params": {"thinking": thinking_on(), "reasoning_effort": effort(),
+                   "temperature": kp_build.TEMPERATURE,
+                   "max_tokens": max_tokens(), "calls_per_chapter": 1,
+                   "max_subsections": MAX_SUBSECTIONS,
+                   "expect_subsections": list(EXPECT_SUBSECTIONS)},
+        "inputs": {"read": ["chunks.id", "chunks.ord", "chunks.source_ref",
+                            "chunks.text", "chunks.heading_path",
+                            "figure_desc.no_info", "documents.title"],
+                   "not_read": ["chunks.topic"], "db_writes": [],
+                   "sections_artifact": str(sections_out_file(doc_id)),
+                   "material_sha256": material_sha},
+        "material": {"chars": int(render_stats.get("chars") or 0),
+                     "mode": render_stats.get("mode") or "",
+                     "dropped_fig_blocks": int(render_stats.get("dropped_fig_blocks") or 0),
+                     "truncated_pages": list(render_stats.get("truncated_pages") or []),
+                     "n_sources": len(inv)},
+        "sections_regex": {"read": bool(sec.get("read")),
+                           "source": sec.get("source") or "",
+                           "n_sections": int(sec.get("n_sections") or 0),
+                           "fallback": bool(sec.get("fallback")),
+                           "note": sec.get("note") or "",
+                           "cost": "0 次模型调用（纯正则/本地生成）"},
+        "skipped": bool(skipped), "prev_backup": prev_backup,
+        "elapsed_s": round(time.perf_counter() - started, 1),
+        "pipeline": ("C-0110 预习总结 v2（独立管线分区，core/preview.py::"
+                     "build_chapter_preview）：按章取块（0 成本）→ 缺《章节细目》时"
+                     "core.sections 纯本地生成（0 模型调用）→ 整章 **1 次**调用"
+                     "（%s / thinking=%s / reasoning_effort=%s）→ 新提示词要求先细分"
+                     "小节再逐小节写 → 原子落盘**按章**产物。"
+                     % (model_name(), thinking_on(), effort())),
+    }
+
+
+def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None,
+                          db_path=None, dry_run: bool = False, force: bool = False,
+                          ignore_switch: bool = False, log=print,
+                          on_progress=None) -> dict:
+    """**按章预习总结（v2，2026-10-20）**：1 次模型调用，先细分子节再逐节写。
+
+    流程：dry-run（纯预估，0 写入）→ 开关校验 → 缺《章节细目》时本地生成（0 模型）
+    → 整章材料 + 节级大纲 → **1 次**调用 → 解析/校验新 schema（pages 越界清空、
+    空小节丢弃、去重、≤30 节；旧 key_points 兜底）→ 原子写
+    `logs/knowledge/<doc_id>-预习总结-第<N>章.json`（同章重跑先备份 `.bak-<ts>`，
+    换章不覆盖其它章）。
+
+    返回 `{"ok", "status", "error", "out_path", "meta", "estimate"}`；
+    与旧 `build_preview()` 的调用方兼容（旧名已改为转调本函数）。
+    """
+    started = time.perf_counter()
+    if dry_run:
+        est = estimate_preview(doc_id, chapter, prompt_path=prompt_path,
+                               out_path=out_path, db_path=db_path)
+        if not est.get("ok"):
+            return {"ok": False, "error": est.get("error"), "dry_run": True,
+                    "doc_id": int(doc_id), "chapter": str(chapter)}
+        return {"ok": True, "dry_run": True, **est}
+
+    # ★ 开关：关着时**拒绝**并给可操作提示（默认已开启，仍可手动关闭）
+    st = enabled_state()
+    if not st["enabled"] and not ignore_switch:
+        return {"ok": False, "error": "预习功能未开启", "doc_id": int(doc_id),
+                "chapter": str(chapter), "enabled": False,
+                "hint": st["hint"], "switch": st["switch"]}
+
+    # ★ 先确保《章节细目》（本地正则，0 模型调用；dry-run 不会走到这里）
+    sec_build = ensure_sections_artifact(doc_id, db_path=db_path)
+    est = estimate_preview(doc_id, chapter, prompt_path=prompt_path,
+                           out_path=out_path, db_path=db_path)
+    if not est.get("ok"):
+        return {"ok": False, "error": est.get("error"), "doc_id": int(doc_id),
+                "chapter": str(chapter)}
+    out = Path(est["out_path"])
+
+    if est.get("skip_would_happen") and not force:
+        log("预习总结：第 %s 章产物已是最新（材料 sha256 未变）→ 跳过，0 次调用 0 花费"
+            % est["chapter"])
+        log("产物：%s" % out)
+        return {"ok": True, "status": "skipped", "out_path": str(out),
+                "meta": (kp_build._load_prev(out).get("meta") or {}),
+                "estimate": est, "sections_build": sec_build}
+
+    _stage(0, "读取第 %s 章" % est["chapter"], on_progress)
+    prompt = load_preview_prompts(prompt_path)
+    ch, info, material, inv, stats = read_chapter_ch(doc_id, chapter, db_path=db_path)
+    if not info.get("ok"):
+        return {"ok": False, "error": info.get("error"), "doc_id": int(doc_id)}
+    sec = chapter_sections(doc_id, info)
+    outline = render_sections_outline(sec)
+    material_sha = hashlib.sha256((material + "\n" + outline).encode("utf-8")).hexdigest()
+    sections_source = ("none" if int(sec.get("n_sections") or 0) <= 0 else
+                       ("generated" if sec_build.get("created") else "artifact"))
+
+    calls: list = []
+    prev_meta = kp_build._load_prev(out).get("meta") or {}
+    if not force and int(prev_meta.get("chapter_no") or 0) == int(info.get("no") or 0):
+        for _c in (prev_meta.get("calls") or []):
+            if isinstance(_c, dict):
+                _c = dict(_c)
+                _c.setdefault("run", 1)
+                calls.append(_c)
+    run_no = max([int(c.get("run") or 1) for c in calls] or [0]) + 1
+    if int(sec.get("n_sections") or 0) <= 0:
+        log("  ⚠ 本章没有可用的《章节细目》小节（%s）→ 小节由模型按内容逻辑自拟"
+            % (sec_build.get("note") or "无产物"))
+
+    # 同章重跑：先备份旧产物（不同章是不同文件，天然互不覆盖）
+    prev_backup = ""
+    if out.exists():
+        bak = out.with_name(out.name + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
+        try:
+            shutil.copy2(out, bak)
+            prev_backup = str(bak)
+        except OSError as e:
+            log("  ⚠ 旧产物备份失败：%s（仍继续写新产物）" % e)
+
+    log("预习总结 v2（按章）：%s（doc#%d）· %s · %d 页 / %d 块 · 材料 %d 字符"
+        % (est.get("title") or "", doc_id, est["chapter"], est["n_pages"],
+           est["n_blocks"], len(material)))
+    log("  ├ 节级细目：%d 节（%s，0 次模型调用）"
+        % (sec.get("n_sections") or 0,
+           {"artifact": "复用已有《章节细目》", "generated": "本地正则新生成",
+            "none": "没有可用细目 → 小节自拟"}.get(sections_source, "")))
+    log("  └ 调用：**整章 1 次**（%s / thinking=%s / reasoning_effort=%s / max_tokens=%d）"
+        % (est["model"], est["thinking"], est["reasoning_effort"], est["max_tokens"]))
+
+    status, err = "done", ""
+    raw: dict = {}
+    subs: list = []
+    terms: list = []
+    warnings: list = []
+    parser = "v2_subsections"
+    _stage(1, "渲染整章材料（%d 字符）" % len(material), on_progress)
+    _stage(2, "预习总结（1 次调用，先细分小节）", on_progress)
+    try:
+        user = (prompt["user"].replace("{deck}", est.get("title") or "")
+                .replace("{chapter}", est["chapter"])
+                .replace("{heading_path}", info.get("heading_path") or "")
+                .replace("{n_pages}", str(est["n_pages"]))
+                .replace("{page_label}", est.get("page_label") or "")
+                .replace("{sections_outline}", outline)
+                .replace("{chapter_material}", material))
+        res = _preview_call(calls, "preview.chapter", prompt["sys"], user,
+                            max_tokens=est["max_tokens"], retry=1, log=log,
+                            note="第 %s 章预习（p.%s）" % (est["chapter"],
+                                                          est.get("page_label") or ""),
+                            run_no=run_no, thinking=est["thinking"],
+                            reasoning_effort=est["reasoning_effort"],
+                            model=est["model"])
+        if not res["ok"]:
+            raise RuntimeError("预习总结调用失败：%s" % res["error"])
+        raw = res["parsed"] if isinstance(res["parsed"], dict) else {}
+        subs = _clean_subsections(raw.get("subsections") or [],
+                                  list(ch.get("pages_all") or []), dict(ch["cover"]),
+                                  material, warnings)
+        if not subs and (raw.get("key_points") or raw.get("points")):
+            parser = "legacy_key_points"
+            subs = _subsections_from_key_points(
+                raw.get("key_points") or raw.get("points") or [],
+                list(ch.get("pages_all") or []), dict(ch["cover"]),
+                sec.get("sections") or [], warnings)
+        terms = _clean_terms_list(raw.get("key_terms") or raw.get("terms") or [], material)
+        log("  ├ 小节：模型 %d 个 → 校验后 %d 个（parser=%s，丢弃/清空见 warnings）"
+            % (len(raw.get("subsections") or []), len(subs), parser))
+        log("  └ 关键名词 %d 个 · 章级 overview %d 字"
+            % (len(terms), len(str(raw.get("overview") or ""))))
+        if not subs:
+            warnings.append("模型没有给出可用小节（也没有旧 key_points 可兜底）——"
+                            "产物会带 status=done 但 subsections 为空，可 force 重跑")
+    except Exception as e:  # noqa: BLE001
+        status, err = "failed", "%s: %s" % (type(e).__name__, e)
+        log("★预习总结中止：%s" % err)
+
+    summary = _build_summary_v2(raw, material)
+    meta = _v2_meta(doc_id, info, est, prompt, calls, started=started, status=status,
+                    err=err, inv=inv, render_stats=stats, sec=sec, subs=subs,
+                    terms=terms, warnings=warnings, material_sha=material_sha,
+                    run_no=run_no, sections_source=sections_source, parser=parser,
+                    prev_backup=prev_backup)
+    artifact = {
+        "meta": meta,
+        "chapter": {"no": int(info.get("no") or 0), "name": info.get("name") or "",
+                    "heading_path": info.get("heading_path") or "",
+                    "page_start": meta["page_start"], "page_end": meta["page_end"],
+                    "page_label": meta["page_label"], "pages": list(meta["pages"]),
+                    "n_blocks": meta["n_blocks"],
+                    "chapter_source": meta["chapter_source"]},
+        "summary": summary,
+        "subsections": subs,
+        "terms": terms,
+        "sources": _sources(inv),
+    }
+    _stage(3, "写入产物", on_progress)
+    kp_build._save(artifact, out)
+    log("完成：状态 %s · 小节 %d 个 · 名词 %d 个 · %d 次调用 · 本次 CNY%.6f"
+        % (status, len(subs), len(terms), meta["usage_this_run"]["calls"],
+           meta["cost_cny"]))
+    log("产物（按章）：%s" % out)
+    return {"ok": True, "status": status, "error": err, "out_path": str(out),
+            "meta": meta, "estimate": est, "sections_build": sec_build,
+            "artifact": {"chapter": artifact["chapter"], "summary": summary,
+                         "n_subsections": len(subs), "n_terms": len(terms)}}
+
+
+def preview_status(doc_id: int) -> dict:
+    """扫这份教材的**按章**预习产物（+ 旧单文件只读兼容），零模型、零写入。
+
+    返回 `{chapter_no(int): {exists,path,status,generated_at,cost_cny,
+    n_subsections,chapter_name,pages,preview_version,is_current_version}}`；
+    另带 `_schema` / `_old_single` 两个下划线键（不会被章号误用）。
+    """
+    d = config.LOG_DIR / "knowledge"
+    out: dict = {"_schema": PREVIEW_SCHEMA, "_preview_version": PREVIEW_VERSION}
+    pat = re.compile(r"^%d-预习总结-第(\d+)章\.json$" % int(doc_id))
+    try:
+        files = sorted(d.glob("%d-预习总结-第*章.json" % int(doc_id)))
+    except OSError:
+        files = []
+    for p in files:
+        m = pat.match(p.name)
+        if not m:
+            continue
+        no = int(m.group(1))
+        data = kp_build._load_prev(p)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        subs = data.get("subsections") if isinstance(data.get("subsections"), list) else []
+        out[no] = {
+            "exists": True, "path": str(p),
+            "status": str(meta.get("status") or ""),
+            "generated_at": str(meta.get("generated_at") or ""),
+            "created_at": meta.get("created_at"),
+            "cost_cny": float(meta.get("cost_cny") or 0.0),
+            "n_subsections": len(subs),
+            "chapter_name": str(meta.get("chapter_name") or ""),
+            "pages": list(meta.get("pages") or []),
+            "page_label": str(meta.get("page_label") or ""),
+            "preview_version": str(meta.get("preview_version") or ""),
+            "is_current_version": (str(meta.get("preview_version") or "")
+                                   == PREVIEW_VERSION),
+            "sections_source": str(meta.get("sections_source") or ""),
+        }
+    legacy = legacy_preview_out_file(doc_id)
+    if legacy.exists():
+        data = kp_build._load_prev(legacy)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        no = int(meta.get("chapter_no") or 0)
+        out["_old_single"] = {
+            "exists": True, "path": str(legacy), "chapter_no": no,
+            "status": str(meta.get("status") or ""),
+            "preview_version": str(meta.get("preview_version") or ""),
+            "is_current_version": (str(meta.get("preview_version") or "")
+                                   == PREVIEW_VERSION),
+            "generated_at": str(meta.get("generated_at") or ""),
+            "cost_cny": float(meta.get("cost_cny") or 0.0),
+            "migrated": no in out,
+        }
+    return out
+
+
+def read_preview_artifact(doc_id: int, chapter) -> dict:
+    """读一章的预习产物（前端查看器用；零模型、零写入）。
+
+    返回 `{"ok", "artifact": {meta, chapter, summary, subsections, terms, sources},
+    "path", "legacy", "is_current_version"}`；找不到 → `{"ok": False, "error"}`。
+    旧单文件（C-0094-v1）若章号匹配也会被读取，并在 `legacy=True` + warning 里标出来。
+    """
+    want = _norm_chapter_arg(chapter)
+    no = int(want.get("no") or 0)
+    if not no:
+        info = locate_chapter(doc_id, chapter)
+        if not info.get("ok"):
+            return {"ok": False, "error": info.get("error") or "找不到这一章",
+                    "doc_id": int(doc_id), "chapter": str(chapter)}
+        no = int(info.get("no") or 0)
+    path = preview_out_file_per_chapter(doc_id, no)
+    legacy_used = False
+    if not path.exists():
+        legacy = legacy_preview_out_file(doc_id)
+        data = kp_build._load_prev(legacy)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        if data and int(meta.get("chapter_no") or 0) == no:
+            path, legacy_used = legacy, True
+    data = kp_build._load_prev(path)
+    if not data:
+        return {"ok": False, "error": "没有第 %d 章的预习产物（请先生成）" % no,
+                "doc_id": int(doc_id), "chapter_no": no,
+                "expected_path": str(preview_out_file_per_chapter(doc_id, no))}
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    version = str(meta.get("preview_version") or "")
+    is_current = version == PREVIEW_VERSION
+    if is_current or isinstance(data.get("subsections"), list):
+        artifact = {
+            "meta": meta,
+            "chapter": data.get("chapter") if isinstance(data.get("chapter"), dict) else {},
+            "summary": data.get("summary") if isinstance(data.get("summary"),
+                                                          dict) else {},
+            "subsections": data.get("subsections")
+            if isinstance(data.get("subsections"), list) else [],
+            "terms": data.get("terms") if isinstance(data.get("terms"), list) else [],
+            "sources": data.get("sources") if isinstance(data.get("sources"), list) else [],
+        }
+    else:
+        # 旧产物（v1）：summary.key_points + sections[].key_points → 转成查看器可读的 subsections
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        sections = data.get("sections") if isinstance(data.get("sections"), list) else []
+        subs = []
+        warns = ["这是旧版（%s）产物，已按查看器结构做只读转换；"
+                 "重新生成后会写入 v2 按章产物" % (version or "v1")]
+        for s in sections:
+            if not isinstance(s, dict):
+                continue
+            pts = [p for p in (s.get("key_points") or []) if isinstance(p, dict)]
+            if not pts:
+                continue
+            subs.append({
+                "no": len(subs) + 1,
+                "title": str(s.get("title") or ("小节 %d" % (len(subs) + 1))),
+                "pages": list(s.get("pages") or []),
+                "page_label": kp_build._pages_label(s.get("pages") or []),
+                "why": "", "lecture": "", "pitfalls": [], "self_check": [],
+                "core": [{"name": str(p.get("point") or ""),
+                          "explain": str(p.get("detail") or "")} for p in pts],
+                "chunk_ids": sorted({c for p in pts for c in (p.get("chunk_ids") or [])}),
+            })
+        if not subs:
+            subs = _subsections_from_key_points(
+                summary.get("key_points") or [], meta.get("pages") or [],
+                {}, sections, warns)
+        artifact = {
+            "meta": dict(meta, legacy=True,
+                         warnings=list(meta.get("warnings") or []) + warns),
+            "chapter": data.get("chapter") if isinstance(data.get("chapter"),
+                                                         dict) else {},
+            "summary": summary,
+            "subsections": subs,
+            "terms": summary.get("key_terms") if isinstance(
+                summary.get("key_terms"), list) else [],
+            "sources": data.get("sources") if isinstance(data.get("sources"), list) else [],
+        }
+    return {"ok": True, "artifact": artifact, "path": str(path),
+            "legacy": bool(legacy_used or not is_current),
+            "is_current_version": bool(is_current)}
