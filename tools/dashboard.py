@@ -572,19 +572,18 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
   .subjmenu{min-width:200px}
 }
 
-/* ---------- 设置中心（卡 C-0059）：右上角入口 + 四分区模态窗 ----------
-   布局意图：左栏四条管线（+一行说明），右栏是这条管线的字段；
-   字段一律「标签 / 控件 / 说明」三行式，说明里写清底层键名与生效时机——
-   这个窗口要给不认识代码的人用，也要给想核对"到底改了哪个键"的人用。
-   密钥永不回显明文，只显示"已配置 · 尾号 xxxx"。 */
+/* ---------- 设置中心（改版 · 卡 C-0059 的按现有功能重排） ----------
+   布局：左栏「搜索 + 两组导航（AI 能力 / 资料）」，右侧「标题 + 卡片」；
+   字段一律「标签 / 控件 / 说明」三行式。密钥永不回显明文，只显示"已配置 · 尾号 xxxx"。
+   宽屏 1180px，<760px 近全屏 + 横向 chips；只改本窗口的样式。 */
 #set-btn{display:flex;align-items:center;gap:7px;white-space:nowrap;
   font-weight:600}
 #set-btn:hover{border-color:var(--accent);color:var(--fg)}
-.set-modal{align-items:flex-start;padding:26px 16px;z-index:45}
+.set-modal{align-items:flex-start;justify-content:center;padding:26px 16px;z-index:45}
 .setbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  width:min(1080px,100%);max-height:calc(100vh - 52px);display:flex;
+  width:min(1180px,94vw);max-height:min(86vh,820px);display:flex;
   flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6)}
-.set-head{display:flex;align-items:center;gap:12px;padding:15px 20px;
+.set-head{display:flex;align-items:center;gap:12px;padding:14px 20px;
   border-bottom:1px solid var(--line);background:linear-gradient(180deg,#1c212b,#171a21)}
 .set-head h2{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}
 .set-head .ssub{color:var(--dim);font-size:12px;margin-top:3px}
@@ -595,27 +594,60 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
 .set-secretbar{display:flex;gap:9px;align-items:flex-start;padding:9px 20px;
   background:#12251a;border-bottom:1px solid #1c3a24;color:#9ed7ae;font-size:12px;
   line-height:1.65}
-.set-body{display:flex;min-height:0;flex:1}
-.set-nav{flex:0 0 194px;border-right:1px solid var(--line);padding:12px 10px;
-  display:flex;flex-direction:column;gap:4px;background:#141821}
-.set-nav button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+.set-body{display:flex;min-height:0;flex:1;overflow:hidden}
+.set-nav{flex:0 0 220px;border-right:1px solid var(--line);padding:12px 10px;
+  display:flex;flex-direction:column;gap:3px;background:#141821;overflow:auto}
+.set-search{width:100%;box-sizing:border-box;margin:0 0 6px;padding:7px 10px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  color:var(--fg);font:inherit;font-size:12.5px}
+.set-search:focus{outline:none;border-color:var(--accent)}
+.set-qinfo{color:var(--dim);font-size:11px;padding:0 9px 4px;min-height:14px}
+.set-nav .sn-group{color:var(--dim);font-size:11px;font-weight:600;
+  letter-spacing:.5px;padding:9px 9px 3px;white-space:nowrap}
+.set-nav button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
   background:transparent;border:1px solid transparent;color:var(--dim);
-  padding:9px 11px;border-radius:9px;cursor:pointer;font:inherit;font-size:13px}
+  padding:8px 10px;border-radius:9px;cursor:pointer;font:inherit;font-size:13px}
 .set-nav button:hover{background:var(--panel2);color:var(--fg)}
 .set-nav button.on{background:var(--panel2);border-color:var(--accent);
   color:var(--fg);font-weight:600}
+.set-nav button .sn-ic{flex:0 0 auto}
+.set-nav button .sn-name{flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.set-nav .sn-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;
+  background:#3a4250;box-shadow:0 0 0 1px rgba(255,255,255,.04)}
+.set-nav .sn-dot.on{background:var(--ok)}
+.set-nav .sn-dot.off{background:#3d3218;border:1px solid #7a5a1e}
 .set-nav .snav-note{margin-top:auto;border-top:1px dashed var(--line);
   padding:9px 10px 2px;color:var(--dim);font-size:11px;line-height:1.7}
-.set-pane{flex:1;min-width:0;overflow:auto;padding:18px 22px 28px}
-.set-pane h3{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
-.set-pane .pdesc{color:var(--dim);font-size:12.5px;margin:6px 0 4px;line-height:1.75}
+.set-pane{flex:1;min-width:0;overflow:auto;padding:16px 20px 26px}
+.set-pane h3{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}
+.set-pane .pdesc{color:var(--dim);font-size:12.5px;margin:5px 0 14px;line-height:1.75}
+/* 卡片：连接与密钥 / 参数与开关 / 高级（折叠）/ 提示词 */
+.settings-card{border:1px solid var(--line);border-radius:10px;background:#151920;
+  padding:12px 14px 6px;margin:0 0 12px}
+.settings-card>h4{margin:0 0 4px;font-size:12.5px;color:var(--fg);font-weight:600;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.settings-card>h4 .sc-badge{font-size:10.5px;font-weight:500;padding:1px 8px;
+  border-radius:20px;border:1px solid var(--line);color:var(--dim)}
+.settings-card>h4 .sc-badge.warn{color:var(--warn);border-color:#3d3218}
+.settings-card>h4 .sc-badge.ok{color:var(--ok);border-color:#1c3a24}
+.settings-card.muted{opacity:.66}
+.settings-card .set-card-note{color:var(--dim);font-size:11.5px;line-height:1.7;
+  margin:2px 0 6px}
+.settings-card .set-adv-in{margin:4px 0 8px;border:none;background:transparent;
+  padding:0}
+.settings-card .set-adv-in>summary{padding:6px 0;color:var(--dim)}
 .set-group{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 .set-group>h4{margin:0 0 6px;font-size:11.5px;color:var(--dim);font-weight:600;
   letter-spacing:.5px}
-.srow{display:grid;grid-template-columns:194px minmax(0,1fr);gap:8px 14px;
-  align-items:start;padding:9px 0;border-bottom:1px dashed rgba(42,47,58,.75)}
+/* 行：沿用「标签 / 控件 / 说明」三行式；搜索命中时左侧亮条 + 浅底 */
+.srow{display:grid;grid-template-columns:188px minmax(0,1fr);gap:8px 14px;
+  align-items:start;padding:9px 6px;border-bottom:1px dashed rgba(42,47,58,.75);
+  border-left:2px solid transparent;border-radius:4px}
 .srow:last-child{border-bottom:none}
-.srow>label{font-size:13px;padding-top:7px;color:var(--fg)}
+.srow.hit{background:rgba(91,157,255,.07);border-left-color:var(--accent)}
+.srow>label{font-size:13px;padding-top:7px;color:var(--fg);word-break:break-word}
+.srow .skey{color:#4d5566;font-size:10px;margin-left:6px;font-weight:400}
 .srow .sctl{min-width:0}
 .srow input[type=text],.srow input[type=password],.srow input[type=number],
 .srow select{width:100%;max-width:440px}
@@ -626,41 +658,70 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
 .switch{display:flex;align-items:center;gap:9px;padding-top:6px;font-size:13px}
 .switch input{width:auto;flex:0 0 auto}
 .switch.off{opacity:.62}
-.set-adv{margin-top:14px;border:1px solid var(--line);border-radius:9px;
-  background:#151920}
+.set-nomatch{border:1px dashed var(--line);border-radius:10px;padding:20px;
+  text-align:center;color:var(--dim);font-size:13px}
+/* 入库方式：模式横幅（开=整页切块 / 关=旧模式） */
+.mode-banner{margin:2px 0 8px;padding:8px 11px;border-radius:8px;font-size:12px;
+  line-height:1.75;border:1px solid #1c3a24;background:#12251a;color:#9ed7ae}
+.mode-banner.off{border-color:#3d3218;background:#211b10;color:#ffd48a}
+/* 高级参数折叠（沿用旧样式，放在卡片内时去掉外框） */
+.set-adv{margin-top:4px;border:1px solid var(--line);border-radius:9px;
+  background:#131720}
 .set-adv>summary{cursor:pointer;padding:9px 13px;font-size:12px;color:var(--dim);
   list-style:none;outline:none}
 .set-adv>summary::-webkit-details-marker{display:none}
-.set-adv>summary::before{content:'▸ 高级：'}
-.set-adv[open]>summary::before{content:'▾ 高级：'}
-.set-adv .setadvbody{padding:0 14px 10px}
-.spcard{border:1px solid var(--line);border-radius:9px;background:#151920;
+.set-adv>summary::before{content:'▸ '}
+.set-adv[open]>summary::before{content:'▾ '}
+.set-adv .setadvbody{padding:0 12px 8px}
+/* 提示词卡片 */
+.spcard{border:1px solid var(--line);border-radius:9px;background:#131720;
   padding:11px 13px;margin-bottom:9px}
 .spcard .spname{font-size:13px;font-weight:600}
 .spcard .spmeta{color:var(--dim);font-size:11px;margin-top:4px;
   word-break:break-all;line-height:1.6}
 .spcard .spact{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
-.spcard.readonly{background:#131720;border-style:dashed}
+.spcard.readonly{background:#11151d;border-style:dashed}
 .spedit{margin-top:11px;border-top:1px solid var(--line);padding-top:11px}
-.spedit textarea{width:100%;min-height:40vh;font:12px/1.65 ui-monospace,
+.spedit textarea{width:100%;min-height:34vh;font:12px/1.65 ui-monospace,
   Consolas,"Courier New",monospace;white-space:pre;overflow:auto}
 .spmsg{font-size:12px;margin-top:8px;line-height:1.7}
 .spmsg.ok{color:var(--ok)}
 .spmsg.bad{color:var(--bad)}
+/* footer：固定、带未保存计数 */
 .set-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
-  padding:12px 20px;border-top:1px solid var(--line);background:#141821}
+  padding:11px 18px;border-top:1px solid var(--line);background:#141821}
+button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.set-foot .save-n{color:var(--warn);font-size:12px;white-space:nowrap}
+.set-foot .save-n.zero{color:var(--dim)}
 .set-foot .sstat{color:var(--dim);font-size:12px;margin-left:auto;text-align:right}
 .set-foot .sstat.ok{color:var(--ok)}
 .set-foot .sstat.bad{color:var(--bad)}
 .set-foot .sstat.warn{color:var(--warn)}
-@media (max-width:860px){
+@media (max-width:760px){
+  .set-modal{padding:0;align-items:stretch;justify-content:center}
+  .setbox{width:94vw;height:92vh;max-height:92vh;border-radius:12px;margin:auto}
+  .set-head{padding:10px 13px}
+  .set-head h2{font-size:15px}
+  .set-head .ssub{font-size:11px}
+  .set-secretbar{padding:7px 13px;font-size:11.5px}
   .set-body{flex-direction:column}
-  .set-nav{flex:0 0 auto;flex-direction:row;overflow:auto;border-right:none;
-    border-bottom:1px solid var(--line)}
-  .set-nav button{width:auto;white-space:nowrap}
+  .set-nav{flex:0 0 auto;flex-direction:row;align-items:center;overflow-x:auto;
+    overflow-y:hidden;border-right:none;border-bottom:1px solid var(--line);
+    gap:6px;padding:8px 10px}
+  .set-search{width:132px;flex:0 0 132px;margin:0;font-size:12px}
+  .set-qinfo{display:none}
+  .set-nav .sn-group{padding:0 2px;font-size:10.5px}
+  .set-nav button{width:auto;white-space:nowrap;padding:6px 10px;font-size:12px}
   .set-nav .snav-note{display:none}
-  .srow{grid-template-columns:1fr}
+  .set-pane{padding:12px 12px 18px}
+  .settings-card{padding:10px 11px 4px}
+  .srow{grid-template-columns:1fr;padding:8px 4px}
   .srow>label{padding-top:0}
+  .set-foot{padding:10px 12px;gap:8px}
+  .set-foot button{flex:0 1 auto}
+  .set-foot .save-n{order:4}
+  .set-foot .sstat{flex:1 1 100%;margin-left:0;text-align:left;order:5;font-size:11.5px}
+  .spedit textarea{min-height:26vh}
 }
 /* ---------------- 遗忘曲线月历（卡 C-0061） ----------------
    纯手写网格（零 CDN / 零第三方库），全部用既有 CSS 变量，不引入新色。
@@ -763,7 +824,7 @@ header #q{width:190px;min-width:88px;flex:0 1 190px}
   </div>
   <!-- 设置中心（卡 C-0059）：需求 6 要的「页面右上角设置栏」。刻意放在学科
        切换器**之后**（全页最右）；点开是模态窗而不是新页签，视线不离开当前页。 -->
-  <button class="ghost" id="set-btn" title="设置：AI 问答 / 知识点总结 / 入库 / 课件答疑 四条管线的模型、密钥、识图、推理与提示词">
+  <button class="ghost" id="set-btn" title="设置：AI 问答 / 知识点总结 / 入库 / 课件答疑 / AI 预习总结 各条管线的模型、密钥、识图、推理与提示词">
     <span>⚙</span><span>设置</span>
   </button>
 </header>
@@ -848,13 +909,13 @@ function renderFirstrun(){
   const box = $('#firstrun');
   if (!box || !FIRST) return;
   const d = FIRST, out = [];
-  // ① 没配密钥：说清"哪四条管线不可用 + 去哪填"，并明说离线功能不受影响
+  // ① 没配密钥：说清"哪几条管线不可用 + 去哪填"，并明说离线功能不受影响
   if (!(d.credential && d.credential.ok)) {
     out.push(`<div class="fr warn" id="fr-nokey">
       <h3>⚠ 还没有配置大模型密钥</h3>
       <div class="frbody">
-        <b>暂不可用</b>：AI 问答、知识点总结、入库识图、课件答疑
-        —— 这四条管线都要调大模型。<br>
+        <b>暂不可用</b>：AI 问答、知识点总结、入库识图、课件答疑、预习总结
+        —— 这几条管线都要调大模型。<br>
         <b>照常可用</b>：上传与浏览资料、本地检索、知识点与笔记、错题与复习
         —— 走本地模型与本地库，不需要密钥，也不花钱。
       </div>
@@ -6412,9 +6473,19 @@ subjLoad().catch(() => {
 //   · 提示词是**文件真源**（logs/knowledge/*.md）：保存时后端自动 .bak，
 //     并回报新旧 sha256 —— 产物 meta 里的 prompt_sha256 用的就是这个文件。
 let SET = null;          // 最近一次 /api/settings 的返回
-let SET_TAB = 'chat';    // 当前分区（四条管线之一）
+let SET_TAB = 'chat';    // 当前分区（管线 id）
 let SET_MSG = { cls: '', text: '' };
 let SET_BUSY = false;
+
+// ---------------- 设置中心（改版）：按「现有功能」重排（只改前端展示/交互） ----------------
+// 契约不变：字段仍来自 /api/settings 的 pipelines[].fields（key/type/advanced/hint 原样），
+// 保存仍走 POST /api/settings {values: patch}；这里只负责分组、卡片、搜索与未保存计数。
+// 任何字段都不丢、key 不改：未知字段会落进「其它参数」卡片兜底。
+let SET_Q = '';   // 左栏搜索词（只影响显示，不影响 setCollect/保存）
+const SET_GROUPS = [
+  {title: 'AI 能力', ids: ['chat', 'kp', 'deck', 'preview']},
+  {title: '资料', ids: ['ingest']},
+];
 
 async function openSettings(){
   const box = $('#setmodal');
@@ -6467,8 +6538,12 @@ function humanize(s){
     .replace(/\s{2,}/g, ' ').trim();
 }
 
+// 单条字段（「标签 / 控件 / 说明」三行式）。data-search 给左栏搜索用；
+// data-k 仍是保存时 setCollect 的唯一依据（值/语义一个字不改）。
 function setFieldHtml(f){
   const k = 'data-k="' + f.key + '"';
+  const search = esc([f.label, f.key, f.hint || '', humanize(f.hint || '')]
+    .join(' ').toLowerCase());
   let ctl = '', orig = '';
   if (f.type === 'bool' || f.type === 'fixed'){
     const on = String(f.value) === '1' || f.value === 1 || f.value === true ||
@@ -6489,9 +6564,9 @@ function setFieldHtml(f){
     orig = '';
     const cred = (SET && SET.credential) || {};
     const fb = cred.ok
-      ? '留空时回退到 .dsh 凭据文件里的那把（当前可用 · 尾号 ' + esc(cred.tail || '')
+      ? '留空时回退到本机已保存的密钥（当前可用 · 尾号 ' + esc(cred.tail || '')
         + '）。'
-      : '留空时回退到 .dsh 凭据文件——**当前读不到可用密钥**，这条管线会跑不起来。';
+      : '留空时回退到本机已保存的密钥——**当前读不到可用密钥**，这条管线会跑不起来。';
     ctl = '<input type="password" ' + k + ' data-orig="" value="" '
       + 'autocomplete="new-password" placeholder="'
       + (f.set ? '已配置 · 尾号 ' + esc(f.tail) + '（留空＝不改动）'
@@ -6499,17 +6574,36 @@ function setFieldHtml(f){
       + '<span class="sbadge ' + (f.set ? 'on' : '') + '">'
       + (f.set ? '已配置 · 尾号 ' + esc(f.tail) : '未配置') + '</span>'
       + '<div class="shint">' + em(humanize(fb)) + '</div>';
-  } else if (f.type === 'int'){
+  } else if (f.type === 'int' || f.type === 'float'){
     orig = String(setOr(f.value, ''));
     ctl = '<input type="number" ' + k + ' data-orig="' + esc(orig) + '" value="'
-      + esc(orig) + '">';
+      + esc(orig) + '"' + (f.type === 'float' ? ' step="0.01"' : '') + '>';
   } else {
     orig = String(setOr(f.value, ''));
     ctl = '<input type="text" ' + k + ' data-orig="' + esc(orig) + '" value="'
       + esc(orig) + '">';
   }
-  return '<div class="srow"><label>' + esc(f.label) + '</label><div class="sctl">'
-    + ctl + '<div class="shint">' + em(humanize(f.hint || '')) + '</div></div></div>';
+  return '<div class="srow" data-key="' + esc(f.key) + '" data-search="' + search + '">'
+    + '<label>' + esc(f.label) + '<span class="skey">' + esc(f.key) + '</span></label>'
+    + '<div class="sctl">' + ctl
+    + (f.type === 'secret' ? '' : '<div class="shint">' + em(humanize(f.hint || '')) + '</div>')
+    + '</div></div>';
+}
+
+function setRows(fields){
+  return (fields || []).map(setFieldHtml).join('');
+}
+
+function setCard(title, body, opts){
+  const o = opts || {};
+  return '<div class="settings-card' + (o.muted ? ' muted' : '') + '"'
+    + (o.id ? ' id="' + o.id + '"' : '') + '>'
+    + '<h4>' + esc(title)
+    + (o.badge ? '<span class="sc-badge ' + (o.badgeCls || '') + '">'
+        + esc(o.badge) + '</span>' : '')
+    + '</h4>'
+    + (o.note ? '<div class="set-card-note">' + o.note + '</div>' : '')
+    + body + '</div>';
 }
 
 function setPromptsHtml(p){
@@ -6521,7 +6615,7 @@ function setPromptsHtml(p){
       + ' · ' + setOr(s.chars, 0) + ' 字</div>'
       + '<div class="spact"><button class="ghost" onclick="promptOpen(\'' + s.id
       + '\')">查看 / 编辑</button></div><div id="sp-' + s.id + '"></div></div>').join('');
-    return cards + '<div class="shint" style="margin-top:6px">'
+    return cards + '<div class="set-card-note">'
       + '保存时自动备份旧版本；整理记录里会记下用的是哪一版提示词。</div>';
   }
   if (p.id === 'deck'){
@@ -6540,37 +6634,130 @@ function setPromptsHtml(p){
     + '<div class="spact"><button class="ghost" onclick="promptOpenBuiltin(\''
     + b.id + '\')">查看</button></div><div id="sp-' + b.id + '"></div></div>';
   }).join('');
-  const tail = (p.id === 'ingest')
-    ? '<div class="shint" style="margin-top:6px">' + em('入库识图**没有可编辑的提示词**：'
-      + '它的口径是固定的，上面这段用于整份资料的结构分析。') + '</div>'
-    : '<div class="shint" style="margin-top:6px">问答的系统提示词决定"只依据资料作答、'
-      + '找不到就说没有"的口径；这一版不给窗口改，避免一句话改坏引用纪律。</div>';
-  return cards + tail;
+  return cards;
+}
+
+// 入库方式横幅文案：开=整页切块；关=旧模式（结构分析 + 跨页语义切块）。
+function setModeBannerText(on){
+  return on
+    ? '当前：整页切块 · 每页一块；有图页识图文字并入同一块；不跑 AI 结构分析、不建独立识图块'
+    : '当前：旧模式 · AI 结构分析 + 跨页语义切块 + 独立识图块';
+}
+
+// 入库页重排：入库方式（主开关）→ 识图 → AI 结构分析（旧模式专用，默认折叠）
+// → 连接与密钥 → 提示词（旧模式）。字段一个不少，未知字段落入「其它参数」兜底。
+function setIngestPaneHtml(p){
+  const by = {};
+  (p.fields || []).forEach(f => { by[f.key] = f; });
+  const used = new Set();
+  const take = keys => keys.map(k => by[k]).filter(Boolean).map(f => {
+    used.add(f.key); return setFieldHtml(f);
+  }).join('');
+  const pageChunk = by['INGEST_PAGE_CHUNK'];
+  const onChunk = !!pageChunk && String(pageChunk.value) === '1';
+
+  let html = '';
+  if (pageChunk){
+    used.add('INGEST_PAGE_CHUNK');
+    html += '<div class="settings-card" id="set-ingest-mode">'
+      + '<h4>入库方式 <span class="sc-badge ' + (onChunk ? 'ok' : 'warn') + '">'
+      + (onChunk ? '整页切块' : '旧模式') + '</span></h4>'
+      + '<div class="set-card-note">这是入库的主开关：先定模式，再看下面哪些参数会生效。</div>'
+      + setFieldHtml(pageChunk)
+      + '<div class="mode-banner ' + (onChunk ? '' : 'off') + '" id="ingest-mode-banner">'
+      + esc(setModeBannerText(onChunk)) + '</div>'
+      + '</div>';
+  }
+  html += setCard('识图（图片理解）',
+    take(['DEEPSEEK_VISION_MODEL', 'FIGURE_DESC', 'FIGURE_THINKING',
+          'FIGURE_REASONING_EFFORT', 'FIGURE_RENDER_DPI', 'FIGURE_MAX_CALLS_PER_DOC']),
+    {note: '整页切块模式下 pptx 只对有图页调用；PDF 暂按原口径全页。'});
+  html += '<div class="settings-card' + (onChunk ? ' muted' : '') + '" id="set-structure-card">'
+    + '<h4>AI 结构分析（旧模式专用）'
+    + '<span class="sc-badge ' + (onChunk ? 'warn' : 'ok') + '">'
+    + '仅当整页切块关闭时生效 · ' + (onChunk ? '当前不生效' : '当前生效')
+    + '</span></h4>'
+    + '<details class="set-adv set-adv-in"><summary>展开结构分析参数（3 项）</summary>'
+    + '<div class="setadvbody">'
+    + take(['INGEST_MODEL', 'OUTLINE_ANALYSIS', 'OUTLINE_THINKING'])
+    + '</div></details>'
+    + '<div class="set-card-note">这一组只在「整页切块」关闭时使用；'
+    + '整页切块模式下不跑 AI 结构分析。开关值仍可改、可保存（改完下次入库按新模式走）。</div>'
+    + '</div>';
+  html += setCard('连接与密钥', take(['DEEPSEEK_BASE_URL', 'INGEST_API_KEY']));
+  const rest = (p.fields || []).filter(f => !used.has(f.key));
+  if (rest.length){
+    html += setCard('其它参数', setRows(rest),
+      {note: '这些字段没有归入上面的分组，原样保留（不丢字段、不改 key）。'});
+  }
+  html += setCard('提示词（旧模式）', setPromptsHtml(p),
+    {note: '旧模式的结构分析提示词；整页切块模式不使用。'});
+  return html;
 }
 
 function setPaneHtml(p){
   if (!p) return '<div class="empty">没有可配置的管线</div>';
-  const conn = p.fields.filter(f =>
+  const head = '<h3><span>' + (p.icon || '') + '</span>' + esc(p.label) + '</h3>'
+    + '<div class="pdesc">' + esc(humanize(p.sub || '')) + '<br>'
+    + em(humanize(p.desc || '')) + '</div>';
+  if (p.id === 'ingest') return head + setIngestPaneHtml(p);
+  const conn = (p.fields || []).filter(f =>
     !f.advanced && (f.type === 'str' || f.type === 'secret'));
-  const sw = p.fields.filter(f =>
+  const sw = (p.fields || []).filter(f =>
     !f.advanced && f.type !== 'str' && f.type !== 'secret' && f.type !== 'note');
-  const adv = p.fields.filter(f => f.advanced);
-  let html = '<h3><span>' + (p.icon || '') + '</span>' + esc(p.label) + '</h3>'
-    + '<div class="pdesc">' + esc(humanize(p.sub || '')) + '<br>' + em(humanize(p.desc || '')) + '</div>';
-  if (conn.length){
-    html += '<div class="set-group"><h4>模型 · 端点 · 密钥</h4>'
-      + conn.map(setFieldHtml).join('') + '</div>';
-  }
-  if (sw.length){
-    html += '<div class="set-group"><h4>识图 · 推理 · 强度</h4>'
-      + sw.map(setFieldHtml).join('') + '</div>';
-  }
+  const adv = (p.fields || []).filter(f => f.advanced);
+  let html = head;
+  html += setCard('连接与密钥', setRows(conn));
+  html += setCard('参数与开关', setRows(sw));
   if (adv.length){
-    html += '<details class="set-adv"><summary>高级参数（' + adv.length + ' 项）</summary>'
-      + '<div class="setadvbody">' + adv.map(setFieldHtml).join('') + '</div></details>';
+    html += '<div class="settings-card">'
+      + '<details class="set-adv set-adv-in"><summary>高级参数（'
+      + adv.length + ' 项）</summary><div class="setadvbody">'
+      + setRows(adv) + '</div></details></div>';
   }
-  html += '<div class="set-group"><h4>提示词</h4>' + setPromptsHtml(p) + '</div>';
+  html += setCard('提示词', setPromptsHtml(p));
   return html;
+}
+
+// 左栏：搜索框 + 两组导航（AI 能力 / 资料）+ 每项状态点 + 底部说明。
+function setNavHtml(pipes){
+  const byId = {};
+  pipes.forEach(p => { byId[p.id] = p; });
+  const btn = p => {
+    const st = setPipeKeyState(p);
+    const dot = st
+      ? '<span class="sn-dot ' + st + '" title="'
+        + (st === 'on' ? '密钥已配置' : '密钥未配置（留空＝用本机已保存的密钥）')
+        + '"></span>' : '';
+    return '<button data-p="' + p.id + '" class="' + (p.id === SET_TAB ? 'on' : '')
+      + '" onclick="setTab(\'' + p.id + '\')">'
+      + '<span class="sn-ic">' + (p.icon || '') + '</span>'
+      + '<span class="sn-name">' + esc(p.label) + '</span>' + dot + '</button>';
+  };
+  let h = '<input class="set-search" id="set-q" type="search" value="' + esc(SET_Q)
+    + '" placeholder="搜索设置项（名称 / 键 / 说明）" autocomplete="off">'
+    + '<div class="set-qinfo" id="set-qinfo"></div>';
+  const grouped = new Set();
+  SET_GROUPS.forEach(g => {
+    const items = g.ids.map(id => byId[id]).filter(Boolean);
+    items.forEach(p => grouped.add(p.id));
+    if (items.length) h += '<div class="sn-group">' + esc(g.title) + '</div>'
+      + items.map(btn).join('');
+  });
+  const others = pipes.filter(p => !grouped.has(p.id));
+  if (others.length){
+    h += '<div class="sn-group">其它</div>' + others.map(btn).join('');
+  }
+  h += '<div class="snav-note">设置只保存在本机<br>不会上传、不会进代码仓库<br>'
+    + '密钥留空＝不改动</div>';
+  return h;
+}
+
+// 每项管线的小状态点：看这条管线的密钥字段（后端给的 set 状态）；取不到就不显示。
+function setPipeKeyState(p){
+  const sec = (p.fields || []).find(f => f.type === 'secret');
+  if (!sec) return '';
+  return sec.set ? 'on' : 'off';
 }
 
 function setRender(){
@@ -6584,27 +6771,120 @@ function setRender(){
     return;
   }
   const pipes = SET.pipelines || [];
-  const nav = pipes.map(p =>
-    '<button data-p="' + p.id + '" class="' + (p.id === SET_TAB ? 'on' : '')
-    + '" onclick="setTab(\'' + p.id + '\')"><span>' + (p.icon || '')
-    + '</span><span>' + esc(p.label) + '</span></button>').join('');
   const cur = setPipe();
   box.innerHTML =
-    '<div class="set-head"><div><h2>⚙ 设置中心</h2>'
-    + '<div class="ssub">四条管线各配各的模型 / 密钥 / 识图 / 推理 / 提示词；'
-    + '保存后<strong>立刻生效</strong>，不用重启看板（正在跑的任务不受影响）</div></div>'
+    '<div class="set-head"><div><h2>⚙ 设置中心 · ' + pipes.length + ' 条管线</h2>'
+    + '<div class="ssub">只保存在本机 · 保存后立即生效 · 密钥只显示后 4 位，留空＝不改动</div></div>'
     + '<button class="set-x" onclick="closeSettings()" title="关闭（Esc）">✕</button></div>'
     + '<div class="set-secretbar"><span>🔒</span><span>'
     + 'API 密钥只保存在本机，不会上传到任何服务器；窗口里只显示后 4 位，留空表示不改动。'
     + '</span></div>'
-    + '<div class="set-body"><div class="set-nav">' + nav
-    + '<div class="snav-note">设置只保存在本机<br>不会上传、不会进代码仓库<br>密钥留空＝不改动</div></div>'
-    + '<div class="set-pane" id="setpane">' + setPaneHtml(cur) + '</div></div>'
-    + '<div class="set-foot"><button class="act" onclick="setSave()">保存</button>'
+    + '<div class="set-body">'
+    + '<div class="set-nav">' + setNavHtml(pipes) + '</div>'
+    + '<div class="set-pane" id="setpane">' + setPaneHtml(cur)
+    + '<div class="set-nomatch" id="set-nomatch" style="display:none">没有匹配项</div></div>'
+    + '</div>'
+    + '<div class="set-foot">'
+    + '<button class="act" id="set-save" onclick="setSave()">保存</button>'
     + '<button class="ghost" onclick="setResetPane()">本区恢复默认</button>'
     + '<button class="ghost" onclick="SET=null;openSettings()">重新读取</button>'
-    + '<div class="sstat ' + SET_MSG.cls + '" id="setstat">' + esc(SET_MSG.text || '')
-    + '</div></div>';
+    + '<span class="save-n zero" id="set-unsaved">无未保存改动</span>'
+    + '<div class="sstat ' + SET_MSG.cls + '" id="setstat">'
+    + esc(SET_MSG.text || '') + '</div>'
+    + '</div>';
+  setBind();
+}
+
+function setBind(){
+  const q = $('#set-q');
+  if (q){
+    q.oninput = () => setSearchApply(q.value);
+    setSearchApply(SET_Q);
+  }
+  const pane = $('#setpane');
+  if (pane){
+    pane.addEventListener('input', setCounter);
+    pane.addEventListener('change', setCounter);
+  }
+  setIngestBind();
+  setCounter();
+}
+
+// 搜索：只切显示/高亮，**不删 DOM**（setCollect 仍能读到被隐藏字段的改动，保存不受影响）。
+function setSearchApply(q){
+  SET_Q = String(q || '').trim();
+  const pane = $('#setpane');
+  if (!pane) return;
+  const ql = SET_Q.toLowerCase();
+  let hit = 0;
+  const rows = [...pane.querySelectorAll('.srow')];
+  rows.forEach(row => {
+    const text = (row.dataset.search || row.textContent || '').toLowerCase();
+    const ok = !ql || text.indexOf(ql) >= 0;
+    row.style.display = ok ? '' : 'none';
+    row.classList.toggle('hit', !!ql && ok);
+    if (ok) hit++;
+  });
+  pane.querySelectorAll('.settings-card').forEach(card => {
+    const rs = [...card.querySelectorAll('.srow')];
+    if (rs.length && ql && !rs.some(r => r.style.display !== 'none')){
+      card.style.display = 'none';
+    } else {
+      card.style.display = '';
+    }
+  });
+  // 命中的字段在折叠区里 → 自动展开，方便定位
+  if (ql){
+    pane.querySelectorAll('details').forEach(det => {
+      if (det.querySelector('.srow.hit')) det.open = true;
+    });
+  }
+  const no = $('#set-nomatch');
+  if (no) no.style.display = (ql && hit === 0) ? '' : 'none';
+  const info = $('#set-qinfo');
+  if (info) info.textContent = ql ? ('命中 ' + hit + ' 项') : '';
+  setCounter();
+}
+
+// 入库方式开关：**不重渲染**（否则会丢掉其它未保存改动），只就地更新横幅/徽标/卡片灰化。
+function setIngestBind(){
+  const cb = document.querySelector('#set-ingest-mode [data-k="INGEST_PAGE_CHUNK"]');
+  if (!cb) return;
+  cb.addEventListener('change', setIngestModePaint);
+}
+function setIngestModePaint(){
+  const cb = document.querySelector('#set-ingest-mode [data-k="INGEST_PAGE_CHUNK"]');
+  if (!cb) return;
+  const on = !!cb.checked;
+  const banner = $('#ingest-mode-banner');
+  if (banner){
+    banner.className = 'mode-banner' + (on ? '' : ' off');
+    banner.textContent = setModeBannerText(on);
+  }
+  const modeCard = $('#set-ingest-mode');
+  const modeBadge = modeCard ? modeCard.querySelector('h4 .sc-badge') : null;
+  if (modeBadge){
+    modeBadge.className = 'sc-badge ' + (on ? 'ok' : 'warn');
+    modeBadge.textContent = on ? '整页切块' : '旧模式';
+  }
+  const card = $('#set-structure-card');
+  if (card){
+    card.classList.toggle('muted', on);
+    const badge = card.querySelector('h4 .sc-badge');
+    if (badge){
+      badge.className = 'sc-badge ' + (on ? 'warn' : 'ok');
+      badge.textContent = '仅当整页切块关闭时生效 · ' + (on ? '当前不生效' : '当前生效');
+    }
+  }
+  const sw = cb.closest('.switch');
+  if (sw){
+    sw.classList.toggle('off', !on);
+    const label = sw.querySelector('span');
+    if (label && label.textContent.indexOf('固定') < 0){
+      label.textContent = on ? '已开启' : '已关闭';
+    }
+  }
+  setCounter();
 }
 
 function setCollect(){
@@ -6620,6 +6900,18 @@ function setCollect(){
   return out;
 }
 
+// footer：实时「N 项未保存」；无改动/保存中时禁用「保存」。
+function setCounter(){
+  const n = Object.keys(setCollect()).length;
+  const el = $('#set-unsaved');
+  if (el){
+    el.textContent = n ? (n + ' 项未保存') : '无未保存改动';
+    el.classList.toggle('zero', n === 0);
+  }
+  const btn = $('#set-save');
+  if (btn) btn.disabled = (n === 0) || !!SET_BUSY;
+}
+
 async function setTab(id){
   if (id === SET_TAB) return;
   const patch = setCollect();
@@ -6629,8 +6921,11 @@ async function setTab(id){
     if (!go2) return;
   }
   SET_TAB = id;
+  SET_Q = '';
   SET_MSG = { cls: '', text: '' };
   setRender();
+  const pane = $('#setpane');
+  if (pane) pane.scrollTop = 0;
 }
 
 async function setSave(){
@@ -6653,8 +6948,7 @@ async function setSave(){
       throw new Error(((r && r.errors) || []).join('；') || '保存失败');
     }
     if (r.settings) SET = r.settings;
-    // 卡 C-0071：刚在窗口里配好密钥 → 首屏那条"还没配置密钥"横幅立刻收掉，
-    // 不用等人切页或刷新（他保存完最想看的就是"到底生效没有"）。
+    // 刚在窗口里配好密钥 → 首屏那条"还没配置密钥"横幅立刻收掉
     loadFirstrun(true);
     const applied = Object.keys(r.applied || {}).length;
     SET_MSG = { cls: 'ok', text: '已保存 ' + (r.saved || []).length + ' 项并生效（运行时推送 '

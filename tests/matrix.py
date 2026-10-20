@@ -180,6 +180,9 @@ MATRIX = [
     dict(id="F107", feature="课件整页切块（每页一块 + 识图并入同一块，旧模式可回退）",
          entry="study.py ingest + config.INGEST_PAGE_CHUNK / KB_INGEST_PAGE_CHUNK",
          kind="write", priority="P1", tests=["test_15_page_chunk"], evidence="json+db"),
+    dict(id="F108", feature="设置中心改版（5 管线分组/入库方式突出/搜索/未保存计数/响应式）",
+         entry="⚙ 设置中心（前端）", kind="ui", priority="P1",
+         tests=["test_16_settings_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
