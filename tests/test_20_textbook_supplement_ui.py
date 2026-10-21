@@ -61,10 +61,12 @@ class TestPopupTeachSidebar(unittest.TestCase):
             self.assertIn(probe, _PAGE, f"原有小窗控件丢失：{probe}")
 
     def test_content_parts(self):
+        # task-30 改版后：本地匹配内容收进「教材原文（参考）」折叠区，新增 AI 卡；
+        # 这里断言"本地兜底 + 页图 + 底部注释"仍在。
         for probe in (
-            "教材补充", "mteach-pages", "mteach-pg", "mteach-tx",
-            "mteach-hits", "mteach-term", "mteach-foot",
-            "补充段落", "教材补充点",
+            "教材补充", "教材原文（参考）", "mteach-pages", "mteach-pg",
+            "mteach-tx", "mteach-hits", "mteach-term", "mteach-foot",
+            "教材补充点", "mteach-local", "mteach-ai",
             'img loading="lazy"',
             "/api/teach-page?doc_id=",
             "dpi=110", "dpi=150",
@@ -106,10 +108,10 @@ class TestMindmapBackfill(unittest.TestCase):
             "mmteach-ready",
             "检测到教材《",
             "补做教材补充",
-            "教材补充已就绪：",
+            "教材补充已就绪",
             "不改动原知识点",
             "/api/textbook-supplement/build",
-            "force: false",
+            "force: legacy",
         ):
             self.assertIn(probe, _PAGE, f"缺少导图栏提醒实现：{probe}")
 

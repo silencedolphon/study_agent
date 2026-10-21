@@ -515,6 +515,76 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
 .mmteach-banner .small{display:block;color:#d8c69a;font-size:11px;margin-top:2px}
 .mmteach-banner button{flex:0 0 auto}
 .mmteach-ready{color:var(--ok);font-size:11.5px;margin:0 0 7px}
+/* ---------------- 特性3（task-30）：教材补充 AI 卡 / 旧版提示 / 本地原文折叠 ----------------
+   右侧栏结构（自上而下）：教材名 → 整份课件定位章（AI/本地兜底小字）→ 页图
+   → AI 补充卡（未生成 estimate+生成 / 已生成 verdict+points+gaps+citations /
+   no_supplement / failed / busy / 旧版提示）→「教材原文（参考）」折叠区。
+   所有选择器仍挂在 .evpop 下，不碰其它页面。 */
+.evpop .mteach-cm{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font-size:11.5px;color:var(--dim);line-height:1.7;margin:0 0 7px}
+.evpop .mteach-cm b{color:var(--fg);font-weight:600}
+.evpop .mteach-cm-src{font-size:10px;border:1px solid var(--line);border-radius:10px;
+  padding:0 6px;color:var(--dim);white-space:nowrap}
+.evpop .mteach-cm-src.ai{color:#cfe0ff;border-color:#233047}
+.evpop .mteach-cm-src.local{color:var(--warn);border-color:#3d3218}
+.evpop .mteach-ai{border:1px solid var(--line);border-radius:8px;background:#151b24;
+  padding:8px 9px;margin:8px 0}
+.evpop .mteach-ai-h{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font-size:12px;font-weight:600;margin:0 0 5px}
+.evpop .mteach-ai-badge{font-size:10.5px;font-weight:500;padding:1px 7px;
+  border-radius:20px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.evpop .mteach-ai-badge.ok{color:var(--ok);border-color:#1c3a24}
+.evpop .mteach-ai-badge.warn{color:var(--warn);border-color:#3d3218}
+.evpop .mteach-ai-badge.bad{color:var(--bad);border-color:#4a1f1c}
+.evpop .mteach-ai-est{color:var(--dim);font-size:11px;line-height:1.75;margin:3px 0 7px}
+.evpop .mteach-ai-est b{color:var(--fg);font-weight:600}
+.evpop .mteach-ai-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.evpop .mteach-ai-act button{font-size:12px}
+.evpop .mteach-spin{display:inline-block;width:11px;height:11px;
+  border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;
+  animation:mteachspin .8s linear infinite;vertical-align:-1px;margin-right:5px}
+@keyframes mteachspin{to{transform:rotate(360deg)}}
+.evpop .mteach-verdict{font-size:12.5px;color:var(--fg);line-height:1.75;
+  margin:2px 0 5px;word-break:break-word}
+.evpop .mteach-sum{font-size:12px;color:var(--dim);line-height:1.75;margin:0 0 6px;
+  word-break:break-word}
+.evpop .mteach-points{display:flex;flex-direction:column;gap:4px}
+.evpop .mteach-point{font-size:12px;line-height:1.7;padding:5px 6px;
+  border-left:2px solid #233047;background:#12161e;border-radius:0 5px 5px 0;
+  word-break:break-word}
+.evpop .mteach-kind{font-size:10px;color:#cfe0ff;border:1px solid #233047;
+  border-radius:10px;padding:0 5px;margin-left:4px;white-space:nowrap}
+.evpop .mteach-pages-tag{color:var(--dim);font-size:10.5px;margin-left:4px}
+.evpop .mteach-gaps{color:#ffd48a;font-size:11.5px;line-height:1.75;
+  margin-top:6px;word-break:break-word}
+.evpop .mteach-gaps b{display:block;color:var(--warn);margin-bottom:2px}
+.evpop .mteach-cites{border:1px solid var(--line);border-radius:7px;
+  margin-top:6px;background:#12161e}
+.evpop .mteach-cites>summary{cursor:pointer;padding:6px 8px;font-size:11.5px;
+  color:var(--dim);list-style:none}
+.evpop .mteach-cites>summary::-webkit-details-marker{display:none}
+.evpop .mteach-cites>summary::before{content:'▸ '}
+.evpop .mteach-cites[open]>summary::before{content:'▾ '}
+.evpop .mteach-cite{padding:5px 8px;border-top:1px dashed var(--line);
+  font-size:11.5px;line-height:1.7;color:var(--dim);word-break:break-word}
+.evpop .mteach-ai-foot{color:var(--dim);font-size:10.5px;margin-top:6px;
+  line-height:1.6;word-break:break-word}
+.evpop .mteach-legacy{border:1px solid #3d3218;background:#211b10;
+  color:#ffd48a;border-radius:8px;padding:8px 9px;margin:8px 0;
+  font-size:12px;line-height:1.7}
+.evpop .mteach-legacy .small{display:block;color:#d8c69a;font-size:11px;
+  margin:3px 0 6px;line-height:1.65}
+.evpop .mteach-local{border:1px solid var(--line);border-radius:8px;
+  background:#12161e;margin:8px 0;padding:0 8px 6px}
+.evpop .mteach-local>summary{cursor:pointer;padding:7px 0;font-size:11.5px;
+  color:var(--dim);list-style:none}
+.evpop .mteach-local>summary::-webkit-details-marker{display:none}
+.evpop .mteach-local>summary::before{content:'▸ 教材原文（参考）'}
+.evpop .mteach-local[open]>summary::before{content:'▾ 教材原文（参考）'}
+@media (max-width:900px){
+  .evpop .mteach-ai{padding:7px 8px}
+  .evpop .mteach-ai-act button{flex:1 1 auto}
+}
 /* 卡 C-0055：出处小窗里的"这一页"——课件图 + 该页知识点。
    人拍板（2026-09-27）：「AI问答版块点击右下标签时最好可以跳出那一页的课件图片。
    并且可以看到那一页课件对应的知识点，形成一个网状知识体系。」
@@ -5201,57 +5271,181 @@ async function mmTeachPaint(d, el){
   mmTeachRender(aside, kpData || {}, st || {}, d);
 }
 
+function mteachNum(v, dflt){ const n = Number(v); return isFinite(n) ? n : (dflt || 0); }
+function mteachCostTxt(v, fallback){
+  const n = mteachNum(v, 0);
+  return n > 0 ? ('≤¥' + n.toFixed(4)) : (fallback || '按实际计费');
+}
+function mteachEst(est){
+  const e = est || {};
+  return {calls: mteachNum(e.calls, 1) || 1,
+          cost: mteachNum(e.cost_cny_max, 0),
+          model: e.model || '默认模型',
+          thinking: !!e.thinking, effort: e.effort || ''};
+}
+function mteachSourceTxt(src){
+  if (src === 'ai') return {cls: 'ai', text: 'AI 定位'};
+  if (src === 'local_fallback') return {cls: 'local', text: '本地兜底'};
+  return {cls: '', text: src || '本地匹配'};
+}
+function mteachChapterLine(cm, entry){
+  const c = (cm && typeof cm === 'object') ? cm : {};
+  const ch = (entry && entry.chapter && typeof entry.chapter === 'object')
+    ? entry.chapter : {};
+  const no = mteachNum(c.chapter_no || ch.no, 0);
+  const nameRaw = String(c.chapter_name || c.name || ch.name || '');
+  const nameHasNo = /第\s*\d+\s*章/.test(nameRaw);
+  const name = nameHasNo ? nameRaw : nameRaw;
+  const page = c.page_label || (entry && entry.page_label) || '';
+  if (!no && !name && !page) return '';
+  const src = mteachSourceTxt(c.source || (entry && entry.source));
+  const cost = mteachNum(c.cost_cny, 0);
+  return `<div class="mteach-cm">
+    <span>整份课件定位：<b>${no && !nameHasNo ? ('第' + no + '章 ') : ''}${esc(name || '（未定位到章）')}</b>${page ? ' · ' + esc(page) : ''}</span>
+    <span class="mteach-cm-src ${src.cls}">${esc(src.text)}</span>
+    ${cost > 0 ? `<span class="mteach-cm-src">映射成本 ¥${cost.toFixed(4)}</span>` : ''}
+  </div>`;
+}
+function mteachPagesHtml(entry, tb, st){
+  const pages = (entry.pages || []).filter(p => parseInt(p, 10) > 0).slice(0, 3);
+  if (!pages.length) return '';
+  const tbId = mteachNum(tb.doc_id || ((st && st.supplement) || {}).textbook_doc_id, 0);
+  if (!tbId) return '';
+  return `<div class="mteach-pages">${pages.map(p => `<a class="mteach-pg"
+      href="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=150"
+      target="_blank" rel="noopener" title="打开教材 p.${p} 原尺寸">
+      <img loading="lazy" src="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=110"
+        alt="教材 p.${p}" onerror="this.classList.add('bad')">
+      <span>p.${p}</span></a>`).join('')}</div>`;
+}
+function mteachLocalHtml(entry){
+  const passages = (entry.passages || []).filter(Boolean);
+  const terms = (entry.added_terms || []).map(t =>
+    (typeof t === 'string') ? t : (t.term || t.word || t.name || '')).filter(Boolean);
+  if (!passages.length && !terms.length) return '';
+  const psHtml = passages.map(p => {
+    const txt = String(p.text || '');
+    const cut = txt.length > 350 ? '…' : '';
+    const hits = (p.hit_terms || []).slice(0, 5);
+    const pg = p.page_label || (p.page_start ? ('p.' + p.page_start) : '');
+    return `<div class="mteach-ps">
+      <div class="mteach-ps-h"><span class="mteach-pgno">${esc(pg)}</span>
+        ${p.score ? `<span class="mteach-score">匹配 ${Number(p.score).toFixed(1)}</span>` : ''}</div>
+      <div class="mteach-tx">${esc(txt.slice(0, 350))}${cut}</div>
+      ${hits.length ? `<div class="mteach-hits">${hits.map(t =>
+        `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
+  }).join('');
+  const termsHtml = terms.length ? `<div class="mteach-sec">教材补充点</div>
+    <div class="mteach-terms">${terms.slice(0, 12).map(t =>
+      `<span class="mteach-term">${esc(t)}</span>`).join('')}</div>` : '';
+  return `<details class="mteach-local">
+    <summary>${passages.length} 段${terms.length ? ' · ' + terms.length + ' 个补充点' : ''}（本地匹配，点开看）</summary>
+    ${psHtml}${termsHtml}
+    <div class="mteach-foot">按教材章节切块匹配，仅供参考；不改动原知识点</div>
+  </details>`;
+}
+function mteachAiPoints(points){
+  return (points || []).filter(Boolean).map(p => {
+    if (typeof p === 'string') return `<div class="mteach-point">${esc(p)}</div>`;
+    const kind = p.kind || p.type || '';
+    const pages = Array.isArray(p.pages) ? p.pages : (p.page ? [p.page] : []);
+    return `<div class="mteach-point">${esc(String(p.text || p.content || ''))}
+      ${kind ? `<span class="mteach-kind">${esc(kind)}</span>` : ''}
+      ${pages.length ? `<span class="mteach-pages-tag">${pages.map(x => 'p.' + x).join('、')}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+function mteachAiCard(entry, kpData, st, busy){
+  const ai = (entry && entry.ai && typeof entry.ai === 'object') ? entry.ai : null;
+  const est = mteachEst((kpData && kpData.estimate) || (st && st.estimate) || {});
+  const aiCfg = (st && st.ai && typeof st.ai === 'object') ? st.ai : {};
+  const enabled = aiCfg.enabled !== false;
+  if (busy){
+    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
+      <span class="mteach-ai-badge warn"><span class="mteach-spin"></span>AI 分析中…</span></div>
+      <div class="mteach-ai-est">正在让外接大模型对比课件与教材（约 1 次调用，可能 5–20 秒），请稍候。</div></div>`;
+  }
+  if (!ai || !ai.status){
+    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
+      <span class="mteach-ai-badge">未生成</span></div>
+      <div class="mteach-ai-est">让外接大模型读「教材对应小节」与「本知识点」：
+        补课件没讲到的内容、指出课件没讲清的缺口，不改动原知识点。<br>
+        预计 <b>${est.calls} 次调用</b> · 成本上界 <b>${mteachCostTxt(est.cost)}</b> · 模型 <b>${esc(est.model)}</b>
+        ${enabled ? '' : ' · <span style="color:var(--warn)">AI 未启用（检查设置中心密钥）</span>'}</div>
+      <div class="mteach-ai-act"><button class="act" id="mteach-gen"
+        ${enabled ? '' : 'disabled'}>生成 AI 补充</button></div></div>`;
+  }
+  const status = String(ai.status || '');
+  if (status === 'failed'){
+    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
+      <span class="mteach-ai-badge bad">生成失败</span></div>
+      <div class="mteach-ai-est">${esc(ai.error || ai.summary || 'AI 生成失败（可重试）')}
+        <br>本地「教材原文（参考）」仍可在下方查看，不受影响。</div>
+      <div class="mteach-ai-act"><button class="act" id="mteach-gen" data-force="1">重试生成</button></div></div>`;
+  }
+  const badge = status === 'no_supplement'
+    ? '<span class="mteach-ai-badge warn">AI：无需补充</span>'
+    : '<span class="mteach-ai-badge ok">AI 已生成</span>';
+  const noSupLine = status === 'no_supplement'
+    ? '<div class="mteach-ai-est">AI 判断教材对应小节没有需要补充的内容。</div>'
+    : '';
+  const points = mteachAiPoints(ai.points);
+  const gaps = (ai.gaps || []).filter(Boolean);
+  const cites = (ai.citations || []).filter(Boolean);
+  const citesHtml = cites.length ? `<details class="mteach-cites">
+    <summary>教材出处（${cites.length} 条，点开看原文）</summary>
+    ${cites.map(c => {
+      if (typeof c === 'string') return `<div class="mteach-cite">${esc(c)}</div>`;
+      const pg = c.page_label || (c.page ? ('p.' + c.page) : '');
+      return `<div class="mteach-cite">${pg ? `<b>${esc(pg)}</b> · ` : ''}${esc(String(c.text || c.quote || c.chunk_text || ''))}</div>`;
+    }).join('')}</details>` : '';
+  const foot = [ai.model ? ('模型 ' + ai.model) : '',
+                ai.cost_cny != null ? ('费用 ¥' + mteachNum(ai.cost_cny).toFixed(4)) : '',
+                ai.elapsed_s != null ? ('耗时 ' + mteachNum(ai.elapsed_s).toFixed(1) + 's') : ''
+               ].filter(Boolean).join(' · ');
+  return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充 ${badge}</div>
+    ${noSupLine}
+    ${ai.verdict ? `<div class="mteach-verdict">${pvText(ai.verdict)}</div>` : ''}
+    ${ai.summary ? `<div class="mteach-sum">${pvText(ai.summary)}</div>` : ''}
+    ${points ? `<div class="mteach-points">${points}</div>` : ''}
+    ${gaps.length ? `<div class="mteach-gaps"><b>课件没讲 / 没讲清</b>${gaps.map(g => '· ' + esc(String(g))).join('<br>')}</div>` : ''}
+    ${citesHtml}
+    ${foot ? `<div class="mteach-ai-foot">${esc(foot)}</div>` : ''}
+    <div class="mteach-ai-act">
+      <button class="ghost" id="mteach-gen" data-force="1">重新生成</button>
+    </div></div>`;
+}
+
 function mmTeachRender(aside, kpData, st, d){
   MMTEACH.lastStatus = st || {};
+  MMTEACH.ctx = {aside, kpData, st, d};
   const tb = (kpData && kpData.textbook) || {};
   const entry = (kpData && kpData.entry) || {};
   const books = (st && st.textbooks) || [];
   const hasTb = !!(st && st.has_textbook) || books.length > 0;
+  const legacy = !!(st && st.legacy);
   const sup = (st && st.supplement) || {};
-  const passages = (entry.passages || []).filter(Boolean);
-  const available = !!((kpData && kpData.available) && passages.length);
+  const available = !!((kpData && kpData.available) && ((entry.passages || []).length || entry.ai));
   const head = `<div class="mteach-h"><b>📖 教材补充</b>
     <button class="mteach-x" title="收起教材补充" onclick="mmTeachClose()">✕</button></div>`;
   let body = '';
-  if (available){
-    const pages = (entry.pages || []).filter(p => parseInt(p, 10) > 0).slice(0, 3);
-    const tbId = parseInt(tb.doc_id || (st && st.supplement || {}).textbook_doc_id || 0, 10) || 0;
-    const imgs = pages.map(p => `<a class="mteach-pg"
-        href="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=150"
-        target="_blank" rel="noopener" title="打开 p.${p} 原尺寸">
-        <img loading="lazy" src="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=110"
-          alt="教材 p.${p}" onerror="this.classList.add('bad')">
-        <span>p.${p}</span></a>`).join('');
-    const ch = entry.chapter || {};
-    const chName = ch.name || '';
-    const chLine = /第\s*\d+\s*章/.test(chName)
-      ? chName
-      : [ch.no ? ('第' + ch.no + '章') : '', chName].filter(Boolean).join(' ');
-    const psHtml = passages.map(p => {
-      const txt = String(p.text || '');
-      const cut = txt.length > 350 ? '…' : '';
-      const hits = (p.hit_terms || []).slice(0, 5);
-      const pg = p.page_label || (p.page_start ? ('p.' + p.page_start) : '');
-      return `<div class="mteach-ps">
-        <div class="mteach-ps-h"><span class="mteach-pgno">${esc(pg)}</span>
-          ${p.score ? `<span class="mteach-score">匹配 ${Number(p.score).toFixed(1)}</span>` : ''}</div>
-        <div class="mteach-tx">${esc(txt.slice(0, 350))}${cut}</div>
-        ${hits.length ? `<div class="mteach-hits">${hits.map(t =>
-          `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
-    }).join('');
-    const terms = (entry.added_terms || []).map(t =>
-      (typeof t === 'string') ? t : (t.term || t.word || t.name || '')).filter(Boolean);
-    const termsHtml = terms.length ? `<div class="mteach-sec">教材补充点</div>
-      <div class="mteach-terms">${terms.slice(0, 12).map(t =>
-        `<span class="mteach-term">${esc(t)}</span>`).join('')}</div>` : '';
+  if (available || (legacy && kpData && kpData.available)){
+    const bookTitle = tb.title || ((books[0] || {}).title) || '教材';
+    const cmLine = mteachChapterLine((st && st.chapter_map) || entry.chapter || {},
+                                     entry);
     body = head
-      + `<div class="mteach-sub">📚 ${esc(tb.title || ((books[0] || {}).title) || '教材')}</div>`
-      + ((chLine || entry.page_label)
-          ? `<div class="mteach-ch">${esc(chLine)}${entry.page_label
-              ? (chLine ? ' · ' : '') + esc(entry.page_label) : ''}</div>` : '')
-      + (imgs ? `<div class="mteach-pages">${imgs}</div>` : '')
-      + `<div class="mteach-sec">补充段落</div>` + psHtml + termsHtml
-      + `<div class="mteach-foot">按教材章节切块匹配，仅供参考；不改动原知识点</div>`;
+      + `<div class="mteach-sub">📚 ${esc(bookTitle)}</div>`
+      + cmLine
+      + mteachPagesHtml(entry, tb, st);
+    if (legacy){
+      body += `<div class="mteach-legacy">⚠ 旧版教材补充（纯本地匹配，无 AI 章节映射）
+        <span class="small">建议先重新 AI 定位整份课件的教材章节与小节，再对单条知识点生成 AI 补充；不改动原知识点。</span>
+        <div class="mteach-ai-act"><button class="act" id="mteach-rebuild">重新 AI 定位并补做</button></div>
+      </div>`;
+    } else {
+      body += mteachAiCard(entry, kpData, st, !!MMTEACH.busy);
+    }
+    body += mteachLocalHtml(entry);
   } else if (!hasTb){
     body = head + `<div class="mteach-empty">本学科尚未入库教材，教材补充暂不可用。
       <br><span class="small">把教材 PDF 放进 raw 并入库后，整理知识点时会自动补做。</span></div>`;
@@ -5268,6 +5462,77 @@ function mmTeachRender(aside, kpData, st, d){
     body = head + `<div class="mteach-empty">${em(humanize(note))}</div>`;
   }
   aside.innerHTML = body;
+  const gen = $('#mteach-gen');
+  if (gen) gen.onclick = () => mmTeachGenerate(gen.getAttribute('data-force') === '1');
+  const rebuild = $('#mteach-rebuild');
+  if (rebuild) rebuild.onclick = () => mmTeachLegacyRebuild();
+}
+
+async function mmTeachGenerate(force){
+  if (MMTEACH.busy) return;
+  const ctx = MMTEACH.ctx || {};
+  const d = ctx.d || {};
+  const docId = parseInt(d.doc_id || MMPOP.docId, 10) || 0;
+  const kpId = d.kp_id || '';
+  if (!docId || !kpId) return;
+  const est = mteachEst((ctx.kpData && ctx.kpData.estimate) || (ctx.st && ctx.st.estimate) || {});
+  const ok = await confirmBox(force ? '重新生成 AI 教材补充？' : '生成 AI 教材补充？',
+    `预计 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}\n\n`
+    + 'AI 只依据教材原文补课件没讲到的内容、指出没讲清的缺口；不改动原知识点。\n'
+    + '确认后才调用外接大模型。');
+  if (!ok) return;
+  MMTEACH.busy = true;
+  ctx.aside && mmTeachRender(ctx.aside, ctx.kpData, ctx.st, d);
+  try {
+    const r = await api('/api/textbook-supplement/kp/build', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: docId, kp_id: kpId, force: !!force})});
+    if (!r || r.ok === false) throw new Error((r && r.error) || '生成失败');
+    toast('AI 教材补充已生成');
+    await mmTeachRefresh();
+  } catch(e){
+    toast('AI 教材补充失败：' + e.message);
+  } finally {
+    MMTEACH.busy = false;
+    if (MMTEACH.ctx) mmTeachRender(MMTEACH.ctx.aside, MMTEACH.ctx.kpData,
+                                   MMTEACH.ctx.st, MMTEACH.ctx.d);
+  }
+}
+
+async function mmTeachLegacyRebuild(){
+  if (MMTEACH.busy) return;
+  const ctx = MMTEACH.ctx || {};
+  const d = ctx.d || {};
+  const docId = parseInt(d.doc_id || MMPOP.docId, 10) || 0;
+  if (!docId) return;
+  const est = mteachEst((ctx.st && ctx.st.estimate) || (ctx.kpData && ctx.kpData.estimate) || {});
+  const ok = await confirmBox('重新 AI 定位教材补充？',
+    `旧版产物只有本地按章匹配，没有 AI 章节映射。\n`
+    + `这一步会先让 AI 为整份课件定位教材章节（约 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}），`
+    + '再由本地定位小节/页；不改动原知识点。\n确认后才调用外接大模型。');
+  if (!ok) return;
+  MMTEACH.busy = true;
+  ctx.aside && mmTeachRender(ctx.aside, ctx.kpData, ctx.st, d);
+  try {
+    const r = await api('/api/textbook-supplement/build', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: docId, force: true})});
+    if (!r || r.ok === false) throw new Error((r && r.error) || '补做失败');
+    toast('AI 定位完成，已刷新教材补充');
+    await mmTeachRefresh();
+  } catch(e){
+    toast('AI 定位失败：' + e.message);
+  } finally {
+    MMTEACH.busy = false;
+    if (MMTEACH.ctx) mmTeachRender(MMTEACH.ctx.aside, MMTEACH.ctx.kpData,
+                                   MMTEACH.ctx.st, MMTEACH.ctx.d);
+  }
+}
+
+async function mmTeachRefresh(){
+  const ctx = MMTEACH.ctx;
+  if (!ctx) return;
+  await mmTeachPaint(ctx.d, MMPOP.anchor);
 }
 
 function mmTeachToggle(){
@@ -5292,10 +5557,32 @@ function mmTeachGotoBackfill(docId){
   toast('在「课件思维导图」栏点「补做教材补充」（不改动原知识点）');
 }
 
-// ---------------- 特性2：课件思维导图栏「补做教材补充」提醒（task-27） ----------------
-// 触发条件由后端 supplement_status 判：有 KP 产物 + 有教材 + 没补做/教材后入库。
+// ---------------- 特性3：课件思维导图栏「AI 定位章节 + 补做」提醒（task-30） ----------------
+// 触发条件由后端 supplement_status 判：有 KP 产物 + 有教材 + 没补做/旧版/教材后入库。
 // 只在 #mm-tree 顶部出现；不改其它页面、不改原知识点。
 const MMBACK = {busy: false};
+
+function mteachBackfillEst(st){
+  return mteachEst((st && st.estimate)
+    || ((st && st.ai) && st.ai.estimate) || {});
+}
+function mteachReadyLine(st){
+  const cm = (st && st.chapter_map) || {};
+  const sup = (st && st.supplement) || {};
+  const secs = (cm.n_sections != null) ? mteachNum(cm.n_sections, 0) : 0;
+  const no = mteachNum(cm.chapter_no, 0);
+  const name = cm.chapter_name || '';
+  const nameHasNo = /第\s*\d+\s*章/.test(name);
+  const src = mteachSourceTxt(cm.source);
+  const cost = mteachNum(cm.cost_cny || sup.cost_cny, 0);
+  const parts = [];
+  if (no || name) parts.push(`章节：${no && !nameHasNo ? ('第' + no + '章 ') : ''}${name}`);
+  if (cm.page_label) parts.push(cm.page_label);
+  parts.push(`本地小节：${secs} 个`);
+  parts.push('可逐条生成 AI 补充');
+  return `教材补充已就绪 · ${parts.join(' · ')}` +
+    (cm.source ? `（${src.text}${cost > 0 ? ' · 映射成本 ¥' + cost.toFixed(4) : ''}）` : '');
+}
 
 async function mmTeachBackfill(docId){
   const box = $('#mm-tree');
@@ -5312,37 +5599,48 @@ async function mmTeachBackfill(docId){
   const books = st.textbooks || [];
   const first = books[0] || {};
   const line = document.createElement('div');
-  if (st.needs_backfill){
+  const legacy = !!st.legacy;
+  if (st.needs_backfill || legacy){
+    const est = mteachBackfillEst(st);
+    const costTxt = mteachCostTxt(est.cost, '约 1 次小调用');
     const reason = humanize(st.reason || '');
     line.className = 'mmteach-banner';
-    line.innerHTML = `<div class="mmteach-banner-t">检测到教材《${esc(first.title || '')}》
-      已入库，可为这份课件的知识点补做教材补充（<b>不改动原知识点</b>）。
+    line.innerHTML = `<div class="mmteach-banner-t">${legacy
+      ? `检测到<b>旧版</b>教材补充（纯本地匹配，无 AI 章节映射）：建议重新 AI 定位整份课件的章节与小节，再逐条生成 AI 补充（${esc(costTxt)}，<b>不改动原知识点</b>）。`
+      : `检测到教材《${esc(first.title || '')}》已入库，可先 AI 定位本章并补做教材补充（${esc(costTxt)}，<b>不改动原知识点</b>）。`}
       ${reason ? `<span class="small">${esc(reason)}</span>` : ''}</div>
-      <button class="act" id="mmteach-build">补做教材补充</button>`;
+      <button class="act" id="mmteach-build">${legacy ? '重新 AI 定位并补做' : 'AI 定位章节并补做'}</button>`;
     box.insertBefore(line, box.firstChild);
     const btn = $('#mmteach-build');
     if (btn) btn.onclick = () => mmTeachBuild(did, btn);
-  } else if (((st.supplement || {}).exists)){
-    const n = (st.supplement || {}).n_matched || 0;
+  } else if ((st.supplement || {}).exists){
     line.className = 'mmteach-ready';
-    line.textContent = '教材补充已就绪：' + n + ' 条知识点已匹配';
+    line.textContent = mteachReadyLine(st);
     box.insertBefore(line, box.firstChild);
   }
 }
 
 async function mmTeachBuild(docId, btn){
   if (MMBACK.busy) return;
+  let st = null;
+  try { st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(docId)); }
+  catch(e){ st = null; }
+  const est = mteachBackfillEst(st || {});
+  const legacy = !!(st && st.legacy);
+  const ok = await confirmBox(legacy ? '重新 AI 定位教材补充？' : 'AI 定位章节并补做教材补充？',
+    `会先让 AI 为整份课件定位教材章节（约 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}），`
+    + '再由本地定位小节/页；不改动原知识点。\n同步执行约 5–15 秒，确认后才调用外接大模型。');
+  if (!ok) return;
   MMBACK.busy = true;
   const oldText = btn ? btn.textContent : '';
-  if (btn){ btn.disabled = true; btn.textContent = '补做中…'; }
+  if (btn){ btn.disabled = true; btn.textContent = 'AI 定位中…'; }
   try {
     const r = await api('/api/textbook-supplement/build', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ doc_id: docId, force: false }),
+      body: JSON.stringify({ doc_id: docId, force: legacy }),
     });
     if (!r || r.ok === false) throw new Error((r && r.error) || '补做失败');
-    const n = ((r.meta || {}).n_matched) || 0;
-    toast('教材补充已生成：' + n + ' 条知识点已匹配（原知识点未改动）');
+    toast('AI 定位完成：教材补充已更新');
     MMTEACH.cache = {};
     await mmTeachBackfill(docId);          // 重新取状态：横幅变"已就绪"
   } catch(e){
@@ -10522,13 +10820,218 @@ def api_kp_build_progress():
 # 这里只做转调与兜底：函数缺失或抛异常 → 200/4xx JSON，绝不让页面 500。
 
 
+# ---------------- 特性2/3：教材补充（含 AI）后端胶水（task-27 + task-30） ----------------
+# 真正的零模型匹配 / AI 分析 / 产物读写在 `core/teach.py`（另一智能体并行新增）：
+#   build_supplement / supplement_status / supplement_for_kp / page_png
+#   + task-30 的 AI 字段与 analyze_kp_supplement（名字以实际落地为准，见 _teach_ai_fn）。
+# 这里只做转调、字段兜底与旧版产物判定：函数缺失/异常 → 200/4xx JSON，绝不让页面 500。
+
+
 def _teach_mod():
     from core import teach as _tm
     return _tm
 
 
+def _teach_ai_model():
+    """AI 补充用的模型名（与知识点总结同一模型；取不到给默认值）。"""
+    for mod_name in ("kp_build", "preview"):
+        try:
+            mod = __import__("core." + mod_name, fromlist=["x"])
+            for nm in ("model_name", "default_model", "kp_model", "ai_model"):
+                fn = getattr(mod, nm, None)
+                if callable(fn):
+                    try:
+                        v = fn()
+                        if v:
+                            return str(v)
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception:  # noqa: BLE001
+            continue
+    return "deepseek-flash"
+
+
+def _teach_estimate_fallback():
+    """后端还没给 estimate 时的兜底估价（1 次小调用；真实估价以后端为准）。"""
+    return {"calls": 1, "cost_cny_max": 0.02, "model": _teach_ai_model(),
+            "thinking": True, "effort": "high", "source": "fallback_estimate"}
+
+
+def _teach_normalize_estimate(est):
+    """把后端 estimate 归一：缺成本/模型时补兜底值（不丢后端的 error/ok 字段）。"""
+    fb = _teach_estimate_fallback()
+    if not isinstance(est, dict):
+        return fb
+    out = dict(est)
+    try:
+        cost = float(out.get("cost_cny_max") or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if cost <= 0:
+        out["cost_cny_max"] = fb["cost_cny_max"]
+        out.setdefault("model", fb["model"])
+        out.setdefault("calls", fb["calls"])
+        out["estimate_is_fallback"] = True
+    return out
+
+
+def _teach_estimate_map(doc_id, conn=None):
+    """AI 章节映射的预估（后端 estimate_map；0 模型 0 写盘）。取不到返回 None。"""
+    fn = getattr(_teach_mod(), "estimate_map", None)
+    if not callable(fn):
+        return None
+    try:
+        try:
+            r = fn(int(doc_id), conn=conn)
+        except TypeError:
+            r = fn(int(doc_id))
+    except Exception:  # noqa: BLE001
+        return None
+    return r if isinstance(r, dict) else None
+
+
+def _teach_supplement_file(doc_id):
+    """读沙箱/真实 logs 里的 `<doc>-教材补充.json`（只读；坏文件返回 {}）。"""
+    try:
+        p = Path(config.LOG_DIR) / "knowledge" / ("%d-教材补充.json" % int(doc_id))
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _teach_derive(doc_id):
+    """从产物文件里推出 UI 需要的 chapter_map / ai 概览 / 是否旧版。
+
+    返回 `(chapter_map, ai_summary, legacy, entries)`。
+    旧版产物（task-27 的纯本地格式）没有 `chapter_map`、任何 entry 也没有 `ai` 字段 →
+    legacy=True，前端显示"旧版教材补充，建议重新 AI 定位"。
+    """
+    art = _teach_supplement_file(doc_id)
+    meta = art.get("meta") if isinstance(art.get("meta"), dict) else {}
+    kps = art.get("kps") if isinstance(art.get("kps"), dict) else {}
+    entries = [e for e in kps.values() if isinstance(e, dict)] if kps else []
+    has_ai = any(isinstance(e.get("ai"), dict) and e["ai"].get("status")
+                 for e in entries)
+    meta_cm = meta.get("chapter_map") if isinstance(meta.get("chapter_map"), dict) else {}
+    meta_cm = dict(meta_cm or {})
+    cm = dict(meta_cm)
+    if not cm:
+        for e in entries:
+            ch = e.get("chapter") if isinstance(e.get("chapter"), dict) else {}
+            if not ch and not e.get("page_label"):
+                continue
+            if str(e.get("status") or "") not in ("done", "no_match"):
+                continue
+            cm = {"chapter_no": int(ch.get("no") or 0),
+                  "chapter_name": str(ch.get("name") or ""),
+                  "page_label": str(e.get("page_label") or ""),
+                  "source": str(e.get("source") or "local_fallback"),
+                  "cost_cny": 0.0, "confidence": None}
+            break
+    if cm and "n_sections" not in cm:
+        ns = 0
+        for e in entries:
+            secs = e.get("sections") if isinstance(e.get("sections"), list) else []
+            ns = max(ns, len(secs))
+        if not ns:
+            ns = int(meta.get("n_sections") or 0)
+        cm["n_sections"] = ns
+    ai_sum = {
+        "enabled": True,
+        "model": _teach_ai_model(),
+        "n_ai_ready": sum(1 for e in entries
+                          if isinstance(e.get("ai"), dict)
+                          and e["ai"].get("status") == "done"),
+        "n_ai_missing": sum(1 for e in entries
+                            if not (isinstance(e.get("ai"), dict)
+                                    and e["ai"].get("status"))),
+    }
+    legacy = bool(entries or meta) and not meta_cm and not has_ai
+    return cm, ai_sum, legacy, entries
+
+
+def _teach_augment_status(doc_id, st, conn=None):
+    """把后端新/旧状态归一成前端需要的顶层字段（chapter_map / ai / estimate / legacy）。"""
+    if not isinstance(st, dict):
+        st = {}
+    st.setdefault("ok", True)
+    sup = st.get("supplement") if isinstance(st.get("supplement"), dict) else {}
+    ai = st.get("ai") if isinstance(st.get("ai"), dict) else {}
+    aimap = ai.get("map") if isinstance(ai.get("map"), dict) else {}
+    cm, ai_sum, derived_legacy, _entries = _teach_derive(doc_id)
+    cm = dict(cm or {})
+    # 后端 ai.map（新版）优先补章号/名称/来源/成本；artifact meta 里的 page_label/n_sections 保留
+    if aimap:
+        if int(aimap.get("chapter_no") or 0):
+            cm["chapter_no"] = int(aimap.get("chapter_no") or 0)
+        if aimap.get("chapter_name"):
+            cm["chapter_name"] = str(aimap.get("chapter_name") or "")
+        if aimap.get("source"):
+            cm["source"] = str(aimap.get("source") or "")
+        if aimap.get("confidence"):
+            cm["confidence"] = str(aimap.get("confidence") or "")
+        try:
+            c = float(aimap.get("cost_cny") or sup.get("ai_map_cost_cny") or 0)
+        except (TypeError, ValueError):
+            c = 0.0
+        if c > 0:
+            cm["cost_cny"] = round(c, 6)
+    if cm and ("chapter_no" in cm or cm.get("chapter_name")):
+        st["chapter_map"] = cm
+    if not ai or "n_ai_ready" not in ai:
+        st["ai"] = ai_sum
+    else:
+        st["ai"] = ai
+    if not isinstance(st.get("estimate"), dict):
+        est = _teach_estimate_map(doc_id, conn=conn)
+        st["estimate"] = _teach_normalize_estimate(est) if est else \
+            _teach_estimate_fallback()
+    legacy = bool(sup.get("legacy") or sup.get("stale")) or derived_legacy
+    st["legacy"] = legacy
+    if legacy:
+        st["needs_backfill"] = True
+        if not str(st.get("reason") or "").strip():
+            st["reason"] = "旧版教材补充（纯本地匹配，无 AI 章节映射）→ 建议重新 AI 定位章节与小节"
+    return st
+
+
+def _teach_augment_kp(doc_id, kp_id, r):
+    if not isinstance(r, dict):
+        return {"ok": False, "available": False, "textbook": {}, "entry": {},
+                "note": "教材补充返回异常", "estimate": _teach_estimate_fallback()}
+    r.setdefault("ok", True)
+    entry = r.get("entry") if isinstance(r.get("entry"), dict) else {}
+    if not isinstance(entry.get("ai"), dict) and isinstance(r.get("ai"), dict) \
+            and r.get("ai"):
+        entry["ai"] = r["ai"]          # 新版后端把 ai 放在顶层：给前端并到 entry
+    if not isinstance(entry.get("chapter"), dict) or not entry.get("chapter"):
+        cm, _a, _l, _e = _teach_derive(doc_id)
+        if cm:
+            entry["chapter"] = cm
+    r["entry"] = entry
+    r["estimate"] = _teach_normalize_estimate(
+        r.get("estimate") if isinstance(r.get("estimate"), dict) else
+        (_teach_estimate_map(doc_id) or {}))
+    if not isinstance(r.get("legacy"), bool):
+        cm, _a, legacy, _e = _teach_derive(doc_id)
+        r["legacy"] = bool(legacy)
+    return r
+
+
+def _teach_ai_fn():
+    """找后端 task-30 的按需 AI 分析函数（名字以实际落地为准）。"""
+    tm = _teach_mod()
+    for nm in ("analyze_kp_supplement", "build_kp_supplement",
+               "kp_ai_supplement", "analyze_kp"):
+        fn = getattr(tm, nm, None)
+        if callable(fn):
+            return fn
+    return None
+
+
 def api_textbook_supplement_status(conn, doc_id):
-    """这份课件的教材补充状态（只读、零写盘）。"""
+    """这份课件的教材补充状态（只读、零写盘；含 AI 章节映射概览）。"""
     try:
         doc_id = int(doc_id or 0)
     except (TypeError, ValueError):
@@ -10545,40 +11048,95 @@ def api_textbook_supplement_status(conn, doc_id):
             r = fn(doc_id)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "读教材补充状态失败：%s" % e}
-    if not isinstance(r, dict):
-        return {"ok": False, "error": "教材补充状态返回异常"}
-    r.setdefault("ok", True)
-    return r
+    return _teach_augment_status(doc_id, r, conn=conn)
 
 
 def api_textbook_supplement_kp(conn, doc_id, kp_id):
-    """某条知识点的教材补充（页图路径 + 段落 + 补充点；只读）。"""
+    """某条知识点的教材补充（AI 字段 + 本地原文 + estimate；只读）。"""
     try:
         doc_id = int(doc_id or 0)
     except (TypeError, ValueError):
-        return {"ok": False, "available": False, "error": "doc_id 必须是整数",
-                "textbook": {}, "entry": {}, "note": "doc_id 必须是整数"}
+        doc_id = 0
     kp_id = str(kp_id or "").strip()
     if doc_id <= 0 or not kp_id:
         return {"ok": False, "available": False, "textbook": {}, "entry": {},
-                "note": "缺少 doc_id 或 kp_id"}
+                "note": "缺少 doc_id 或 kp_id",
+                "estimate": _teach_estimate_fallback()}
     fn = getattr(_teach_mod(), "supplement_for_kp", None)
     if not callable(fn):
         return {"ok": False, "available": False, "textbook": {}, "entry": {},
-                "note": "教材补充后端还没就绪（缺 supplement_for_kp）"}
+                "note": "教材补充后端还没就绪（缺 supplement_for_kp）",
+                "estimate": _teach_estimate_fallback()}
     try:
         r = fn(doc_id, kp_id)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "available": False, "textbook": {}, "entry": {},
-                "note": "读教材补充失败：%s" % e}
+                "note": "读教材补充失败：%s" % e,
+                "estimate": _teach_estimate_fallback()}
+    return _teach_augment_kp(doc_id, kp_id, r)
+
+
+def api_textbook_supplement_kp_estimate(doc_id, kp_id):
+    """单条 KP 的 AI 补充估价：优先后端新函数，否则给兜底估价。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        doc_id = 0
+    kp_id = str(kp_id or "").strip()
+    tm = _teach_mod()
+    for nm in ("estimate_kp_supplement", "kp_supplement_estimate",
+               "estimate_kp_ai"):
+        fn = getattr(tm, nm, None)
+        if not callable(fn):
+            continue
+        try:
+            try:
+                r = fn(doc_id, kp_id)
+            except TypeError:
+                r = fn(doc_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(r, dict):
+            est = r.get("estimate") if isinstance(r.get("estimate"), dict) else r
+            if isinstance(est, dict) and ("cost_cny_max" in est or "calls" in est):
+                return {"ok": True, "estimate": _teach_normalize_estimate(est)}
+    return {"ok": True, "estimate": _teach_estimate_fallback()}
+
+
+def api_textbook_supplement_kp_build(payload):
+    """按需生成单条知识点的 AI 教材补充（同步 1 次调用；不持全局 _lock）。"""
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    kp_id = str(payload.get("kp_id") or "").strip()
+    if doc_id <= 0 or not kp_id:
+        return {"ok": False, "error": "缺少 doc_id 或 kp_id"}
+    force = bool(payload.get("force"))
+    fn = _teach_ai_fn()
+    if fn is None:
+        return {"ok": False,
+                "error": "AI 教材补充后端还没就绪（缺 analyze_kp_supplement）"}
+    try:
+        try:
+            r = fn(doc_id, kp_id, force=force)
+        except TypeError:
+            r = fn(doc_id, kp_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "AI 生成失败：%s" % e}
     if not isinstance(r, dict):
-        return {"ok": False, "available": False, "textbook": {}, "entry": {},
-                "note": "教材补充返回异常"}
+        return {"ok": False, "error": "AI 生成返回异常"}
+    r.setdefault("ok", True)
+    r["estimate"] = _teach_normalize_estimate(
+        r.get("estimate") if isinstance(r.get("estimate"), dict) else
+        (_teach_estimate_map(doc_id) or {}))
+    if "ai" not in r and isinstance(r.get("entry"), dict):
+        r["ai"] = r["entry"].get("ai")
     return r
 
 
 def api_textbook_supplement_build(payload):
-    """补做教材补充：同步、零模型、只写 `logs/knowledge/<doc>-教材补充.json`。"""
+    """补做教材补充（含 AI 章节映射 + 本地小节定位）：同步零/小模型调用。"""
     try:
         doc_id = int(payload.get("doc_id") or 0)
     except (TypeError, ValueError):
@@ -10596,9 +11154,27 @@ def api_textbook_supplement_build(payload):
     if not isinstance(r, dict):
         return {"ok": False, "error": "教材补充返回异常"}
     meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
-    return {"ok": bool(r.get("ok", True)), "status": r.get("status") or "",
-            "doc_id": doc_id, "out_path": r.get("out_path") or "",
-            "meta": meta, "error": r.get("error") or ""}
+    # 新版 build 会写 meta.chapter_map/ai_map_source；旧版没有 → 读产物补 chapter_map/ai
+    cm, ai_sum, legacy, _entries = _teach_derive(doc_id)
+    if not isinstance(meta.get("chapter_map"), dict) or not meta.get("chapter_map"):
+        if cm:
+            meta["chapter_map"] = cm
+    if not isinstance(meta.get("ai"), dict):
+        meta["ai"] = ai_sum
+    st2 = _teach_augment_status(doc_id, {
+        "has_artifact": True, "has_textbook": True,
+        "supplement": {"exists": True}, "ai": meta.get("ai")}, conn=None)
+    meta["chapter_map"] = st2.get("chapter_map") or meta.get("chapter_map") or {}
+    meta["ai"] = st2.get("ai") or meta.get("ai") or ai_sum
+    out = {"ok": bool(r.get("ok", True)), "status": r.get("status") or "",
+           "doc_id": doc_id, "out_path": r.get("out_path") or "",
+           "meta": meta, "error": r.get("error") or "",
+           "legacy": bool(st2.get("legacy") or legacy),
+           "chapter_map": st2.get("chapter_map") or {},
+           "estimate": _teach_normalize_estimate(
+               r.get("estimate") if isinstance(r.get("estimate"), dict) else
+               (st2.get("estimate") or {}))}
+    return out
 
 
 def api_teach_page(doc_id, page, dpi):
@@ -10646,7 +11222,8 @@ def api_teach_page(doc_id, page, dpi):
 
 
 def _teach_after_kp_build(doc_id):
-    """整理知识点成功后顺手补做教材补充（零模型；异常吞掉，绝不影响整理状态）。"""
+    """整理知识点成功后顺手补做教材补充（现在会自动跑 1 次 AI 章节映射；
+    AI 失败/无 key 时后端本地兜底；异常吞掉，绝不影响整理状态）。"""
     try:
         from core import teach as _tm
         fn = getattr(_tm, "build_supplement", None)
@@ -14463,6 +15040,10 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(api_textbook_supplement_kp(
                             conn, _int_arg(qs.get("doc_id"), 0),
                             qs.get("kp_id", "")))
+                    if path == "/api/textbook-supplement/kp/estimate":
+                        return self._json(api_textbook_supplement_kp_estimate(
+                            _int_arg(qs.get("doc_id"), 0),
+                            qs.get("kp_id", "")))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -14612,6 +15193,11 @@ class Handler(BaseHTTPRequestHandler):
             # 同步、零模型、可能数秒；不持全局 _lock（build 内部只读 DB + 原子写产物）。
             if u.path == "/api/textbook-supplement/build":
                 return self._json(api_textbook_supplement_build(payload))
+
+            # ---------------- 教材补充：单条 KP 的按需 AI 分析（task-30） ----------------
+            # 同步 1 次模型调用（5~20 秒）；不持全局 _lock，避免挡住其它请求。
+            if u.path == "/api/textbook-supplement/kp/build":
+                return self._json(api_textbook_supplement_kp_build(payload))
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":

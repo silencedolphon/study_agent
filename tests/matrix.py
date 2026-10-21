@@ -193,6 +193,12 @@ MATRIX = [
     dict(id="F112", feature="知识点小窗右侧教材栏（页图+段落） + 导图栏补做提醒",
          entry="小窗 #mmkp-teach + /api/teach-page + 导图横幅补做按钮",
          kind="ui", priority="P1", tests=["test_20_textbook_supplement_ui"], evidence="json+shot"),
+    dict(id="F113", feature="教材补充 AI 三段式（AI 课件→章 / 本地小节定位 / 按需 AI 补充 + 提示词）",
+         entry="core/teach.py map_courseware_chapter/_local_kp_sections/analyze_kp_supplement + estimate",
+         kind="read", priority="P1", tests=["test_21_teach_ai"], evidence="json"),
+    dict(id="F114", feature="教材补充 AI 卡（成本预估/生成/结果/重试/旧版重做）+ 导图 AI 横幅",
+         entry="小窗 AI 卡 + /api/textbook-supplement/kp/{estimate,build} + 导图横幅 AI 文案",
+         kind="ui", priority="P1", tests=["test_22_teach_ai_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

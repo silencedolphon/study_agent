@@ -72,6 +72,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -876,7 +877,7 @@ def kp_textbook(conn: sqlite3.Connection, doc_id: int, kp_id: str,
 #   · 只 `SELECT ... WHERE doc_id=? AND heading_path=?` 取所选章的块做段落打分；
 #   · 产物 `logs/knowledge/<doc_id>-教材补充.json`，原子写；
 #   · 旧 `textbook_passages` / `kp_textbook` 一个字节未改（旧接口/旧流程继续可用）。
-SUPPLEMENT_VERSION = "C-0124-teach-supplement-v1"
+SUPPLEMENT_VERSION = "C-0125-teach-ai-v1"
 SUPPLEMENT_SUFFIX = "-教材补充.json"
 SUPPLEMENT_MAX_PASSAGES = 3
 SUPPLEMENT_MAX_ADDED_TERMS = 8
@@ -909,6 +910,19 @@ def _page_span_label(lo: int, hi: int) -> str:
     if not lo:
         return ""
     return f"p.{lo}" if (not hi or hi == lo) else f"p.{lo}–p.{hi}"
+
+
+_REF_PAGE_RE = re.compile(r"p\.(\d+)(?:\s*-\s*(\d+))?")
+
+
+def _ref_span(ref) -> tuple[int, int] | None:
+    """`p.70` / `p.70-82` / `p.70–p.82` → (70, 70) / (70, 82)。"""
+    m = _REF_PAGE_RE.search(str(ref or ""))
+    if not m:
+        return None
+    a = int(m.group(1))
+    b = int(m.group(2) or a)
+    return (min(a, b), max(a, b))
 
 
 def _chapter_candidates(conn: sqlite3.Connection, tb: dict) -> list:
@@ -1050,10 +1064,8 @@ def _chapter_passages(conn: sqlite3.Connection, tb: dict, chapter_heading: str,
             break
         r = rows[i]
         txt, _cut = _clip(r["text"] or "")
-        ref = str(r["source_ref"] or "")
-        pgs = [int(x) for x in re.findall(r"p\.(\d+)", ref)] or []
-        lo = min(pgs) if pgs else 0
-        hi = max(pgs) if len(pgs) > 1 else lo
+        span = _ref_span(r["source_ref"])
+        lo, hi = span if span else (0, 0)
         hits = sorted(per_block_hits[i], key=lambda t: -weights.get(t, 0.0))[:6]
         out.append({
             "chunk_id": int(r["id"]),
@@ -1108,60 +1120,759 @@ def _doc_title(conn, doc_id: int) -> str:
         return ""
 
 
-def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
-                     db_path=None, conn: sqlite3.Connection | None = None,
-                     log=print) -> dict:
-    """给一份**课件的 KP 产物**生成 `教材补充.json`（零模型、只读 DB、原子写）。
+def _load_supplement(out: Path) -> dict:
+    try:
+        raw = json.loads(Path(out).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
-    流程（对应用户需求 1/2/3）：
 
-    1. 读 `kp_build.out_file(doc_id)` 的知识点产物；没有 → `no_kps`（不写文件）；
-    2. `pick_textbook(conn)`：**没有教材** → 写 `status="no_textbook"` 状态文件
-       （meta + 空 `kps`），供"教材入库后提醒补做"判断；
-    3. 有教材：`_chapter_candidates`（只读 heading_path 分组）→ 逐条 KP
-       `_match_chapter_for_kp`（只挑**一章**，0 分即 no_match）→
-       `_chapter_passages`（**只查所选章**）→ 写每条的 chapter/pages/passages/
-       added_terms；**不修改原知识点产物**（只读它、记 sha/mtime 进 meta）；
-    4. 幂等：非 force 且已有产物、版本/教材 id/KP 产物 mtime 都没变 → `skipped`；
-    5. 原子写；不写数据库、不调模型。
+# ==========================================================================
+# C-0125（2026-10-22）：教材补充 AI 混合管线
+# ==========================================================================
+# 用户反馈：C-0124 纯本地的教材补充"排版好但结果差"，要求改用**外接 AI**
+# （与知识点总结管线同一个模型）并改提示词。三步（能本地的绝不调模型）：
+#
+#   ① MAP：课件标题 + KP 大纲 → 教材**唯一章节**（AI，每课件 1 次，小输入）
+#   ② LOCAL：每条 KP → 预习《章节细目》里的具体小节 + 页码（本地词项，0 AI）
+#   ③ SUPP：按 KP **按需** AI 分析"教材可补充内容"（打开/点击才调用，带缓存）
+#
+# 所有 AI 调用都记账（tokens/cost/elapsed/attempts）；AI 不可用/失败自动降级本地，
+# 保留 C-0124 的 passages/页图口径（旧字段继续可读）。旧版产物（C-0124）识别为
+# stale（needs_backfill=true），升级时先备份 `.bak-<ts>`，不静默覆盖。
+TEACH_PROMPT_NAME = "提示词-教材补充.md"
+TEACH_AI_ENV = "KB_TEACH_AI"
+TEACH_MAP_PROMPT_MAX_KPS = 60
+TEACH_MAP_JSON_HINT = 4096
+TEACH_SUPP_MATERIAL_MAX = 12000
+TEACH_SUPP_POINTS_MAX = 5
+TEACH_SUPP_CITATIONS_MAX = 3
+TEACH_SUPP_GAPS_MAX = 5
+TEACH_SUPP_SECTIONS_MAX = 2
+TEACH_SUPP_KINDS = ("概念", "机制", "分类", "临床", "注意", "例子")
+TEACH_AI_MARKER_ENV = "VERIFY_REFRESH_FIXTURES"   # run_all 测试套件的自我保护标记
 
-    返回 `{ok, status, out_path, meta, kps?}`；`no_kps` 时 `ok=False`。
+
+# ---------------------------------------------------------------- 提示词
+def teach_prompt_file(path=None) -> Path:
+    """提示词真源：显式给定 > 本学科 logs/knowledge/ > 项目根 > 随包资源目录。"""
+    if path:
+        return Path(path)
+    name = TEACH_PROMPT_NAME
+    own = config.LOG_DIR / "knowledge" / name
+    if own.exists():
+        return own
+    root = config.ROOT / "logs" / "knowledge" / name
+    if root.exists():
+        return root
+    return config.BUNDLE_ROOT / "logs" / "knowledge" / name
+
+
+def _load_prompts(path=None) -> dict:
+    """逐字提取 4 个提示词块（MAP-SYS/USER、SUPP-SYS/USER）+ sha256。
+
+    文件缺失/缺块 → 抛 `TeachError`；调用方在构建时捕获并降级本地（不崩）。
+    """
+    p = teach_prompt_file(path)
+    try:
+        blob = p.read_bytes()
+    except OSError as e:
+        raise TeachError("教材补充提示词真源不可读：%s（%s）" % (p, e), 500) from None
+    md = blob.decode("utf-8", "replace")
+    out = {}
+    for tag, key in (("PROMPT-TEACH-MAP-SYS", "map_sys"),
+                     ("PROMPT-TEACH-MAP-USER", "map_user"),
+                     ("PROMPT-TEACH-SUPP-SYS", "supp_sys"),
+                     ("PROMPT-TEACH-SUPP-USER", "supp_user")):
+        try:
+            out[key] = _kp_build()._grab(md, tag, p)
+        except SystemExit as e:
+            raise TeachError("教材补充提示词缺块 %s：%s" % (tag, e), 500) from None
+    out.update({"path": str(p), "sha256": hashlib.sha256(blob).hexdigest(),
+                "chars": sum(len(out[k]) for k in
+                             ("map_sys", "map_user", "supp_sys", "supp_user"))})
+    return out
+
+
+# ---------------------------------------------------------------- 配置 / 记账
+def _kp_build():
+    """延迟 import kp_build（本模块在 dashboard import 链上，别在顶层拖重依赖）。"""
+    from . import kp_build as _kb
+    return _kb
+
+
+def _config_value(key: str, default):
+    try:
+        return config.value_of(key, default)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _kp_model() -> str:
+    return str(_config_value("KP_BUILD_MODEL", "deepseek-flash") or "deepseek-flash").strip() \
+        or "deepseek-flash"
+
+
+def _kp_thinking() -> bool:
+    try:
+        return bool(config.value_int("KP_BUILD_THINKING", 1))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _kp_effort() -> str:
+    return str(_config_value("KP_BUILD_REASONING_EFFORT", "max") or "max").strip() or "max"
+
+
+def _kp_max_tokens() -> int:
+    try:
+        return max(1024, config.value_int("KP_BUILD_MAX_TOKENS", 65536))
+    except Exception:  # noqa: BLE001
+        return 65536
+
+
+def _ai_enabled() -> bool:
+    """教材补充 AI 是否可用：有 key + 可 import chat + 未被环境/测试套件关闭。
+
+    `KB_TEACH_AI=0` 可显式关闭；`VERIFY_REFRESH_FIXTURES` 是 `tests/run_all.py`
+    在**测试进程**里设置的标记（生产/看板进程不会设置）——测试套件必须 0 真实请求，
+    所以这里把它当作"AI 不可用"（新用例会 monkeypatch `_ai_enabled` 测 AI 路径）。
+    """
+    v = os.environ.get(TEACH_AI_ENV, "").strip().lower()
+    if v in ("0", "false", "off", "no"):
+        return False
+    if os.environ.get(TEACH_AI_MARKER_ENV):
+        return False
+    try:
+        from . import chat
+        chat.load_api_key()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _cost_of(usage) -> float:
+    """与知识点总结管线同一价格口径（kp_build.PRICE_IN/PRICE_OUT/FX）。"""
+    return float(_kp_build().cost_of(usage or {}))
+
+
+def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = None,
+             log=None) -> dict:
+    """调 1 次（失败重试 1 次）并按知识点管线口径记账；**成功/失败都返回 calls 明细**。
+
+    返回 `{ok, parsed, raw, usage, tokens:{in,out,reasoning}, cost_cny, elapsed_s,
+    attempts, calls:[{attempt,ok,tokens_in,tokens_out,cost_cny,elapsed_s,error}],
+    error, model, thinking, reasoning_effort, max_tokens}`。
+    """
+    from . import chat
+    kb = _kp_build()
+    model = _kp_model()
+    thinking = _kp_thinking()
+    effort = _kp_effort()
+    mt = int(max_tokens) if max_tokens else _kp_max_tokens()
+    calls: list = []
+    last = ""
+    for attempt in range(2):
+        t0 = time.perf_counter()
+        rec = {"attempt": attempt + 1, "ok": False, "tokens_in": 0,
+               "tokens_out": 0, "reasoning_tokens": 0, "cost_cny": 0.0,
+               "elapsed_s": 0.0, "error": ""}
+        try:
+            r = chat.chat_once(
+                [{"role": "system", "content": sys_p},
+                 {"role": "user", "content": user_p}],
+                model=model, max_tokens=mt, thinking=thinking,
+                reasoning_effort=(effort if thinking else None))
+        except Exception as e:  # noqa: BLE001
+            last = "%s: %s" % (type(e).__name__, e)
+            rec["error"] = last
+            rec["elapsed_s"] = round(time.perf_counter() - t0, 1)
+            if log:
+                log("  ★教材补充 AI 调用失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
+            calls.append(rec)
+            if attempt == 0:
+                time.sleep(1)
+            continue
+        usage = r.get("usage") or {}
+        rec.update({
+            "ok": True,
+            "tokens_in": int(usage.get("prompt_tokens") or 0),
+            "tokens_out": int(usage.get("completion_tokens") or 0),
+            "reasoning_tokens": int(kb._reasoning_tokens(usage) or 0),
+            "cost_cny": _cost_of(usage),
+            "elapsed_s": round(time.perf_counter() - t0, 1),
+        })
+        calls.append(rec)
+        raw = r.get("content") or ""
+        parsed = kb.parse_json(raw)
+        if isinstance(parsed, dict) and not parsed.get("_parse_error"):
+            ti = sum(int(c["tokens_in"]) for c in calls)
+            to = sum(int(c["tokens_out"]) for c in calls)
+            return {"ok": True, "parsed": parsed, "raw": raw, "usage": usage,
+                    "tokens": {"in": ti, "out": to,
+                               "reasoning": sum(int(c["reasoning_tokens"]) for c in calls)},
+                    "cost_cny": round(sum(float(c["cost_cny"]) for c in calls), 6),
+                    "elapsed_s": round(sum(float(c["elapsed_s"]) for c in calls), 1),
+                    "attempts": len(calls), "calls": calls, "error": "",
+                    "model": model, "thinking": thinking,
+                    "reasoning_effort": effort, "max_tokens": mt}
+        last = str(parsed.get("_parse_error") or "模型输出不是 JSON 对象")
+        if log:
+            log("  ★教材补充 AI 输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
+        if attempt == 0:
+            time.sleep(1)
+    return {"ok": False, "parsed": {}, "raw": "", "usage": {},
+            "tokens": {"in": 0, "out": 0, "reasoning": 0},
+            "cost_cny": 0.0,
+            "elapsed_s": round(sum(float(c["elapsed_s"]) for c in calls), 1),
+            "attempts": len(calls), "calls": calls, "error": last or "未知错误",
+            "model": model, "thinking": thinking, "reasoning_effort": effort,
+            "max_tokens": mt}
+
+
+# ---------------------------------------------------------------- 章级元数据
+def _courseware_kps(doc_id: int):
+    """读课件 KP 产物 → `(path, kps, sha256, mtime)`；无产物返回 `(path, [], "", 0)`。"""
+    kb = _kp_build()
+    path = kb.out_file(doc_id)
+    doc = kb._load_prev(path)
+    kps = [r for r in (doc.get("knowledge_points") or []) if isinstance(r, dict)]
+    sha = mtime = ""
+    try:
+        mtime = float(path.stat().st_mtime)
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        pass
+    return path, kps, sha, mtime
+
+
+def _chapter_page_ranges(conn, tb) -> dict:
+    """`{heading_path: (page_start, page_end)}`（只读 heading_path/source_ref，不读正文）。"""
+    try:
+        rows = conn.execute(
+            "SELECT heading_path, source_ref FROM chunks WHERE doc_id=? ORDER BY ord",
+            (int(tb["id"]),)).fetchall()
+    except sqlite3.Error:
+        return {}
+    out: dict = {}
+    for r in rows:
+        hp = str(r["heading_path"] or "")
+        span = _ref_span(r["source_ref"])
+        if not span:
+            continue
+        lo, hi = span
+        cur = out.get(hp)
+        out[hp] = (min(cur[0], lo), max(cur[1], hi)) if cur else (lo, hi)
+    return out
+
+
+def _chapter_map_entry(chapters, ranges, no: int, **extra) -> dict:
+    for c in chapters:
+        if int(c.get("no") or 0) == int(no):
+            rng = ranges.get(c["heading_path"]) or (0, 0)
+            pages = list(range(rng[0], rng[1] + 1)) if rng[0] else []
+            return dict({
+                "chapter_no": int(c["no"]), "name": str(c.get("name") or ""),
+                "chapter_name": str(c.get("name") or ""),
+                "heading_path": str(c.get("heading_path") or ""),
+                "page_start": rng[0], "page_end": rng[1],
+                "page_label": _fmt_pages(pages), "pages": pages,
+                "n_blocks": int(c.get("n_blocks") or 0),
+            }, **extra)
+    return {}
+
+
+def _kp_outline_text(kps: list, limit: int = TEACH_MAP_PROMPT_MAX_KPS) -> str:
+    lines = []
+    for kp in kps[:limit]:
+        name = str(kp.get("name") or kp.get("node_name") or "").strip()
+        pts = [str(x).strip() for x in (kp.get("points") or [])][:3]
+        seg = "；".join(p for p in pts if p)[:150]
+        if name:
+            lines.append("- %s%s" % (name, ("：" + seg) if seg else ""))
+    if len(kps) > limit:
+        lines.append("- …（共 %d 条知识点，已截断）" % len(kps))
+    return "\n".join(lines) or "（这份课件没有知识点名称）"
+
+
+def _chapters_text(chapters: list, ranges: dict, limit: int = 80) -> str:
+    lines = []
+    for c in chapters[:limit]:
+        rng = ranges.get(c["heading_path"]) or (0, 0)
+        label = _page_span_label(rng[0], rng[1]) if rng[0] else ""
+        lines.append("第%d章 %s%s" % (int(c.get("no") or 0), c.get("name") or "",
+                                      (" · %s" % label) if label else ""))
+    if len(chapters) > limit:
+        lines.append("…（共 %d 章，已截断）" % len(chapters))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- ① MAP：课件 → 章
+def _map_cache_valid(cm: dict, tb, kp_sha: str, prompt_sha: str) -> bool:
+    if not isinstance(cm, dict) or not int(cm.get("chapter_no") or 0):
+        return False
+    if int(cm.get("textbook_doc_id") or 0) != int(tb["id"]):
+        return False
+    if str(cm.get("kp_artifact_sha256") or "") != str(kp_sha):
+        return False
+    if prompt_sha and str(cm.get("prompt_sha256") or "") != str(prompt_sha):
+        return False
+    return True
+
+
+def _cache_map_into_file(out: Path, cm: dict, meta_patch: dict | None = None) -> None:
+    """把 chapter_map 回写进已存在的 supplement 文件（不存在就不写，build 会带上）。"""
+    if not Path(out).exists():
+        return
+    data = _load_supplement(out)
+    if not data:
+        return
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    meta["chapter_map"] = cm
+    if meta_patch:
+        meta.update(meta_patch)
+    data["meta"] = meta
+    _atomic_write_json(data, Path(out))
+
+
+def _local_chapter_vote(chapters: list, kps: list, doc_title: str) -> dict:
+    """本地兜底：所有 KP 各自 `_match_chapter_for_kp` → 章投票（票数优先、总分次之）。"""
+    votes: dict = {}
+    order: list = []
+    for kp in kps:
+        hit = _match_chapter_for_kp(chapters, kp, doc_title)
+        if not hit:
+            continue
+        key = hit["heading_path"]
+        if key not in votes:
+            votes[key] = {"chapter": hit, "votes": 0, "score": 0.0}
+            order.append(key)
+        votes[key]["votes"] += 1
+        votes[key]["score"] += float(hit.get("score") or 0.0)
+    if not votes:
+        return {"chapter_no": 0}
+    best = max(order, key=lambda k: (votes[k]["votes"], votes[k]["score"]))
+    return votes[best]["chapter"]
+
+
+def map_courseware_chapter(doc_id: int, *, force: bool = False,
+                           allow_ai: bool = True, out_path=None, db_path=None,
+                           conn: sqlite3.Connection | None = None,
+                           prompt_path=None, log=print) -> dict:
+    """① 课件 → 教材**唯一章节**（AI 1 次；已有缓存/不可用时 0 调用）。
+
+    - 已有 `meta.chapter_map` 且教材 id / KP 产物 sha / 提示词 sha 未变 → 直接复用（cached）；
+    - AI 可用：MAP 1 次调用；返回章号不在章列表 → 重试 1 次，仍不合法 → 本地投票兜底；
+    - AI 不可用/调用失败/提示词缺失 → 本地投票（`source="local_fallback"`），不阻塞。
+    返回字典带 `source(ai|local_fallback)`、`cost_cny/tokens/elapsed_s/error`。
     """
     own = conn is None
     conn = conn or _open_db(db_path)
     try:
-        from . import kp_build as _kp
-        kp_path = _kp.out_file(doc_id)
-        kp_doc = _kp._load_prev(kp_path)
-        kps_raw = kp_doc.get("knowledge_points") if isinstance(kp_doc, dict) else None
-        if not isinstance(kps_raw, list) or not kps_raw:
+        kp_path, kps, kp_sha, _kp_mtime = _courseware_kps(doc_id)
+        if not kps:
+            return {"ok": False, "chapter_no": 0, "source": "none",
+                    "error": "这份课件还没有末级知识点产物（先整理知识点）"}
+        tb = pick_textbook(conn)
+        if tb is None:
+            return {"ok": False, "chapter_no": 0, "source": "none",
+                    "error": "当前学科库里没有教材类资料（role=textbook 的 PDF）"}
+        chapters = _chapter_candidates(conn, tb)
+        ranges = _chapter_page_ranges(conn, tb)
+        if not chapters:
+            return {"ok": False, "chapter_no": 0, "source": "none",
+                    "error": "教材没有可用的章级 heading_path（未按章节切块），无法映射"}
+        out = Path(out_path) if out_path else supplement_out_file(doc_id)
+        prompts, prompt_sha, prompt_error = {}, "", ""
+        try:
+            prompts = _load_prompts(prompt_path)
+            prompt_sha = prompts["sha256"]
+        except TeachError as e:
+            prompt_error = str(e)
+
+        # 已有缓存（0 调用）
+        if not force:
+            prev = _load_supplement(out)
+            pm = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+            cm = pm.get("chapter_map")
+            if isinstance(cm, dict) and _map_cache_valid(cm, tb, kp_sha, prompt_sha):
+                return dict(cm, ok=True, cached=True, source=str(cm.get("source") or "cache"),
+                            cost_cny=0.0, tokens={"in": 0, "out": 0}, elapsed_s=0.0)
+
+        ai_ok = bool(allow_ai and _ai_enabled() and prompts)
+        err = prompt_error
+        if ai_ok:
+            title = _doc_title(conn, doc_id)
+            user = (prompts["map_user"]
+                    .replace("{courseware_title}", title)
+                    .replace("{kp_outline}", _kp_outline_text(kps))
+                    .replace("{chapters}", _chapters_text(chapters, ranges)))
+            res = _ai_chat("teach.map", prompts["map_sys"], user, log=log)
+            for attempt in range(2):
+                if attempt:                    # 章号不合法 → 重试 1 次
+                    res = _ai_chat("teach.map", prompts["map_sys"], user, log=log)
+                if not res.get("ok"):
+                    err = str(res.get("error") or "AI 调用失败")
+                    break
+                parsed = res.get("parsed") or {}
+                try:
+                    no = int(str(parsed.get("chapter_no")).strip())
+                except (TypeError, ValueError):
+                    err = "AI 返回的 chapter_no 不是整数：%r" % parsed.get("chapter_no")
+                    continue
+                if not any(int(c.get("no") or 0) == no for c in chapters):
+                    err = "AI 返回的章号不在章列表：%r" % no
+                    continue
+                cm = _chapter_map_entry(
+                    chapters, ranges, no,
+                    source="ai",
+                    confidence=str(parsed.get("confidence") or "").strip().lower()
+                    if str(parsed.get("confidence") or "").strip().lower()
+                    in ("high", "medium", "low") else "medium",
+                    reason=str(parsed.get("reason") or "").strip()[:120],
+                    chapter_name_ai=str(parsed.get("chapter_name") or "").strip()[:60],
+                    textbook_doc_id=int(tb["id"]),
+                    textbook_title=str(tb.get("title") or ""),
+                    kp_artifact=str(kp_path), kp_artifact_sha256=kp_sha,
+                    prompt_sha256=prompt_sha,
+                    cached=False,
+                    cost_cny=float(res.get("cost_cny") or 0.0),
+                    tokens=res.get("tokens") or {"in": 0, "out": 0},
+                    elapsed_s=float(res.get("elapsed_s") or 0.0),
+                    attempts=int(res.get("attempts") or 1),
+                    error="")
+                _cache_map_into_file(out, cm, {"ai_map_cost_cny": cm["cost_cny"],
+                                               "ai_map_source": "ai"})
+                return dict(cm, ok=True)
+
+        # ---- 本地投票兜底（AI 关闭/失败/提示词缺失）----
+        title = _doc_title(conn, doc_id)
+        hit = _local_chapter_vote(chapters, kps, title)
+        if not hit:
+            return {"ok": False, "chapter_no": 0, "source": "local_fallback",
+                    "error": err or "本地词项投票也没有命中任何章",
+                    "cost_cny": 0.0, "tokens": {"in": 0, "out": 0}, "elapsed_s": 0.0}
+        cm = _chapter_map_entry(
+            chapters, ranges, int(hit["no"]),
+            source="local_fallback", confidence="low",
+            reason=("本地词项投票兜底（AI %s）：本章在本轮 KP 投票中票数最高，"
+                    "共 %d 章候选" % ("可用但未采用" if ai_ok else "不可用/已关闭",
+                                     len(chapters))),
+            chapter_name_ai="", textbook_doc_id=int(tb["id"]),
+            textbook_title=str(tb.get("title") or ""),
+            kp_artifact=str(kp_path), kp_artifact_sha256=kp_sha,
+            prompt_sha256=prompt_sha, cached=False, cost_cny=0.0,
+            tokens={"in": 0, "out": 0}, elapsed_s=0.0, attempts=0,
+            error=err or "")
+        _cache_map_into_file(out, cm, {"ai_map_source": "local_fallback"})
+        if log and err:
+            log("  ⚠ 教材补充章映射降级本地：%s" % err)
+        return dict(cm, ok=True)
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+# ---------------------------------------------------------------- ② LOCAL：KP → 小节
+def _load_sections_detail(tb_id: int) -> dict:
+    """读教材的《章节细目》产物（C-0092 纯正则产物，0 AI）。"""
+    p = config.LOG_DIR / "knowledge" / ("%d-章节细目.json" % int(tb_id))
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"ok": False, "chapters": [], "path": str(p)}
+    if not isinstance(raw, dict) or not isinstance(raw.get("chapters"), list):
+        return {"ok": False, "chapters": [], "path": str(p)}
+    return {"ok": True, "chapters": raw["chapters"], "path": str(p)}
+
+
+def _local_kp_sections(conn, tb, chapter: dict, kp: dict) -> dict:
+    """② 本地（0 AI）：把一条 KP 定位到教材章内的 1~2 个具体小节 + 页码范围 + 原文摘录。
+
+    优先《章节细目》的小节标题做词项 IDF 打分；无产物/标题 0 分时退到
+    `_chapter_passages` 的章内段落页范围当"伪小节"（仍只查该章）。
+    `section_material` 只取选中页范围的教材块原文（≤12000 字，带 `（p.起-止）`）。
+    """
+    heading = str(chapter.get("heading_path") or "")
+    ch_no = int(chapter.get("chapter_no") or chapter.get("no") or 0)
+    kp_text = _kp_query_text(kp)
+    terms = _terms(kp_text, limit=SUPPLEMENT_TERMS_MAX)
+    kp_name = str(kp.get("name") or "")
+    detail = _load_sections_detail(tb["id"])
+    secs: list = []
+    if detail.get("ok"):
+        mine = None
+        for c in detail["chapters"]:
+            try:
+                if int(c.get("no") or 0) == ch_no:
+                    mine = c
+                    break
+            except (TypeError, ValueError):
+                continue
+        secs = [s for s in ((mine or {}).get("sections") or []) if isinstance(s, dict)]
+    picked: list = []
+    if secs and terms:
+        K = len(secs)
+        titles = [str(s.get("title") or "") for s in secs]
+        weights: dict = {}
+        for t in terms:
+            df = sum(1 for nm in titles if t in nm)
+            if 0 < df <= max(2, int(K * 0.5)):
+                weights[t] = (len(t) - 1) * math.log((K + 1) / (df + 0.5))
+        scored = []
+        for s in secs:
+            title = str(s.get("title") or "")
+            hits = [t for t in weights if t in title]
+            score = sum(weights[t] for t in hits)
+            if kp_name and title and len(title) >= 2 and (kp_name in title or title in kp_name):
+                score += 0.8
+            if score > 0:
+                scored.append((score, s, hits))
+        scored.sort(key=lambda x: -x[0])
+        for score, s, hits in scored[:TEACH_SUPP_SECTIONS_MAX]:
+            a = int(s.get("page_start") or 0)
+            b = int(s.get("page_end") or a or 0)
+            picked.append({"index": int(s.get("index") or 0),
+                           "title": str(s.get("title") or ""),
+                           "level": int(s.get("level") or 1),
+                           "page_start": a, "page_end": b,
+                           "page_label": _page_span_label(a, b),
+                           "score": round(float(score), 3),
+                           "hit_terms": hits[:6]})
+    note = ""
+    if not picked:
+        # 退路：章内段落（仍只查该章）的页码范围当伪小节
+        passages = _chapter_passages(conn, tb, heading, terms,
+                                     limit=TEACH_SUPP_SECTIONS_MAX)
+        for i, p in enumerate(passages, 1):
+            a, b = int(p.get("page_start") or 0), int(p.get("page_end") or 0)
+            picked.append({"index": i, "title": "（教材 %s 段落）" % p.get("page_label"),
+                           "level": 1, "page_start": a, "page_end": b,
+                           "page_label": _page_span_label(a, b),
+                           "score": float(p.get("score") or 0),
+                           "hit_terms": p.get("hit_terms") or []})
+        note = ("《章节细目》标题没有匹配 → 用本章词项得分最高的段落页范围兜底"
+                if passages else
+                "《章节细目》与章内段落都没有与这条 KP 匹配的内容（不出 AI 补充）")
+    pages: list = []
+    for s in picked:
+        for pg in range(int(s.get("page_start") or 0),
+                        int(s.get("page_end") or 0) + 1):
+            if pg and pg not in pages:
+                pages.append(pg)
+    pages = sorted(pages)[:SUPPLEMENT_MAX_PAGES]
+    # 教材原文摘录：只取选中页范围、只查该章
+    material = ""
+    chunk_ids: list = []
+    try:
+        rows = conn.execute(
+            "SELECT id, text, source_ref FROM chunks WHERE doc_id=? AND heading_path=? "
+            "ORDER BY ord", (int(tb["id"]), heading)).fetchall()
+    except sqlite3.Error:
+        rows = []
+    parts = []
+    for r in rows:
+        span = _ref_span(r["source_ref"])
+        if span and not (set(range(span[0], span[1] + 1)) & set(pages)):
+            continue
+        lo, hi = span if span else (0, 0)
+        txt = re.sub(r"\s+", " ", str(r["text"] or "")).strip()
+        if not txt:
+            continue
+        part = "（%s）%s" % (_page_span_label(lo, hi) or "p.?", txt)
+        if len(material) + len(part) > TEACH_SUPP_MATERIAL_MAX:
+            note = (note + "；" if note else "") + "原文摘录已达 %d 字上限，后续块被截断" \
+                % TEACH_SUPP_MATERIAL_MAX
+            break
+        parts.append(part)
+        chunk_ids.append(int(r["id"]))
+        material = "\n".join(parts)
+    return {"sections": picked, "pages": pages, "page_label": _fmt_pages(pages),
+            "section_material": material, "section_material_chars": len(material),
+            "chunk_ids": chunk_ids, "note": note or
+            ("本地定位到：%s" % "、".join(s["title"] for s in picked) if picked else "")}
+
+
+# ---------------------------------------------------------------- ③ SUPP：按需 AI
+def _kp_sha(kp: dict) -> str:
+    return hashlib.sha256(json.dumps(kp, ensure_ascii=False, sort_keys=True,
+                                     default=str).encode("utf-8")).hexdigest()
+
+
+def _supp_cache_key(prompt_sha: str, kp: dict, tb_id: int, chapter_no: int,
+                    pages: list) -> str:
+    blob = json.dumps({"v": SUPPLEMENT_VERSION, "prompt": prompt_sha,
+                       "kp": _kp_sha(kp), "tb": int(tb_id),
+                       "ch": int(chapter_no), "pages": sorted(int(x) for x in pages)},
+                      ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+
+
+def estimate_map(doc_id: int, *, db_path=None, conn: sqlite3.Connection | None = None,
+                 prompt_path=None) -> dict:
+    """MAP 调用预估（0 模型、0 写文件）。"""
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        _p, kps, kp_sha, _m = _courseware_kps(doc_id)
+        tb = pick_textbook(conn)
+        chapters = _chapter_candidates(conn, tb) if tb else []
+        ranges = _chapter_page_ranges(conn, tb) if tb else {}
+        try:
+            prompts = _load_prompts(prompt_path)
+        except TeachError:
+            prompts = {}
+        user_len = len((prompts.get("map_user") or "")) + len(_kp_outline_text(kps)) + \
+            len(_chapters_text(chapters, ranges))
+        kb = _kp_build()
+        est_in = int(user_len / max(1.0, kb.CHARS_PER_TOKEN))
+        est_out = min(_kp_max_tokens(), int(est_in * kb.REASON_RATIO) + 400)
+        cost = round(est_in / 1e6 * kb.PRICE_IN * kb.FX
+                     + est_out / 1e6 * kb.PRICE_OUT * kb.FX, 6)
+        return {"calls": 1, "est_tokens_in": est_in, "est_tokens_out": est_out,
+                "cost_cny_max": cost, "model": _kp_model(),
+                "thinking": _kp_thinking(), "reasoning_effort": _kp_effort(),
+                "max_tokens": _kp_max_tokens(), "ai_enabled": _ai_enabled(),
+                "prompt_sha256": str(prompts.get("sha256") or ""),
+                "rule": ("MAP：1 次小输入调用（课件标题+%d 条 KP 大纲+%d 章）；"
+                         "按 %.2f 字符/token、输出≈输入×%.1f+400（上限 max_tokens）估"
+                         % (len(kps), len(chapters), kb.CHARS_PER_TOKEN,
+                            kb.REASON_RATIO))}
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+def estimate_kp_supplement(doc_id: int, kp_id, *, db_path=None,
+                           conn: sqlite3.Connection | None = None,
+                           prompt_path=None) -> dict:
+    """单条 KP 的 SUPP 调用预估（0 模型、0 写文件；本地定位可现算）。"""
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        _p, kps, _kp_sha_val, _m = _courseware_kps(doc_id)
+        kp = next((k for k in kps if str(k.get("id") or "") == str(kp_id)), None)
+        if kp is None:
+            return {"calls": 1, "ok": False, "error": "这份课件里没有这条知识点 %s" % kp_id}
+        tb = pick_textbook(conn)
+        if tb is None:
+            return {"calls": 1, "ok": False, "error": "当前学科库没有教材"}
+        out = supplement_out_file(doc_id)
+        data = _load_supplement(out)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        cm = meta.get("chapter_map") if isinstance(meta.get("chapter_map"), dict) else {}
+        if not cm:
+            chapters = _chapter_candidates(conn, tb)
+            ranges = _chapter_page_ranges(conn, tb)
+            hit = _local_chapter_vote(chapters, kps, _doc_title(conn, doc_id))
+            cm = _chapter_map_entry(chapters, ranges, int(hit.get("no") or 0)) if hit else {}
+        if not cm:
+            return {"calls": 1, "ok": False,
+                    "error": "无法定位章节（教材未按章切块或 KP 与教材无关）"}
+        sec = _local_kp_sections(conn, tb, cm, kp)
+        try:
+            prompts = _load_prompts(prompt_path)
+        except TeachError:
+            prompts = {}
+        title = _doc_title(conn, doc_id)
+        user = (prompts.get("supp_user") or "")
+        for ph, val in (("{courseware_title}", title),
+                        ("{chapter}", "第%s章 %s" % (cm.get("chapter_no"), cm.get("chapter_name"))),
+                        ("{kp_name}", str(kp.get("name") or "")),
+                        ("{kp_points}", "\n".join("- %s" % p for p in (kp.get("points") or [])[:8])),
+                        ("{kp_summary}", str(kp.get("summary") or "")[:600]),
+                        ("{section_outline}", "\n".join(
+                            "- %s（%s）" % (s.get("title"), s.get("page_label"))
+                            for s in sec.get("sections") or [])),
+                        ("{section_material}", sec.get("section_material") or "")):
+            user = user.replace(ph, val)
+        kb = _kp_build()
+        est_in = int((len(user) + len(prompts.get("supp_sys") or ""))
+                     / max(1.0, kb.CHARS_PER_TOKEN))
+        est_out = min(_kp_max_tokens(), int(est_in * kb.REASON_RATIO) + 600)
+        cost = round(est_in / 1e6 * kb.PRICE_IN * kb.FX
+                     + est_out / 1e6 * kb.PRICE_OUT * kb.FX, 6)
+        return {"ok": True, "calls": 1, "doc_id": int(doc_id), "kp_id": str(kp_id),
+                "est_tokens_in": est_in, "est_tokens_out": est_out,
+                "cost_cny_max": cost, "model": _kp_model(),
+                "thinking": _kp_thinking(), "reasoning_effort": _kp_effort(),
+                "max_tokens": _kp_max_tokens(), "ai_enabled": _ai_enabled(),
+                "prompt_sha256": str(prompts.get("sha256") or ""),
+                "sections": sec.get("sections") or [],
+                "pages": sec.get("pages") or [],
+                "material_chars": sec.get("section_material_chars") or 0,
+                "cached": False,
+                "rule": ("SUPP：1 次按需调用（该 KP + %d 字教材摘录）；"
+                         "按 %.2f 字符/token、输出≈输入×%.1f+600（上限 max_tokens）估"
+                         % (sec.get("section_material_chars") or 0,
+                            kb.CHARS_PER_TOKEN, kb.REASON_RATIO))}
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+def _backup_supplement(out: Path) -> str:
+    """旧产物备份 `.bak-<ts>`（旧版升级/force 重写前；失败不阻断）。"""
+    if not Path(out).exists():
+        return ""
+    bak = Path(out).with_name(Path(out).name + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
+    try:
+        shutil.copy2(out, bak)
+        return str(bak)
+    except OSError:
+        return ""
+
+
+def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
+                     allow_ai: bool = True, db_path=None,
+                     conn: sqlite3.Connection | None = None, prompt_path=None,
+                     log=print) -> dict:
+    """混合管线：AI 章映射（1 次/课件，可缓存）→ 本地逐 KP 小节/页码 → 写产物。
+
+    **此处不做 per-KP AI**（省钱/省时；按需分析见 `analyze_kp_supplement`）。
+    """
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        kp_path, kps, kp_sha, kp_mtime = _courseware_kps(doc_id)
+        if not kps:
             return {"ok": False, "status": "no_kps", "doc_id": int(doc_id),
                     "out_path": str(out_path or supplement_out_file(doc_id)),
                     "error": "这份课件还没有末级知识点产物（先整理知识点再补教材）"}
-        kp_mtime = kp_path.stat().st_mtime if kp_path.exists() else 0.0
-        kp_sha = ""
-        try:
-            kp_sha = hashlib.sha256(kp_path.read_bytes()).hexdigest()
-        except OSError:
-            kp_sha = ""
-
         out = Path(out_path) if out_path else supplement_out_file(doc_id)
         doc_title = _doc_title(conn, doc_id)
         tb = pick_textbook(conn)
+        prompts, prompt_sha, prompt_error = {}, "", ""
+        try:
+            prompts = _load_prompts(prompt_path)
+            prompt_sha = prompts["sha256"]
+        except TeachError as e:
+            prompt_error = str(e)
 
-        # ---- 幂等短路（非 force）----
-        if out.exists() and not force:
-            prev = _kp._load_prev(out)
-            pm = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+        prev_data = _load_supplement(out) if out.exists() else {}
+        prev_meta = prev_data.get("meta") if isinstance(prev_data.get("meta"), dict) else {}
+        prev_version = str(prev_meta.get("version") or "")
+        legacy = bool(out.exists()) and (
+            prev_version != SUPPLEMENT_VERSION
+            or str(prev_meta.get("status") or "") not in ("no_textbook",)
+            and not isinstance(prev_meta.get("chapter_map"), dict))
+        if out.exists() and not force and not legacy:
             same = (
-                str(pm.get("version") or "") == SUPPLEMENT_VERSION
-                and int(pm.get("textbook_doc_id") or 0) == int(tb["id"] if tb else 0)
-                and abs(float(pm.get("kp_artifact_mtime") or 0.0) - float(kp_mtime)) < 1e-6
+                int(prev_meta.get("textbook_doc_id") or 0)
+                == int(tb["id"] if tb else 0)
+                and str(prev_meta.get("kp_artifact_sha256") or "") == str(kp_sha)
+                and abs(float(prev_meta.get("kp_artifact_mtime") or 0.0)
+                        - float(kp_mtime or 0.0)) < 1e-6
+                and str(prev_meta.get("prompt_sha256") or "") == str(prompt_sha)
             )
             if same:
                 return {"ok": True, "status": "skipped", "out_path": str(out),
-                        "meta": pm, "doc_id": int(doc_id)}
-            prev = {}
+                        "meta": prev_meta, "doc_id": int(doc_id)}
+
+        prev_backup = ""
+        if out.exists() and (legacy or force):
+            prev_backup = _backup_supplement(out)
 
         generated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
         meta = {
@@ -1174,15 +1885,27 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
             "kp_artifact": str(kp_path),
             "kp_artifact_mtime": kp_mtime,
             "kp_artifact_sha256": kp_sha,
+            "prompt_path": str(prompts.get("path") or ""),
+            "prompt_sha256": prompt_sha,
+            "prompt_error": prompt_error,
+            "ai_enabled": _ai_enabled(),
+            "ai_model": _kp_model(),
+            "chapter_map": {},
+            "ai_map_source": "",
+            "ai_map_cost_cny": 0.0,
+            "ai_map_tokens": {"in": 0, "out": 0},
+            "ai_map_elapsed_s": 0.0,
+            "ai_map_error": "",
+            "legacy_prev_version": prev_version if legacy else "",
+            "prev_backup": prev_backup,
             "generated_at": generated_at,
+            "updated_at": generated_at,
             "created_at": time.time(),
-            "n_kps": len(kps_raw),
+            "n_kps": len(kps),
             "n_matched": 0,
             "n_no_match": 0,
             "note": "",
         }
-        kps_map: dict = {}
-
         if tb is None:
             meta["status"] = "no_textbook"
             meta["note"] = ("当前学科库里没有教材类资料（role=textbook 的 PDF）。"
@@ -1194,72 +1917,79 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
             return {"ok": True, "status": "no_textbook", "out_path": str(out),
                     "meta": meta, "doc_id": int(doc_id), "kps": {}}
 
-        chapters = _chapter_candidates(conn, tb)
-        meta["textbook_chapters"] = len(chapters)
-        matched, no_match = 0, 0
-        for i, kp in enumerate([r for r in kps_raw if isinstance(r, dict)], 1):
+        # ① AI 章映射（缓存命中则 0 调用；失败降级本地）
+        cm = map_courseware_chapter(doc_id, force=force, allow_ai=allow_ai,
+                                    out_path=out, db_path=db_path, conn=conn,
+                                    prompt_path=prompt_path, log=log)
+        meta["chapter_map"] = cm if isinstance(cm, dict) else {}
+        meta["ai_map_source"] = str((cm or {}).get("source") or "")
+        meta["ai_map_cost_cny"] = float((cm or {}).get("cost_cny") or 0.0)
+        meta["ai_map_tokens"] = (cm or {}).get("tokens") or {"in": 0, "out": 0}
+        meta["ai_map_elapsed_s"] = float((cm or {}).get("elapsed_s") or 0.0)
+        meta["ai_map_error"] = str((cm or {}).get("error") or "")
+        if not int((cm or {}).get("chapter_no") or 0):
+            meta["status"] = "no_match"
+            meta["note"] = ("课件→教材章映射失败/无匹配（%s）；没有可补充的教材章节"
+                            % (meta["ai_map_error"] or "无教材章候选"))
+            _atomic_write_json({"meta": meta, "kps": {}}, out)
+            return {"ok": True, "status": "no_match", "out_path": str(out),
+                    "meta": meta, "doc_id": int(doc_id), "kps": {}}
+
+        chapter = {"chapter_no": int(cm.get("chapter_no") or 0),
+                   "name": str(cm.get("name") or cm.get("chapter_name") or ""),
+                   "chapter_name": str(cm.get("name") or cm.get("chapter_name") or ""),
+                   "heading_path": str(cm.get("heading_path") or ""),
+                   "page_start": int(cm.get("page_start") or 0),
+                   "page_end": int(cm.get("page_end") or 0),
+                   "source": str(cm.get("source") or "")}
+        kps_map: dict = {}
+        n_matched = n_no = 0
+        for i, kp in enumerate(kps, 1):
             kp_id = str(kp.get("id") or ("KP-%d" % i))
             kp_name = str(kp.get("name") or kp.get("node_name") or "")
             kp_text = _kp_query_text(kp)
-            entry = {"kp_id": kp_id, "kp_name": kp_name, "status": "no_match",
-                     "chapter": {}, "pages": [], "page_label": "",
-                     "passages": [], "added_terms": [],
-                     "note": ""}
-            chapter = _match_chapter_for_kp(chapters, kp, doc_title)
-            if chapter is None:
-                entry["note"] = ("找不到对应章（词项在章名上 0 分）——按规则不回退整本扫描，"
-                                 "这条先不给教材补充")
-                no_match += 1
-                kps_map[kp_id] = entry
-                continue
+            sec = _local_kp_sections(conn, tb, chapter, kp)
             terms = _terms(kp_text, limit=SUPPLEMENT_TERMS_MAX)
             passages = _chapter_passages(conn, tb, chapter["heading_path"], terms,
                                          limit=SUPPLEMENT_MAX_PASSAGES)
-            if not passages:
-                entry["chapter"] = {"heading_path": chapter["heading_path"],
-                                    "name": chapter["name"], "no": int(chapter["no"]),
-                                    "score": chapter.get("score"),
-                                    "hit_terms": chapter.get("hit_terms") or []}
-                entry["note"] = "已匹配到章，但本章内没有词项得分 ≥ 相对截断线的段落"
-                no_match += 1
-                kps_map[kp_id] = entry
-                continue
-            pages: list = []
-            for p in passages:
-                for pg in range(int(p.get("page_start") or 0),
-                                int(p.get("page_end") or 0) + 1):
-                    if pg and pg not in pages:
-                        pages.append(pg)
-            pages = sorted(pages)[:SUPPLEMENT_MAX_PAGES]
-            entry.update({
-                "status": "done",
-                "chapter": {"heading_path": chapter["heading_path"],
-                            "name": chapter["name"], "no": int(chapter["no"]),
-                            "score": chapter.get("score"),
-                            "hit_terms": chapter.get("hit_terms") or []},
-                "pages": pages,
-                "page_label": _fmt_pages(pages),
+            sel_pages = set(sec.get("pages") or [])
+            if sel_pages:
+                scoped = [p for p in passages
+                          if set(range(int(p.get("page_start") or 0),
+                                       int(p.get("page_end") or 0) + 1)) & sel_pages]
+                passages = scoped or passages
+            status = "done" if (sec.get("sections") or passages) else "no_match"
+            if status == "done":
+                n_matched += 1
+            else:
+                n_no += 1
+            kps_map[kp_id] = {
+                "kp_id": kp_id, "kp_name": kp_name, "status": status,
+                "chapter": dict(chapter),
+                "sections": sec.get("sections") or [],
+                "pages": sec.get("pages") or [],
+                "page_label": sec.get("page_label") or "",
+                "section_material_chars": int(sec.get("section_material_chars") or 0),
+                "material_preview": (sec.get("section_material") or "")[:600],
                 "passages": passages,
                 "added_terms": _supplement_added_terms(passages, kp_text),
-                "note": ("教材「%s」%s 命中 %d 段（%s）。教材按章切块，"
-                         "段落页码范围见 page_label；只做定位，不改原知识点。"
-                         % (tb.get("title") or "", chapter["name"],
-                            len(passages), _fmt_pages(pages))),
-            })
-            matched += 1
-            kps_map[kp_id] = entry
-
-        meta["n_matched"] = matched
-        meta["n_no_match"] = no_match
-        meta["status"] = "done" if matched else "no_match"
-        meta["note"] = ("教材「%s」：%d 条 KP 中 %d 条匹配到章/段落，%d 条无匹配"
-                        % (tb.get("title") or "", len(kps_map), matched, no_match))
+                "note": ("教材：" + (sec.get("note") or "")) if status == "done"
+                        else "教材：本地未定位到小节/段落（可稍后再试或换教材）",
+            }
+        meta["n_matched"] = n_matched
+        meta["n_no_match"] = n_no
+        meta["status"] = "done" if n_matched else "no_match"
+        meta["note"] = ("教材「%s」→ 第%d章 %s（%s）；%d 条 KP 中 %d 条定位到小节/段落"
+                        % (meta["textbook_title"], chapter["chapter_no"],
+                           chapter["chapter_name"], meta["ai_map_source"],
+                           len(kps_map), n_matched))
         _atomic_write_json({"meta": meta, "kps": kps_map}, out)
         if log:
-            log("教材补充：doc#%d · 教材「%s」· %d 条 KP → 匹配 %d / 无匹配 %d"
-                "（%d 章候选，0 次模型调用）"
-                % (int(doc_id), tb.get("title") or "", len(kps_map), matched,
-                   no_match, len(chapters)))
+            log("教材补充：doc#%d · 教材「%s」→ 第%d章 %s（%s，CNY%.6f）· "
+                "%d 条 KP → 定位 %d / 无匹配 %d（per-KP AI 未调用）"
+                % (int(doc_id), meta["textbook_title"], chapter["chapter_no"],
+                   chapter["chapter_name"], meta["ai_map_source"],
+                   meta["ai_map_cost_cny"], len(kps_map), n_matched, n_no))
         return {"ok": True, "status": meta["status"], "out_path": str(out),
                 "meta": meta, "doc_id": int(doc_id), "kps": kps_map}
     finally:
@@ -1267,16 +1997,194 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
             conn.close()
 
 
+def _scale_pages(pages, lo: int, hi: int) -> list:
+    """过滤到章节页范围（越界剔除），去重升序。"""
+    out = []
+    for x in pages or []:
+        try:
+            n = int(str(x).strip())
+        except (TypeError, ValueError):
+            continue
+        if lo <= n <= hi and n not in out:
+            out.append(n)
+    return sorted(out)[:SUPPLEMENT_MAX_PAGES]
+
+
+def analyze_kp_supplement(doc_id: int, kp_id, *, force: bool = False,
+                          allow_ai: bool = True, out_path=None, db_path=None,
+                          conn: sqlite3.Connection | None = None,
+                          prompt_path=None, log=print) -> dict:
+    """③ 按需 AI：分析某条 KP 在教材对应小节里"有什么可补充的"（带缓存）。
+
+    - 无 supplement 文件/旧版（C-0124）/缺该 KP → 先本地 build 升级（不重复 AI 章映射）；
+    - AI 不可用 → `{ok:false,status:"ai_disabled"}`，保留本地 sections/passages 兜底；
+    - AI 失败 → `entry.ai.status="failed"` + error，local 兜底不变；
+    - 缓存键 = prompt sha + KP sha + 教材 id + 章号 + 小节页范围；未变且非 force → cached（0 调用）。
+    """
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        out = Path(out_path) if out_path else supplement_out_file(doc_id)
+        data = _load_supplement(out)
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        if (not data or str(meta.get("version") or "") != SUPPLEMENT_VERSION
+                or not isinstance(meta.get("chapter_map"), dict)):
+            build_supplement(doc_id, out_path=out, force=True, allow_ai=allow_ai,
+                             db_path=db_path, conn=conn, prompt_path=prompt_path,
+                             log=log)
+            data = _load_supplement(out)
+            meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        if not data:
+            return {"ok": False, "status": "no_supplement_file",
+                    "error": "没有教材补充产物，且本地构建失败"}
+        if str(meta.get("status") or "") in ("no_textbook",):
+            return {"ok": False, "status": "no_textbook",
+                    "error": "当前学科库没有教材：先把教材 PDF 入库，再补做教材补充"}
+        kps_map = data.get("kps") if isinstance(data.get("kps"), dict) else {}
+        entry = kps_map.get(str(kp_id))
+        if not entry:
+            build_supplement(doc_id, out_path=out, force=True, allow_ai=allow_ai,
+                             db_path=db_path, conn=conn, prompt_path=prompt_path,
+                             log=log)
+            data = _load_supplement(out)
+            kps_map = data.get("kps") if isinstance(data.get("kps"), dict) else {}
+            entry = kps_map.get(str(kp_id))
+        if not entry:
+            return {"ok": False, "status": "no_kp",
+                    "error": "教材补充产物里没有这条 KP（可能产物生成于它之前）"}
+        chapter = entry.get("chapter") if isinstance(entry.get("chapter"), dict) else {}
+        lo, hi = int(chapter.get("page_start") or 0), int(chapter.get("page_end") or 0)
+        _p, kps, _sha, _m = _courseware_kps(doc_id)
+        kp = next((k for k in kps if str(k.get("id") or "") == str(kp_id)), None)
+        if kp is None:
+            return {"ok": False, "status": "no_kp", "error": "课件产物里没有这条 KP"}
+        tb = pick_textbook(conn)
+        if tb is None:
+            return {"ok": False, "status": "no_textbook",
+                    "error": "当前学科库没有教材"}
+        if not (allow_ai and _ai_enabled()):
+            return {"ok": False, "status": "ai_disabled",
+                    "error": "教材补充 AI 未启用（没有可用密钥，或 KB_TEACH_AI=0）",
+                    "entry": entry, "fallback": entry.get("passages") or []}
+        prompts = _load_prompts(prompt_path)
+        sec = _local_kp_sections(conn, tb, chapter, kp)
+        chapter_label = "第%d章 %s" % (int(chapter.get("chapter_no") or 0),
+                                      str(chapter.get("chapter_name") or ""))
+        kp_points = "\n".join("- %s" % str(p).strip()
+                              for p in (kp.get("points") or [])[:8] if str(p).strip())
+        sec_outline = "\n".join("- %s（%s）" % (s.get("title"), s.get("page_label"))
+                                for s in (sec.get("sections") or []))
+        user = (prompts["supp_user"]
+                .replace("{courseware_title}", _doc_title(conn, doc_id))
+                .replace("{chapter}", chapter_label)
+                .replace("{kp_name}", str(kp.get("name") or ""))
+                .replace("{kp_points}", kp_points or "（课件没有列要点）")
+                .replace("{kp_summary}", str(kp.get("summary") or "")[:600])
+                .replace("{section_outline}", sec_outline or "（本地未匹配到小节）")
+                .replace("{section_material}", sec.get("section_material") or ""))
+        cache_key = _supp_cache_key(prompts["sha256"], kp, int(tb["id"]),
+                                    int(chapter.get("chapter_no") or 0),
+                                    sec.get("pages") or [])
+        old_ai = entry.get("ai") if isinstance(entry.get("ai"), dict) else {}
+        if (not force and str(old_ai.get("cache_key") or "") == cache_key
+                and str(old_ai.get("status") or "") in ("done", "no_supplement")):
+            return {"ok": True, "status": str(old_ai.get("status")), "cached": True,
+                    "entry": entry, "ai": old_ai, "doc_id": int(doc_id),
+                    "kp_id": str(kp_id), "cost_cny": 0.0}
+        res = _ai_chat("teach.supplement", prompts["supp_sys"], user, log=log)
+        generated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        base = {"model": res.get("model"), "cost_cny": round(float(res.get("cost_cny") or 0), 6),
+                "tokens": res.get("tokens") or {"in": 0, "out": 0},
+                "elapsed_s": float(res.get("elapsed_s") or 0.0),
+                "attempts": int(res.get("attempts") or 0),
+                "prompt_sha256": prompts["sha256"], "cache_key": cache_key,
+                "generated_at": generated_at, "section_pages": sec.get("pages") or []}
+        if not res.get("ok"):
+            entry["ai"] = dict(base, status="failed",
+                               error=str(res.get("error") or "AI 调用失败"),
+                               verdict="", summary="", points=[], gaps=[], citations=[])
+            _update_supplement_entry(out, meta, kp_id, entry, ai_cost_delta=base["cost_cny"])
+            return {"ok": False, "status": "failed", "error": entry["ai"]["error"],
+                    "entry": entry, "ai": entry["ai"],
+                    "fallback": entry.get("passages") or []}
+        parsed = res.get("parsed") or {}
+        verdict = str(parsed.get("verdict") or "").strip()
+        if verdict not in ("has_supplement", "no_supplement"):
+            verdict = "no_supplement"
+        points, seen = [], set()
+        for p in (parsed.get("points") or []):
+            if not isinstance(p, dict):
+                continue
+            text = str(p.get("text") or "").strip()[:160]
+            if not text:
+                continue
+            key = re.sub(r"\s+", "", text)
+            if key in seen:
+                continue
+            seen.add(key)
+            pages = _scale_pages(p.get("pages"), lo, hi)
+            kind = str(p.get("kind") or "").strip()
+            if kind not in TEACH_SUPP_KINDS:
+                kind = "概念"
+            points.append({"text": text[:120], "pages": pages, "kind": kind})
+            if len(points) >= TEACH_SUPP_POINTS_MAX:
+                break
+        gaps = [str(g).strip()[:120] for g in (parsed.get("gaps") or [])
+                if str(g or "").strip()][:TEACH_SUPP_GAPS_MAX]
+        citations = []
+        for c in (parsed.get("citations") or []):
+            if not isinstance(c, dict):
+                continue
+            quote = str(c.get("quote") or "").strip()[:80]
+            if not quote:
+                continue
+            citations.append({"pages": _scale_pages(c.get("pages"), lo, hi),
+                              "quote": quote})
+            if len(citations) >= TEACH_SUPP_CITATIONS_MAX:
+                break
+        summary = str(parsed.get("summary") or "").strip()[:160]
+        if verdict == "no_supplement":
+            points = []
+        status = "done" if verdict == "has_supplement" else "no_supplement"
+        entry["ai"] = dict(base, status=status, verdict=verdict, summary=summary,
+                           points=points, gaps=gaps, citations=citations, error="")
+        _update_supplement_entry(out, meta, kp_id, entry, ai_cost_delta=base["cost_cny"])
+        if log:
+            log("教材补充 AI：doc#%d %s → %s（%d 点 · CNY%.6f · %.1fs）"
+                % (int(doc_id), kp_id, status, len(points), base["cost_cny"],
+                   base["elapsed_s"]))
+        return {"ok": True, "status": status, "cached": False, "entry": entry,
+                "ai": entry["ai"], "doc_id": int(doc_id), "kp_id": str(kp_id),
+                "cost_cny": base["cost_cny"]}
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+def _update_supplement_entry(out: Path, meta: dict, kp_id, entry: dict,
+                             *, ai_cost_delta: float = 0.0) -> None:
+    """把某条 KP 的 `ai` 写回 supplement 文件（保留其余条目/本地兜底）。"""
+    data = _load_supplement(out)
+    kps_map = data.get("kps") if isinstance(data.get("kps"), dict) else {}
+    kps_map[str(kp_id)] = entry
+    data["kps"] = kps_map
+    meta = dict(meta)
+    meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    meta["ai_kp_calls"] = int(meta.get("ai_kp_calls") or 0) + 1
+    meta["ai_kp_cost_cny"] = round(float(meta.get("ai_kp_cost_cny") or 0.0)
+                                   + float(ai_cost_delta or 0.0), 6)
+    data["meta"] = meta
+    _atomic_write_json(data, out)
+
+
+# ---------------------------------------------------------------- 状态 / 读取
 def supplement_status(doc_id: int, *, db_path=None,
                       conn: sqlite3.Connection | None = None) -> dict:
     """这份课件的「教材补充」状态（零模型、零写入；供课件栏提醒用）。
 
-    返回 `{ok, doc_id, has_artifact, artifact_mtime, has_textbook,
-    textbooks:[{doc_id,title,...}], supplement:{exists,status,generated_at,n_kps,
-    n_matched,textbook_doc_id}, needs_backfill, reason}`。
-
-    `needs_backfill`：有 KP 产物 + 有教材 +（无补充产物 / 产物是 no_textbook /
-    比 KP 产物旧 / 教材换了一本）→ True。`no_match` 不算 needs（已补过，只是没命中）。
+    新增：旧版产物（C-0124，无 `chapter_map`）会被标成 `stale=true` 且
+    `needs_backfill=true`（reason 明说"旧版产物，需 AI 重新定位"）。
+    `ai` 摘要给前端显示 AI 开关/章映射来源/已分析条数。
     """
     own = conn is None
     conn = conn or _open_db(db_path)
@@ -1293,28 +2201,50 @@ def supplement_status(doc_id: int, *, db_path=None,
         out = supplement_out_file(doc_id)
         exists = out.exists()
         meta: dict = {}
+        data: dict = {}
         if exists:
-            data = _kp._load_prev(out)
+            data = _load_supplement(out)
             meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        version = str(meta.get("version") or "")
+        chapter_map = meta.get("chapter_map") if isinstance(meta.get("chapter_map"), dict) else {}
+        legacy = bool(exists) and (
+            version != SUPPLEMENT_VERSION
+            or (str(meta.get("status") or "") not in ("no_textbook",)
+                and not chapter_map))
         sup = {
             "exists": bool(exists),
             "status": str(meta.get("status") or ""),
+            "version": version,
+            "legacy": legacy,
+            "stale": legacy,
             "generated_at": str(meta.get("generated_at") or ""),
             "n_kps": int(meta.get("n_kps") or 0),
             "n_matched": int(meta.get("n_matched") or 0),
             "textbook_doc_id": int(meta.get("textbook_doc_id") or 0),
-            "version": str(meta.get("version") or ""),
+            "ai_map_source": str(meta.get("ai_map_source") or ""),
+            "ai_map_cost_cny": float(meta.get("ai_map_cost_cny") or 0.0),
         }
+        kps_map = data.get("kps") if isinstance(data.get("kps"), dict) else {}
+        n_ai_ready = sum(1 for e in kps_map.values()
+                         if isinstance(e, dict) and isinstance(e.get("ai"), dict)
+                         and str((e.get("ai") or {}).get("status") or "")
+                         in ("done", "no_supplement"))
+        n_ai_missing = max(0, len(kps_map) - n_ai_ready)
         reasons: list = []
         if has_artifact and books:
             if not exists:
                 reasons.append("还没有教材补充产物")
+            elif legacy:
+                reasons.append("旧版产物（C-0124 纯本地，无 AI 章节映射/小节）→ "
+                               "需要重新 AI 定位/补做")
             elif sup["status"] == "no_textbook":
                 reasons.append("上次补做时还没有教材")
             elif sup["status"] == "failed":
                 reasons.append("上次补做失败")
             elif sup["textbook_doc_id"] and int(sup["textbook_doc_id"]) != cur_tb_id:
                 reasons.append("教材已经换成 doc#%d" % cur_tb_id)
+            elif not chapter_map:
+                reasons.append("产物缺 AI 章节映射 → 需要重新定位")
             elif float(meta.get("kp_artifact_mtime") or 0.0) + 1e-6 < float(kp_mtime):
                 reasons.append("KP 产物比教材补充新（整理过之后还没补）")
         needs = bool(reasons)
@@ -1325,7 +2255,7 @@ def supplement_status(doc_id: int, *, db_path=None,
         elif needs:
             reason = "；".join(reasons) + " → 建议补做教材补充"
         elif sup["status"] == "no_match":
-            reason = "已补做过：教材里没有与这些知识点足够匹配的章节/段落"
+            reason = "已补做过：教材里没有与这些知识点足够匹配的章节/小节"
         else:
             reason = "教材补充已是最新"
         return {
@@ -1337,6 +2267,26 @@ def supplement_status(doc_id: int, *, db_path=None,
             "supplement": sup,
             "needs_backfill": needs,
             "reason": reason,
+            "ai": {
+                "enabled": _ai_enabled(),
+                "model": _kp_model(),
+                "thinking": _kp_thinking(),
+                "reasoning_effort": _kp_effort(),
+                "map": {
+                    "exists": bool(chapter_map),
+                    "source": str(chapter_map.get("source") or
+                                  meta.get("ai_map_source") or ""),
+                    "chapter_no": int(chapter_map.get("chapter_no") or 0),
+                    "chapter_name": str(chapter_map.get("chapter_name") or ""),
+                    "confidence": str(chapter_map.get("confidence") or ""),
+                    "cost_cny": float(meta.get("ai_map_cost_cny") or 0.0),
+                    "cached_at": str(chapter_map.get("cached_at") or ""),
+                },
+                "n_ai_ready": n_ai_ready,
+                "n_ai_missing": n_ai_missing,
+                "ai_kp_calls": int(meta.get("ai_kp_calls") or 0),
+                "ai_kp_cost_cny": round(float(meta.get("ai_kp_cost_cny") or 0.0), 6),
+            },
         }
     finally:
         if own and conn is not None:
@@ -1346,34 +2296,43 @@ def supplement_status(doc_id: int, *, db_path=None,
 def supplement_for_kp(doc_id: int, kp_id) -> dict:
     """读某条 KP 的教材补充（**不自动生成**；前端侧栏用）。
 
-    返回 `{ok, available, textbook:{doc_id,title}, entry, note}`；
-    没有产物/没有这条 KP 时 `available=False` 并给一句人话 note。
+    返回 `{ok, available, textbook, entry, ai, estimate, legacy, needs_rebuild, note}`：
+    `entry` 是本地兜底（chapter/sections/pages/passages），`ai` 是按需 AI 结果（可能有），
+    `estimate` 是"点一下 AI 补充要花多少"的预估（0 调用、0 写入）。
     """
     out = supplement_out_file(doc_id)
     data = _load_supplement(out)
     if not data:
-        return {"ok": True, "available": False,
-                "textbook": {}, "entry": {},
+        return {"ok": True, "available": False, "textbook": {}, "entry": {},
+                "ai": {}, "legacy": False, "needs_rebuild": True,
+                "estimate": estimate_kp_supplement(doc_id, kp_id),
                 "note": "还没有教材补充产物：先整理知识点，或在课件栏点「补做教材补充」"}
     meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    version = str(meta.get("version") or "")
+    chapter_map = meta.get("chapter_map") if isinstance(meta.get("chapter_map"), dict) else {}
+    legacy = bool(version != SUPPLEMENT_VERSION
+                  or (str(meta.get("status") or "") not in ("no_textbook",)
+                      and not chapter_map))
     textbook = {"doc_id": int(meta.get("textbook_doc_id") or 0),
                 "title": str(meta.get("textbook_title") or "")}
     kps = data.get("kps") if isinstance(data.get("kps"), dict) else {}
     entry = kps.get(str(kp_id) if kp_id is not None else "") or {}
+    ai = entry.get("ai") if isinstance(entry.get("ai"), dict) else {}
     available = bool(entry) and str(entry.get("status") or "") == "done"
     if not entry:
         note = "这条知识点在教材补充产物里没有记录（产物可能生成于它之前）"
-    elif not available:
-        note = str(entry.get("note") or "教材里没有找到可补充的匹配段落")
+    elif legacy:
+        note = "这是旧版（C-0124 纯本地）教材补充，建议先点「重新 AI 定位/补做」再看"
+    elif ai:
+        note = str(ai.get("summary") or ai.get("error") or entry.get("note") or "")
     else:
-        note = str(entry.get("note") or "")
-    return {"ok": True, "available": available, "textbook": textbook,
-            "entry": entry, "note": note}
-
-
-def _load_supplement(out: Path) -> dict:
+        note = str(entry.get("note") or "还没做过 AI 补充分析（点按钮按需生成）")
     try:
-        raw = json.loads(Path(out).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
+        estimate = estimate_kp_supplement(doc_id, kp_id)
+    except Exception as e:  # noqa: BLE001
+        estimate = {"ok": False, "calls": 1,
+                    "error": "%s: %s" % (type(e).__name__, e)}
+    return {"ok": True, "available": available, "textbook": textbook,
+            "entry": entry, "ai": ai, "legacy": bool(legacy),
+            "needs_rebuild": bool(legacy),
+            "estimate": estimate, "note": note}
