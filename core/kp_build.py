@@ -4602,6 +4602,10 @@ def start_background(doc_id: int, **kw) -> dict:
     **不能阻塞 HTTP 线程**：整理一份课件要几分钟到几十分钟（每条一次模型调用），
     在请求里同步跑会把看板卡死——入库那边是靠"请求挂很久 + 轮询进度"扛过去的，
     这里直接开线程，请求立刻返回，进度走 `/api/kp-build/progress`。
+
+    `on_done`（2026-10-21 新增，**可选**）：整理成功（产物文件存在）后由后台线程
+    调一次 `on_done(doc_id)`，用于"整理完顺手补做教材补充"；回调里的任何异常都被
+    吞掉，不影响整理状态/进度。**不传时行为与改造前逐字相同**。
     """
     if is_running():
         return {"started": False,
@@ -4612,9 +4616,19 @@ def start_background(doc_id: int, **kw) -> dict:
     progress.reset()
     progress.begin("整理知识点：doc#%d" % int(doc_id), files_total=1)
 
+    # 可选的整理完成回调（C-0124）：从 kw 里弹出，不传给 build()。
+    on_done = kw.pop("on_done", None)
+
     def _run() -> None:
         try:
             build(doc_id, progress_on=True, **kw)
+            if on_done is not None:
+                # 只有整理产物真的落盘了才回调（build 中途失败/没产物时不触发）。
+                try:
+                    if out_file(doc_id).exists():
+                        on_done(doc_id)
+                except Exception:  # noqa: BLE001
+                    pass      # 回调失败绝不影响整理状态/进度（零模型补做，可重试）
         except Exception as e:  # noqa: BLE001
             progress.end("failed", error="%s: %s" % (type(e).__name__, e))
         finally:

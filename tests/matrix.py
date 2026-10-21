@@ -187,6 +187,12 @@ MATRIX = [
     dict(id="F110", feature="预习页签（图谱下线 / 章节目录可收起 / 每章预习按钮 / 左树右文查看器）",
          entry="预习页 + /api/preview/{options,chapters,estimate,progress,doc} + POST /api/preview/start",
          kind="ui", priority="P1", tests=["test_18_preview_ui"], evidence="json+shot"),
+    dict(id="F111", feature="教材补充后端（按章匹配 / 每课件补充产物 / status / 整理完成回调，零模型）",
+         entry="core/teach.py::build_supplement + /api/textbook-supplement/{status,build,kp}",
+         kind="read", priority="P1", tests=["test_19_textbook_supplement"], evidence="json"),
+    dict(id="F112", feature="知识点小窗右侧教材栏（页图+段落） + 导图栏补做提醒",
+         entry="小窗 #mmkp-teach + /api/teach-page + 导图横幅补做按钮",
+         kind="ui", priority="P1", tests=["test_20_textbook_supplement_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

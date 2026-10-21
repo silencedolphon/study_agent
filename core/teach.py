@@ -67,7 +67,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import os
 import re
 import sqlite3
 import threading
@@ -855,3 +858,522 @@ def kp_textbook(conn: sqlite3.Connection, doc_id: int, kp_id: str,
                           f"（p.{ps[0]['page']} 起），按词项与章名自动匹配，"
                           "仅供参考，请以原文为准。")
     return out
+
+
+# ==========================================================================
+# 教材补充（C-0124，2026-10-21）：知识点 ↔ 教材，按**章节切块**匹配 + 每课件产物
+# ==========================================================================
+# 用户需求（2026-10-21）：
+#   1) 知识点窗口右侧显示教材对应页；
+#   2) 以知识点总结为基础判断教材是否有可补充内容，有则补进侧栏；
+#      教材内容必须**按章节切块的库**里找、**不允许整本扫描**；
+#   3) 知识点整理时触发；无教材走原管线；之后教材入库 → 提醒"补做教材补充"，
+#      只补教材、**不动原知识点**。
+#
+# 设计口径（全部零模型调用、只读 DB、只写一个 JSON 产物）：
+#   · 先按 `chunks.heading_path` 分组出**章候选**（只读 heading_path，不读块正文）；
+#   · 每条 KP 用词项给章名打分，只选**一章**；0 分返回 None（**禁止回退整本扫描**）；
+#   · 只 `SELECT ... WHERE doc_id=? AND heading_path=?` 取所选章的块做段落打分；
+#   · 产物 `logs/knowledge/<doc_id>-教材补充.json`，原子写；
+#   · 旧 `textbook_passages` / `kp_textbook` 一个字节未改（旧接口/旧流程继续可用）。
+SUPPLEMENT_VERSION = "C-0124-teach-supplement-v1"
+SUPPLEMENT_SUFFIX = "-教材补充.json"
+SUPPLEMENT_MAX_PASSAGES = 3
+SUPPLEMENT_MAX_ADDED_TERMS = 8
+SUPPLEMENT_MAX_PAGES = 8
+SUPPLEMENT_TERMS_MAX = 320
+
+
+def supplement_out_file(doc_id: int) -> Path:
+    """教材补充产物：`<当前学科 logs>/knowledge/<doc_id>-教材补充.json`。"""
+    return config.LOG_DIR / "knowledge" / ("%d%s" % (int(doc_id), SUPPLEMENT_SUFFIX))
+
+
+def _fmt_pages(pages) -> str:
+    """页列表 → `p.1–p.3、p.7` 文案（与 build_kp 产物里的 page_label 同形）。"""
+    ps = sorted({int(x) for x in (pages or []) if str(x).strip().isdigit()})
+    if not ps:
+        return ""
+    out, a, b = [], ps[0], ps[0]
+    for x in ps[1:]:
+        if x == b + 1:
+            b = x
+            continue
+        out.append(f"p.{a}" if a == b else f"p.{a}–p.{b}")
+        a = b = x
+    out.append(f"p.{a}" if a == b else f"p.{a}–p.{b}")
+    return "、".join(out)
+
+
+def _page_span_label(lo: int, hi: int) -> str:
+    if not lo:
+        return ""
+    return f"p.{lo}" if (not hi or hi == lo) else f"p.{lo}–p.{hi}"
+
+
+def _chapter_candidates(conn: sqlite3.Connection, tb: dict) -> list:
+    """教材的**章候选**：`SELECT heading_path, COUNT(*) GROUP BY heading_path`。
+
+    **只读 heading_path 分组计数，不读任何块正文**（整本扫描的红线也适用于这里）。
+    取 heading_path 最后一段为章名并解析章号；书名级（front matter，只有书名一段）
+    不算章，直接跳过——它们参与匹配会把知识点吸到"前言/目录"上去。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT heading_path, COUNT(*) AS n FROM chunks WHERE doc_id=? "
+            "GROUP BY heading_path ORDER BY MIN(ord)",
+            (int(tb["id"]),),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    tb_title = str(tb.get("title") or "")
+    out: list = []
+    for r in rows:
+        hp = str(r["heading_path"] or "")
+        name = _chapter_of(hp)
+        if not name or name == tb_title or ">" not in hp:
+            continue
+        m = _CHAPTER_NO.search(name) or _CHAPTER_NO.search(hp)
+        out.append({"heading_path": hp, "name": name,
+                    "no": int(m.group(1)) if m else 0,
+                    "n_blocks": int(r["n"] or 0)})
+    return out
+
+
+def _match_chapter_for_kp(chapters: list, kp: dict, doc_title: str = ""):
+    """把一条知识点匹配到**一章**（零模型）。
+
+    打分：候选词 = `_kp_query_text(kp)` + 课件标题 `doc_title` 的词项；
+    词项权重 `w=(词长-1)×log((K+1)/(df+0.5))`（K=章数，df=出现在几个章名里），
+    只来自课件标题的词项 ×0.5 降权；章命中得分 = Σw + 章号命中 +3.0
+    + 知识点名称与章名 ≥3 字词重合 ×0.8。**最高分为 0/无命中 → None**，
+    调用方必须按 no_match 处理，**不得回退整本扫描**。
+    """
+    if not chapters:
+        return None
+    kp_text = _kp_query_text(kp)
+    title_text = str(doc_title or "").strip()
+    text = (kp_text + "\n" + title_text).strip()
+    terms = _terms(text, limit=SUPPLEMENT_TERMS_MAX)
+    if not terms:
+        return None
+    kp_terms = set(_terms(kp_text, limit=SUPPLEMENT_TERMS_MAX))
+    names = [str(c.get("name") or "") for c in chapters]
+    K = len(chapters)
+    weights: dict = {}
+    df: dict = {}
+    for t in terms:
+        d = sum(1 for nm in names if t in nm)
+        if d <= 0:
+            continue
+        df[t] = d
+        # 过于普遍的词（出现在一半以上章名里）没有区分度
+        if d > max(2, int(K * 0.5)):
+            continue
+        w = (len(t) - 1) * math.log((K + 1) / (d + 0.5))
+        if t not in kp_terms:
+            w *= 0.5          # 只来自课件标题的噪声词降权
+        weights[t] = w
+    if not weights:
+        return None
+    want_nos = {str(m) for m in _CHAPTER_NO.findall(kp_text)}
+    kp_name = str(kp.get("name") or "")
+    best = None
+    for c in chapters:
+        nm = str(c.get("name") or "")
+        hits = [t for t in weights if t in nm]
+        if not hits:
+            continue
+        score = sum(weights[t] for t in hits)
+        no = int(c.get("no") or 0)
+        if no and str(no) in want_nos:
+            score += 3.0      # 知识点文本里点名"第N章"
+        name_hits = [t for t in hits if len(t) >= 3 and t in kp_name]
+        if name_hits:
+            score += 0.8 * sum(weights[t] for t in name_hits)
+        if best is None or score > best["score"]:
+            best = dict(c, score=round(score, 3),
+                        hit_terms=sorted(hits, key=lambda t: -weights[t])[:6])
+    return best
+
+
+def _chapter_passages(conn: sqlite3.Connection, tb: dict, chapter_heading: str,
+                      terms: list, limit: int = 0) -> list:
+    """**只查所选章**的教材块并打分（零模型）。
+
+    SQL 固定为 `WHERE doc_id=? AND heading_path=?`——**不 SELECT 整本教材**。
+    打分口径与旧 `textbook_passages` 同源（词项 IDF、相对截断 0.4、每块去重计分），
+    只是分母换成"本章块数"，且不再跨章。
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, ord, text, heading_path, source_ref FROM chunks "
+            "WHERE doc_id=? AND heading_path=? ORDER BY ord",
+            (int(tb["id"]), str(chapter_heading)),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    if not rows:
+        return []
+    N = len(rows)
+    block_texts = [str(r["text"] or "") for r in rows]
+    df: dict = {}
+    for bt in block_texts:
+        for t in terms:
+            if t in bt:
+                df[t] = df.get(t, 0) + 1
+    keep = [(t, d) for t, d in df.items()
+            if 0 < d <= max(2, int(N * 0.55))]
+    if not keep:
+        return []
+    weights = {t: (len(t) - 1) * math.log((N + 1) / (d + 0.5)) for t, d in keep}
+    scored: list = []
+    per_block_hits: list = []
+    for i, bt in enumerate(block_texts):
+        hits = [t for t in weights if t in bt]
+        per_block_hits.append(hits)
+        if not hits:
+            continue
+        s = sum(weights[t] for t in hits)
+        if s > 0:
+            scored.append((s, i))
+    if not scored:
+        return []
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    best = scored[0][0]
+    floor = best * TEACH_MIN_SCORE_RATIO
+    cap = int(limit) if limit else SUPPLEMENT_MAX_PASSAGES
+    cap = max(1, min(cap, TEACH_MAX_PASSAGES))
+    out: list = []
+    for score, i in scored:
+        if len(out) >= cap or score < floor:
+            break
+        r = rows[i]
+        txt, _cut = _clip(r["text"] or "")
+        ref = str(r["source_ref"] or "")
+        pgs = [int(x) for x in re.findall(r"p\.(\d+)", ref)] or []
+        lo = min(pgs) if pgs else 0
+        hi = max(pgs) if len(pgs) > 1 else lo
+        hits = sorted(per_block_hits[i], key=lambda t: -weights.get(t, 0.0))[:6]
+        out.append({
+            "chunk_id": int(r["id"]),
+            "page_start": lo,
+            "page_end": hi,
+            "page_label": _page_span_label(lo, hi),
+            "text": txt,
+            "score": round(score, 3),
+            "hit_terms": hits,
+        })
+    return out
+
+
+def _supplement_added_terms(passages: list, kp_text: str) -> list:
+    """教材段落里出现、而 KP 文本里没有的词（≤8，长词优先；供侧栏"可补充"提示）。"""
+    kp_norm = re.sub(r"\s+", "", str(kp_text or "")).lower()
+    seen: list = []
+    for p in passages or []:
+        for t in _terms(str(p.get("text") or "")):
+            tn = re.sub(r"\s+", "", t).lower()
+            if not tn or tn in kp_norm or t in seen:
+                continue
+            seen.append(t)
+    seen.sort(key=lambda t: (-len(t), t))
+    return seen[:SUPPLEMENT_MAX_ADDED_TERMS]
+
+
+def _atomic_write_json(data: dict, out: Path) -> None:
+    """原子写：临时文件 + `os.replace`（中断不会留半截 JSON）。"""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, out)
+
+
+def _open_db(db_path=None):
+    """只读连接（`mode=ro`，物理上不可能写库）。"""
+    from . import config as _config
+    p = Path(db_path) if db_path else Path(_config.DB_PATH)
+    conn = sqlite3.connect("file:" + p.as_posix() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _doc_title(conn, doc_id: int) -> str:
+    try:
+        row = conn.execute("SELECT title FROM documents WHERE id=?",
+                           (int(doc_id),)).fetchone()
+        return str((row["title"] if row else "") or "")
+    except sqlite3.Error:
+        return ""
+
+
+def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
+                     db_path=None, conn: sqlite3.Connection | None = None,
+                     log=print) -> dict:
+    """给一份**课件的 KP 产物**生成 `教材补充.json`（零模型、只读 DB、原子写）。
+
+    流程（对应用户需求 1/2/3）：
+
+    1. 读 `kp_build.out_file(doc_id)` 的知识点产物；没有 → `no_kps`（不写文件）；
+    2. `pick_textbook(conn)`：**没有教材** → 写 `status="no_textbook"` 状态文件
+       （meta + 空 `kps`），供"教材入库后提醒补做"判断；
+    3. 有教材：`_chapter_candidates`（只读 heading_path 分组）→ 逐条 KP
+       `_match_chapter_for_kp`（只挑**一章**，0 分即 no_match）→
+       `_chapter_passages`（**只查所选章**）→ 写每条的 chapter/pages/passages/
+       added_terms；**不修改原知识点产物**（只读它、记 sha/mtime 进 meta）；
+    4. 幂等：非 force 且已有产物、版本/教材 id/KP 产物 mtime 都没变 → `skipped`；
+    5. 原子写；不写数据库、不调模型。
+
+    返回 `{ok, status, out_path, meta, kps?}`；`no_kps` 时 `ok=False`。
+    """
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        from . import kp_build as _kp
+        kp_path = _kp.out_file(doc_id)
+        kp_doc = _kp._load_prev(kp_path)
+        kps_raw = kp_doc.get("knowledge_points") if isinstance(kp_doc, dict) else None
+        if not isinstance(kps_raw, list) or not kps_raw:
+            return {"ok": False, "status": "no_kps", "doc_id": int(doc_id),
+                    "out_path": str(out_path or supplement_out_file(doc_id)),
+                    "error": "这份课件还没有末级知识点产物（先整理知识点再补教材）"}
+        kp_mtime = kp_path.stat().st_mtime if kp_path.exists() else 0.0
+        kp_sha = ""
+        try:
+            kp_sha = hashlib.sha256(kp_path.read_bytes()).hexdigest()
+        except OSError:
+            kp_sha = ""
+
+        out = Path(out_path) if out_path else supplement_out_file(doc_id)
+        doc_title = _doc_title(conn, doc_id)
+        tb = pick_textbook(conn)
+
+        # ---- 幂等短路（非 force）----
+        if out.exists() and not force:
+            prev = _kp._load_prev(out)
+            pm = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
+            same = (
+                str(pm.get("version") or "") == SUPPLEMENT_VERSION
+                and int(pm.get("textbook_doc_id") or 0) == int(tb["id"] if tb else 0)
+                and abs(float(pm.get("kp_artifact_mtime") or 0.0) - float(kp_mtime)) < 1e-6
+            )
+            if same:
+                return {"ok": True, "status": "skipped", "out_path": str(out),
+                        "meta": pm, "doc_id": int(doc_id)}
+            prev = {}
+
+        generated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        meta = {
+            "version": SUPPLEMENT_VERSION,
+            "doc_id": int(doc_id),
+            "doc_title": doc_title,
+            "status": "done",
+            "textbook_doc_id": int(tb["id"]) if tb else 0,
+            "textbook_title": str(tb.get("title") or "") if tb else "",
+            "kp_artifact": str(kp_path),
+            "kp_artifact_mtime": kp_mtime,
+            "kp_artifact_sha256": kp_sha,
+            "generated_at": generated_at,
+            "created_at": time.time(),
+            "n_kps": len(kps_raw),
+            "n_matched": 0,
+            "n_no_match": 0,
+            "note": "",
+        }
+        kps_map: dict = {}
+
+        if tb is None:
+            meta["status"] = "no_textbook"
+            meta["note"] = ("当前学科库里没有教材类资料（role=textbook 的 PDF）。"
+                            "把教材 PDF 放进 raw 并入库后，在课件栏点「补做教材补充」即可。")
+            _atomic_write_json({"meta": meta, "kps": {}}, out)
+            if log:
+                log("教材补充：doc#%d 无教材 → 已写 no_textbook 状态（0 次模型调用）"
+                    % int(doc_id))
+            return {"ok": True, "status": "no_textbook", "out_path": str(out),
+                    "meta": meta, "doc_id": int(doc_id), "kps": {}}
+
+        chapters = _chapter_candidates(conn, tb)
+        meta["textbook_chapters"] = len(chapters)
+        matched, no_match = 0, 0
+        for i, kp in enumerate([r for r in kps_raw if isinstance(r, dict)], 1):
+            kp_id = str(kp.get("id") or ("KP-%d" % i))
+            kp_name = str(kp.get("name") or kp.get("node_name") or "")
+            kp_text = _kp_query_text(kp)
+            entry = {"kp_id": kp_id, "kp_name": kp_name, "status": "no_match",
+                     "chapter": {}, "pages": [], "page_label": "",
+                     "passages": [], "added_terms": [],
+                     "note": ""}
+            chapter = _match_chapter_for_kp(chapters, kp, doc_title)
+            if chapter is None:
+                entry["note"] = ("找不到对应章（词项在章名上 0 分）——按规则不回退整本扫描，"
+                                 "这条先不给教材补充")
+                no_match += 1
+                kps_map[kp_id] = entry
+                continue
+            terms = _terms(kp_text, limit=SUPPLEMENT_TERMS_MAX)
+            passages = _chapter_passages(conn, tb, chapter["heading_path"], terms,
+                                         limit=SUPPLEMENT_MAX_PASSAGES)
+            if not passages:
+                entry["chapter"] = {"heading_path": chapter["heading_path"],
+                                    "name": chapter["name"], "no": int(chapter["no"]),
+                                    "score": chapter.get("score"),
+                                    "hit_terms": chapter.get("hit_terms") or []}
+                entry["note"] = "已匹配到章，但本章内没有词项得分 ≥ 相对截断线的段落"
+                no_match += 1
+                kps_map[kp_id] = entry
+                continue
+            pages: list = []
+            for p in passages:
+                for pg in range(int(p.get("page_start") or 0),
+                                int(p.get("page_end") or 0) + 1):
+                    if pg and pg not in pages:
+                        pages.append(pg)
+            pages = sorted(pages)[:SUPPLEMENT_MAX_PAGES]
+            entry.update({
+                "status": "done",
+                "chapter": {"heading_path": chapter["heading_path"],
+                            "name": chapter["name"], "no": int(chapter["no"]),
+                            "score": chapter.get("score"),
+                            "hit_terms": chapter.get("hit_terms") or []},
+                "pages": pages,
+                "page_label": _fmt_pages(pages),
+                "passages": passages,
+                "added_terms": _supplement_added_terms(passages, kp_text),
+                "note": ("教材「%s」%s 命中 %d 段（%s）。教材按章切块，"
+                         "段落页码范围见 page_label；只做定位，不改原知识点。"
+                         % (tb.get("title") or "", chapter["name"],
+                            len(passages), _fmt_pages(pages))),
+            })
+            matched += 1
+            kps_map[kp_id] = entry
+
+        meta["n_matched"] = matched
+        meta["n_no_match"] = no_match
+        meta["status"] = "done" if matched else "no_match"
+        meta["note"] = ("教材「%s」：%d 条 KP 中 %d 条匹配到章/段落，%d 条无匹配"
+                        % (tb.get("title") or "", len(kps_map), matched, no_match))
+        _atomic_write_json({"meta": meta, "kps": kps_map}, out)
+        if log:
+            log("教材补充：doc#%d · 教材「%s」· %d 条 KP → 匹配 %d / 无匹配 %d"
+                "（%d 章候选，0 次模型调用）"
+                % (int(doc_id), tb.get("title") or "", len(kps_map), matched,
+                   no_match, len(chapters)))
+        return {"ok": True, "status": meta["status"], "out_path": str(out),
+                "meta": meta, "doc_id": int(doc_id), "kps": kps_map}
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+def supplement_status(doc_id: int, *, db_path=None,
+                      conn: sqlite3.Connection | None = None) -> dict:
+    """这份课件的「教材补充」状态（零模型、零写入；供课件栏提醒用）。
+
+    返回 `{ok, doc_id, has_artifact, artifact_mtime, has_textbook,
+    textbooks:[{doc_id,title,...}], supplement:{exists,status,generated_at,n_kps,
+    n_matched,textbook_doc_id}, needs_backfill, reason}`。
+
+    `needs_backfill`：有 KP 产物 + 有教材 +（无补充产物 / 产物是 no_textbook /
+    比 KP 产物旧 / 教材换了一本）→ True。`no_match` 不算 needs（已补过，只是没命中）。
+    """
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        from . import kp_build as _kp
+        kp_path = _kp.out_file(doc_id)
+        has_artifact = kp_path.exists()
+        kp_mtime = kp_path.stat().st_mtime if has_artifact else 0.0
+        books = textbook_docs(conn)
+        textbooks = [{"doc_id": int(d["id"]), "title": str(d.get("title") or ""),
+                      "corpus": str(d.get("corpus") or "main"),
+                      "n_chunks": int(d.get("n_chunks") or 0)} for d in books]
+        cur_tb_id = int(books[0]["id"]) if books else 0
+        out = supplement_out_file(doc_id)
+        exists = out.exists()
+        meta: dict = {}
+        if exists:
+            data = _kp._load_prev(out)
+            meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        sup = {
+            "exists": bool(exists),
+            "status": str(meta.get("status") or ""),
+            "generated_at": str(meta.get("generated_at") or ""),
+            "n_kps": int(meta.get("n_kps") or 0),
+            "n_matched": int(meta.get("n_matched") or 0),
+            "textbook_doc_id": int(meta.get("textbook_doc_id") or 0),
+            "version": str(meta.get("version") or ""),
+        }
+        reasons: list = []
+        if has_artifact and books:
+            if not exists:
+                reasons.append("还没有教材补充产物")
+            elif sup["status"] == "no_textbook":
+                reasons.append("上次补做时还没有教材")
+            elif sup["status"] == "failed":
+                reasons.append("上次补做失败")
+            elif sup["textbook_doc_id"] and int(sup["textbook_doc_id"]) != cur_tb_id:
+                reasons.append("教材已经换成 doc#%d" % cur_tb_id)
+            elif float(meta.get("kp_artifact_mtime") or 0.0) + 1e-6 < float(kp_mtime):
+                reasons.append("KP 产物比教材补充新（整理过之后还没补）")
+        needs = bool(reasons)
+        if not has_artifact:
+            reason = "还没有末级知识点产物（先整理知识点）"
+        elif not books:
+            reason = "当前学科库里没有教材；有教材入库后会提醒补做"
+        elif needs:
+            reason = "；".join(reasons) + " → 建议补做教材补充"
+        elif sup["status"] == "no_match":
+            reason = "已补做过：教材里没有与这些知识点足够匹配的章节/段落"
+        else:
+            reason = "教材补充已是最新"
+        return {
+            "ok": True, "doc_id": int(doc_id),
+            "has_artifact": bool(has_artifact),
+            "artifact_mtime": kp_mtime,
+            "has_textbook": bool(books),
+            "textbooks": textbooks,
+            "supplement": sup,
+            "needs_backfill": needs,
+            "reason": reason,
+        }
+    finally:
+        if own and conn is not None:
+            conn.close()
+
+
+def supplement_for_kp(doc_id: int, kp_id) -> dict:
+    """读某条 KP 的教材补充（**不自动生成**；前端侧栏用）。
+
+    返回 `{ok, available, textbook:{doc_id,title}, entry, note}`；
+    没有产物/没有这条 KP 时 `available=False` 并给一句人话 note。
+    """
+    out = supplement_out_file(doc_id)
+    data = _load_supplement(out)
+    if not data:
+        return {"ok": True, "available": False,
+                "textbook": {}, "entry": {},
+                "note": "还没有教材补充产物：先整理知识点，或在课件栏点「补做教材补充」"}
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    textbook = {"doc_id": int(meta.get("textbook_doc_id") or 0),
+                "title": str(meta.get("textbook_title") or "")}
+    kps = data.get("kps") if isinstance(data.get("kps"), dict) else {}
+    entry = kps.get(str(kp_id) if kp_id is not None else "") or {}
+    available = bool(entry) and str(entry.get("status") or "") == "done"
+    if not entry:
+        note = "这条知识点在教材补充产物里没有记录（产物可能生成于它之前）"
+    elif not available:
+        note = str(entry.get("note") or "教材里没有找到可补充的匹配段落")
+    else:
+        note = str(entry.get("note") or "")
+    return {"ok": True, "available": available, "textbook": textbook,
+            "entry": entry, "note": note}
+
+
+def _load_supplement(out: Path) -> dict:
+    try:
+        raw = json.loads(Path(out).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}

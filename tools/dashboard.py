@@ -436,6 +436,85 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
   /* 头部压在抽屉上方：展开抽屉时关闭按钮不被遮挡、仍可点 */
   .evpop .mmkp-main .ph{position:relative;z-index:3;background:var(--panel2)}
 }
+/* ---------------- 特性2：知识点小窗右侧「教材补充」栏（task-27） ----------------
+   小窗 = 左侧导图树（224）+ 中间原有正文 + 右侧本学科教材补充（340）。
+   数据全部只读（/api/textbook-supplement/kp、/api/teach-page），零模型；
+   ≥1280px 常驻；<1280px 默认收起，头部「📖 教材」按钮打开覆盖式抽屉。
+   所有选择器都挂在 .evpop 下，不碰其它页面。 */
+.evpop .mmkp-teachbtn{display:none;background:none;border:1px solid var(--line);
+  color:var(--dim);font-size:12px;line-height:1;cursor:pointer;padding:5px 8px;
+  border-radius:6px;flex:0 0 auto;margin-right:2px}
+.evpop .mmkp-teachbtn:hover{color:var(--accent);border-color:var(--accent)}
+.evpop .mmkp-teach{display:none;flex:0 0 340px;min-height:0;overflow:auto;
+  padding:8px 10px 10px;border-left:1px solid var(--line);background:#12151c;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.evpop .mteach-h{display:flex;align-items:center;gap:6px;margin:0 0 6px;
+  font-size:12.5px;color:var(--fg)}
+.evpop .mteach-h b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.evpop .mteach-x{display:none;background:none;border:1px solid var(--line);
+  color:var(--dim);border-radius:6px;cursor:pointer;font-size:12px;line-height:1;
+  padding:4px 7px;flex:0 0 auto}
+.evpop .mteach-x:hover{color:var(--fg);border-color:var(--accent)}
+.evpop .mteach-loading,.evpop .mteach-empty{color:var(--dim);font-size:12px;
+  line-height:1.8;padding:6px 2px}
+.evpop .mteach-empty .small{font-size:11px;line-height:1.7}
+.evpop .mteach-sub{font-size:12px;color:var(--accent);font-weight:600;
+  margin:2px 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evpop .mteach-ch{color:var(--dim);font-size:11.5px;line-height:1.7;margin-bottom:7px}
+.evpop .mteach-pages{display:flex;gap:6px;margin:0 0 8px;flex-wrap:wrap}
+.evpop .mteach-pg{position:relative;display:block;flex:0 0 calc((100% - 12px) / 3);
+  border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#0d1420;
+  min-height:64px}
+.evpop .mteach-pg img{display:block;width:100%;height:96px;object-fit:cover;
+  cursor:zoom-in}
+.evpop .mteach-pg img.bad{display:none}
+.evpop .mteach-pg span{position:absolute;left:0;bottom:0;right:0;
+  background:rgba(0,0,0,.62);color:#cfe0ff;font-size:10.5px;text-align:center;
+  padding:1px 0}
+.evpop .mteach-pg:hover{border-color:var(--accent)}
+.evpop .mteach-sec{color:var(--dim);font-size:11px;letter-spacing:.4px;
+  margin:8px 0 4px;border-top:1px dashed var(--line);padding-top:7px}
+.evpop .mteach-ps{padding:6px 0;border-bottom:1px dashed rgba(42,47,58,.7)}
+.evpop .mteach-ps:last-child{border-bottom:none}
+.evpop .mteach-ps-h{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.evpop .mteach-pgno{color:var(--accent);font-size:11px;font-weight:600}
+.evpop .mteach-score{color:var(--dim);font-size:10.5px;margin-left:auto}
+.evpop .mteach-tx{color:var(--fg);font-size:12px;line-height:1.75;
+  word-break:break-word}
+.evpop .mteach-hits{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.evpop .mteach-hits span{font-size:10.5px;color:var(--dim);
+  border:1px solid var(--line);border-radius:12px;padding:0 7px;line-height:1.7}
+.evpop .mteach-terms{display:flex;flex-wrap:wrap;gap:5px}
+.evpop .mteach-term{font-size:11px;color:#cfe0ff;background:#1b2430;
+  border:1px solid #233047;border-radius:12px;padding:1px 8px;line-height:1.6}
+.evpop .mteach-foot{color:var(--dim);font-size:10.5px;margin-top:10px;
+  padding-top:7px;border-top:1px dashed var(--line);line-height:1.6}
+.evpop .mteach-act{margin-top:6px}
+/* 宽屏常驻：小窗放成三段式（左树 224 + 正文 + 右教材 340） */
+@media (min-width:1280px){
+  .evpop.mmkp-has-teach .mmkp-teach{display:block}
+  .evpop.mmkp-has-side.mmkp-has-teach{width:min(1280px,calc(100vw - 24px))}
+}
+/* <1280px：右侧栏默认收起，头部「📖 教材」打开覆盖式抽屉；390 也不横向溢出 */
+@media (max-width:1279px){
+  .evpop .mmkp-teachbtn{display:inline-flex;align-items:center}
+  .evpop .mmkp-main .ph{position:relative;z-index:3;background:var(--panel2)}
+  .evpop.mmkp-has-teach .mmkp-teach{display:none;position:absolute;right:0;
+    top:0;bottom:0;width:min(340px,86vw);z-index:2;
+    border-left:1px solid var(--accent);box-shadow:-8px 0 24px rgba(0,0,0,.5);
+    padding-top:54px;background:#10141b}
+  .evpop.mmkp-has-teach.mm-teach-open .mmkp-teach{display:block}
+  .evpop .mteach-x{display:inline-block}
+}
+/* 课件思维导图栏的「补做教材补充」提醒（只在 #mm-tree 顶部） */
+.mmteach-banner{display:flex;gap:10px;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;border:1px solid #3d3218;background:#211b10;color:#ffd48a;
+  border-radius:9px;padding:8px 11px;margin:0 0 9px;font-size:12px;line-height:1.7}
+.mmteach-banner-t{flex:1 1 260px}
+.mmteach-banner .small{display:block;color:#d8c69a;font-size:11px;margin-top:2px}
+.mmteach-banner button{flex:0 0 auto}
+.mmteach-ready{color:var(--ok);font-size:11.5px;margin:0 0 7px}
 /* 卡 C-0055：出处小窗里的"这一页"——课件图 + 该页知识点。
    人拍板（2026-09-27）：「AI问答版块点击右下标签时最好可以跳出那一页的课件图片。
    并且可以看到那一页课件对应的知识点，形成一个网状知识体系。」
@@ -1254,8 +1333,10 @@ function evPopClose(){
     EVPOP.dataset.deck = '';
     EVPOP.classList.remove('deck-open');
     // 特性1：左侧导图栏状态一并清掉，下一个出处小窗不会继承"加宽 + 抽屉展开"
-    EVPOP.classList.remove('mmkp-has-side', 'mm-tree-open');
+    EVPOP.classList.remove('mmkp-has-side', 'mm-tree-open',
+      'mmkp-has-teach', 'mm-teach-open');
     MMSIDE.open = false;
+    MMTEACH.open = false;
   }
   document.removeEventListener('click', evPopOutside, true);
   document.removeEventListener('keydown', evPopEsc);
@@ -1398,8 +1479,10 @@ function evPopShow(el, n){
   // 免得它顶掉知识点弹窗之后还按居中的规矩摆。
   d.dataset.kpPop = '';
   // 特性1：出处小窗不显示左侧导图栏（宽屏加宽 / 窄屏抽屉都不该带过来）
-  d.classList.remove('mmkp-has-side', 'mm-tree-open');
+  d.classList.remove('mmkp-has-side', 'mm-tree-open',
+    'mmkp-has-teach', 'mm-teach-open');
   MMSIDE.open = false;
+  MMTEACH.open = false;
   d.dataset.cite = '';   // 卡 C-0055：上一条出处的"这一页"请求一并作废
   if (!e) {
     d.innerHTML = `<div class="ph"><div class="src">
@@ -4312,6 +4395,8 @@ async function loadMindmapTree(){
     </div>
     <div class="mmtree">${mmNodes(d.tree, '')}</div>`;
   bindMindmapTree();
+  // 特性2：教材后入库时，在导图栏顶部提醒「补做教材补充」（不打扰其它状态）
+  mmTeachBackfill(MINDMAP.docId);
 }
 
 function mmNodes(list, pkey){
@@ -4753,8 +4838,9 @@ async function mmOpenKp(kpId, name, el, keepDeck, docId){
   const pop = evPopEl();
   pop.dataset.kp = kpId;
   if (!keepDeck) pop.dataset.deck = '';
-  // 特性1：先摘掉上一屏的左侧栏状态；真正渲染时 mmRenderKp 会按本课件重新加回
-  pop.classList.remove('mmkp-has-side', 'mm-tree-open');
+  // 特性1/2：先摘掉上一屏的侧栏状态；真正渲染时 mmRenderKp 会按本课件重新加回
+  pop.classList.remove('mmkp-has-side', 'mm-tree-open',
+    'mmkp-has-teach', 'mm-teach-open');
   MMPOP.anchor = el;
   MMPOP.docId = did;
   evPopMount(el, `<div class="ph"><div class="src">
@@ -4847,6 +4933,7 @@ function mmRenderKp(d, el, keepDeck){
         <div class="hdg">${esc((d.path || []).join(' › ') || d.node_name || '')}</div>
       </div>
       <button class="mmkp-toggle" id="mmkp-treebtn" title="展开 / 收起左侧导图">☰ 导图</button>
+      <button class="mmkp-teachbtn" id="mmkp-teachbtn" title="展开 / 收起右侧教材补充">📖 教材</button>
       <button class="pclose" onclick="evPopClose()" title="关闭（Esc）">✕</button>
     </div>
     <div class="pbody" id="mmkp-body">
@@ -4920,11 +5007,16 @@ function mmRenderKp(d, el, keepDeck){
       <button class="ghost" id="mmkp-deck" title="${esc(deckTitle)}">展开当页课件</button>
     </div>
       </div>
+      <aside class="mmkp-teach" id="mmkp-teach">
+        <div class="mteach-loading">教材补充加载中…</div>
+      </aside>
     </div>`;
   // 特性1：左侧栏占位（宽屏常驻）——失败会收起；窄屏抽屉若正开着，换节点后保持展开。
   const pop0 = evPopEl();
   pop0.classList.add('mmkp-has-side');
   if (MMSIDE.open) pop0.classList.add('mm-tree-open');
+  pop0.classList.add('mmkp-has-teach');
+  if (MMTEACH.open) pop0.classList.add('mm-teach-open');
   evPopMount(el, html);
   // ★ 卡 C-0042：点「▸ 展开：总结正文 · 出处明细 · 生成链条」也会让内容变高
   //   （同一类"尺寸变了位置没跟着变"的越界），所以折叠体一开一合也重新兜一次。
@@ -4967,6 +5059,10 @@ function mmRenderKp(d, el, keepDeck){
     evPopEl().classList.toggle('mm-tree-open', MMSIDE.open);
     evPopPlace(MMPOP.anchor || evPopEl());
   };
+  // 特性2：右侧「教材补充」栏（异步；无教材/需补做/无匹配都给人话）
+  mmTeachPaint(d, el);
+  const teachBtn = $('#mmkp-teachbtn');
+  if (teachBtn) teachBtn.onclick = () => mmTeachToggle();
 }
 
 // ---------------- 特性1：知识点小窗左侧的「本课件完整导图」 ----------------
@@ -5068,6 +5164,194 @@ async function mmSidebarPaint(d, el){
   evPopPlace(el || MMPOP.anchor || pop);
 }
 
+// ---------------- 特性2：知识点小窗右侧「教材补充」栏（task-27） ----------------
+// 只做加法：小窗 = 左侧导图树 + 中间原有正文 + 右侧本学科教材的补充页图/段落。
+// 数据来自只读接口（零模型）：/api/textbook-supplement/kp（这条 KP 的补充）+
+// /api/textbook-supplement/status（有没有教材/要不要补做）。不改原知识点产物。
+// ≥1280px 常驻；<1280px 头部「📖 教材」按钮打开覆盖式抽屉。
+const MMTEACH = {cache: {}, open: false, req: 0, lastStatus: null};
+
+async function mmTeachPaint(d, el){
+  const aside = $('#mmkp-teach');
+  if (!aside) return;
+  const pop = evPopEl();
+  const docId = parseInt((d && d.doc_id) || MMPOP.docId, 10) || 0;
+  const kpId = (d && d.kp_id) || '';
+  const myReq = ++MMTEACH.req;
+  aside.innerHTML = '<div class="mteach-loading">教材补充加载中…</div>';
+  if (!docId){
+    aside.innerHTML = '<div class="mteach-empty">这条知识点没有关联课件，教材补充不可用。</div>';
+    return;
+  }
+  let kpData = null, st = null;
+  try {
+    kpData = await api('/api/textbook-supplement/kp?doc_id=' +
+                       encodeURIComponent(docId) + '&kp_id=' + encodeURIComponent(kpId));
+  } catch(e){
+    kpData = {ok: false, available: false,
+              note: '读教材补充失败：' + e.message};
+  }
+  try {
+    st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(docId));
+  } catch(e){ st = null; }
+  // 期间用户又切了别的知识点/关了窗：这次结果作废
+  if (myReq !== MMTEACH.req) return;
+  if (evPopEl() !== pop || !document.body.contains(aside) || aside !== $('#mmkp-teach')) return;
+  if ((pop.dataset.kp || '') !== String(kpId)) return;
+  mmTeachRender(aside, kpData || {}, st || {}, d);
+}
+
+function mmTeachRender(aside, kpData, st, d){
+  MMTEACH.lastStatus = st || {};
+  const tb = (kpData && kpData.textbook) || {};
+  const entry = (kpData && kpData.entry) || {};
+  const books = (st && st.textbooks) || [];
+  const hasTb = !!(st && st.has_textbook) || books.length > 0;
+  const sup = (st && st.supplement) || {};
+  const passages = (entry.passages || []).filter(Boolean);
+  const available = !!((kpData && kpData.available) && passages.length);
+  const head = `<div class="mteach-h"><b>📖 教材补充</b>
+    <button class="mteach-x" title="收起教材补充" onclick="mmTeachClose()">✕</button></div>`;
+  let body = '';
+  if (available){
+    const pages = (entry.pages || []).filter(p => parseInt(p, 10) > 0).slice(0, 3);
+    const tbId = parseInt(tb.doc_id || (st && st.supplement || {}).textbook_doc_id || 0, 10) || 0;
+    const imgs = pages.map(p => `<a class="mteach-pg"
+        href="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=150"
+        target="_blank" rel="noopener" title="打开 p.${p} 原尺寸">
+        <img loading="lazy" src="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=110"
+          alt="教材 p.${p}" onerror="this.classList.add('bad')">
+        <span>p.${p}</span></a>`).join('');
+    const ch = entry.chapter || {};
+    const chName = ch.name || '';
+    const chLine = /第\s*\d+\s*章/.test(chName)
+      ? chName
+      : [ch.no ? ('第' + ch.no + '章') : '', chName].filter(Boolean).join(' ');
+    const psHtml = passages.map(p => {
+      const txt = String(p.text || '');
+      const cut = txt.length > 350 ? '…' : '';
+      const hits = (p.hit_terms || []).slice(0, 5);
+      const pg = p.page_label || (p.page_start ? ('p.' + p.page_start) : '');
+      return `<div class="mteach-ps">
+        <div class="mteach-ps-h"><span class="mteach-pgno">${esc(pg)}</span>
+          ${p.score ? `<span class="mteach-score">匹配 ${Number(p.score).toFixed(1)}</span>` : ''}</div>
+        <div class="mteach-tx">${esc(txt.slice(0, 350))}${cut}</div>
+        ${hits.length ? `<div class="mteach-hits">${hits.map(t =>
+          `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
+    }).join('');
+    const terms = (entry.added_terms || []).map(t =>
+      (typeof t === 'string') ? t : (t.term || t.word || t.name || '')).filter(Boolean);
+    const termsHtml = terms.length ? `<div class="mteach-sec">教材补充点</div>
+      <div class="mteach-terms">${terms.slice(0, 12).map(t =>
+        `<span class="mteach-term">${esc(t)}</span>`).join('')}</div>` : '';
+    body = head
+      + `<div class="mteach-sub">📚 ${esc(tb.title || ((books[0] || {}).title) || '教材')}</div>`
+      + ((chLine || entry.page_label)
+          ? `<div class="mteach-ch">${esc(chLine)}${entry.page_label
+              ? (chLine ? ' · ' : '') + esc(entry.page_label) : ''}</div>` : '')
+      + (imgs ? `<div class="mteach-pages">${imgs}</div>` : '')
+      + `<div class="mteach-sec">补充段落</div>` + psHtml + termsHtml
+      + `<div class="mteach-foot">按教材章节切块匹配，仅供参考；不改动原知识点</div>`;
+  } else if (!hasTb){
+    body = head + `<div class="mteach-empty">本学科尚未入库教材，教材补充暂不可用。
+      <br><span class="small">把教材 PDF 放进 raw 并入库后，整理知识点时会自动补做。</span></div>`;
+  } else if (st && st.needs_backfill){
+    body = head + `<div class="mteach-empty">教材已入库，可到导图栏补做教材补充。
+      <br><span class="small">教材《${esc(((books[0] || {}).title) || '')}》已入库；
+      到「课件思维导图」栏点「补做教材补充」即可（不改动原知识点）。</span></div>
+      <div class="mteach-act"><button class="act"
+        onclick="mmTeachGotoBackfill(${parseInt(d.doc_id || 0, 10) || 0})">去导图栏补做</button></div>`;
+  } else {
+    const note = (kpData && kpData.note)
+      || (st && st.reason)
+      || '这条知识点在教材里没有匹配到可补充的段落。';
+    body = head + `<div class="mteach-empty">${em(humanize(note))}</div>`;
+  }
+  aside.innerHTML = body;
+}
+
+function mmTeachToggle(){
+  MMTEACH.open = !MMTEACH.open;
+  evPopEl().classList.toggle('mm-teach-open', MMTEACH.open);
+  evPopPlace(MMPOP.anchor || evPopEl());
+}
+
+function mmTeachClose(){
+  MMTEACH.open = false;
+  evPopEl().classList.remove('mm-teach-open');
+  evPopPlace(MMPOP.anchor || evPopEl());
+}
+
+function mmTeachGotoBackfill(docId){
+  evPopClose();
+  go('kps');
+  setTimeout(() => {
+    const el = $('#mm-tree');
+    if (el) el.scrollIntoView({ block: 'center' });
+  }, 450);
+  toast('在「课件思维导图」栏点「补做教材补充」（不改动原知识点）');
+}
+
+// ---------------- 特性2：课件思维导图栏「补做教材补充」提醒（task-27） ----------------
+// 触发条件由后端 supplement_status 判：有 KP 产物 + 有教材 + 没补做/教材后入库。
+// 只在 #mm-tree 顶部出现；不改其它页面、不改原知识点。
+const MMBACK = {busy: false};
+
+async function mmTeachBackfill(docId){
+  const box = $('#mm-tree');
+  if (!box) return;
+  const did = parseInt(docId || MINDMAP.docId || 0, 10) || 0;
+  if (!did) return;
+  const old = box.querySelector('.mmteach-banner, .mmteach-ready');
+  if (old) old.remove();
+  let st;
+  try { st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(did)); }
+  catch(e){ return; }
+  if (parseInt(MINDMAP.docId || 0, 10) !== did) return;   // 期间换了课件：作废
+  if (!st || st.ok === false || !st.has_artifact || !st.has_textbook) return;
+  const books = st.textbooks || [];
+  const first = books[0] || {};
+  const line = document.createElement('div');
+  if (st.needs_backfill){
+    const reason = humanize(st.reason || '');
+    line.className = 'mmteach-banner';
+    line.innerHTML = `<div class="mmteach-banner-t">检测到教材《${esc(first.title || '')}》
+      已入库，可为这份课件的知识点补做教材补充（<b>不改动原知识点</b>）。
+      ${reason ? `<span class="small">${esc(reason)}</span>` : ''}</div>
+      <button class="act" id="mmteach-build">补做教材补充</button>`;
+    box.insertBefore(line, box.firstChild);
+    const btn = $('#mmteach-build');
+    if (btn) btn.onclick = () => mmTeachBuild(did, btn);
+  } else if (((st.supplement || {}).exists)){
+    const n = (st.supplement || {}).n_matched || 0;
+    line.className = 'mmteach-ready';
+    line.textContent = '教材补充已就绪：' + n + ' 条知识点已匹配';
+    box.insertBefore(line, box.firstChild);
+  }
+}
+
+async function mmTeachBuild(docId, btn){
+  if (MMBACK.busy) return;
+  MMBACK.busy = true;
+  const oldText = btn ? btn.textContent : '';
+  if (btn){ btn.disabled = true; btn.textContent = '补做中…'; }
+  try {
+    const r = await api('/api/textbook-supplement/build', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ doc_id: docId, force: false }),
+    });
+    if (!r || r.ok === false) throw new Error((r && r.error) || '补做失败');
+    const n = ((r.meta || {}).n_matched) || 0;
+    toast('教材补充已生成：' + n + ' 条知识点已匹配（原知识点未改动）');
+    MMTEACH.cache = {};
+    await mmTeachBackfill(docId);          // 重新取状态：横幅变"已就绪"
+  } catch(e){
+    toast('补做教材补充失败：' + e.message);
+    if (btn){ btn.disabled = false; btn.textContent = oldText || '补做教材补充'; }
+  } finally {
+    MMBACK.busy = false;
+  }
+}
 // ---------------- 知识点窗口的笔记（卡 C-0052） ----------------
 // 人拍板：「在点击思维导图的知识点跳出的知识点窗口增加一个『记入笔记』的按钮……
 // 该笔记与知识点窗口绑定。同时增加一个『查看笔记』的按钮……笔记页签也会出现
@@ -10232,6 +10516,146 @@ def api_kp_build_progress():
     return kp_build_mod.progress_snapshot()
 
 
+# ---------------- 特性2：教材补充 / 教材页图（task-27）后端胶水 ----------------
+# 真正的零模型匹配与产物读写在 `core/teach.py`（另一智能体并行新增）：
+#   build_supplement / supplement_status / supplement_for_kp / page_png。
+# 这里只做转调与兜底：函数缺失或抛异常 → 200/4xx JSON，绝不让页面 500。
+
+
+def _teach_mod():
+    from core import teach as _tm
+    return _tm
+
+
+def api_textbook_supplement_status(conn, doc_id):
+    """这份课件的教材补充状态（只读、零写盘）。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    fn = getattr(_teach_mod(), "supplement_status", None)
+    if not callable(fn):
+        return {"ok": False, "error": "教材补充后端还没就绪（缺 supplement_status）"}
+    try:
+        try:
+            r = fn(doc_id, conn=conn)
+        except TypeError:
+            r = fn(doc_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "读教材补充状态失败：%s" % e}
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "教材补充状态返回异常"}
+    r.setdefault("ok", True)
+    return r
+
+
+def api_textbook_supplement_kp(conn, doc_id, kp_id):
+    """某条知识点的教材补充（页图路径 + 段落 + 补充点；只读）。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "available": False, "error": "doc_id 必须是整数",
+                "textbook": {}, "entry": {}, "note": "doc_id 必须是整数"}
+    kp_id = str(kp_id or "").strip()
+    if doc_id <= 0 or not kp_id:
+        return {"ok": False, "available": False, "textbook": {}, "entry": {},
+                "note": "缺少 doc_id 或 kp_id"}
+    fn = getattr(_teach_mod(), "supplement_for_kp", None)
+    if not callable(fn):
+        return {"ok": False, "available": False, "textbook": {}, "entry": {},
+                "note": "教材补充后端还没就绪（缺 supplement_for_kp）"}
+    try:
+        r = fn(doc_id, kp_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "available": False, "textbook": {}, "entry": {},
+                "note": "读教材补充失败：%s" % e}
+    if not isinstance(r, dict):
+        return {"ok": False, "available": False, "textbook": {}, "entry": {},
+                "note": "教材补充返回异常"}
+    return r
+
+
+def api_textbook_supplement_build(payload):
+    """补做教材补充：同步、零模型、只写 `logs/knowledge/<doc>-教材补充.json`。"""
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    force = bool(payload.get("force"))
+    fn = getattr(_teach_mod(), "build_supplement", None)
+    if not callable(fn):
+        return {"ok": False, "error": "教材补充后端还没就绪（缺 build_supplement）"}
+    try:
+        r = fn(doc_id, force=force)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "生成教材补充失败：%s" % e}
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "教材补充返回异常"}
+    meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
+    return {"ok": bool(r.get("ok", True)), "status": r.get("status") or "",
+            "doc_id": doc_id, "out_path": r.get("out_path") or "",
+            "meta": meta, "error": r.get("error") or ""}
+
+
+def api_teach_page(doc_id, page, dpi):
+    """教材某页渲染成 PNG（零模型）。
+
+    返回 `(png_bytes, {"code", "pages", "page"})`；失败 `(None, {"error","code"})`，
+    由路由层翻成 4xx/5xx JSON（与 `/img/slide` 的降级风格一致）。
+    """
+    try:
+        doc_id, page = int(doc_id or 0), int(page or 0)
+    except (TypeError, ValueError):
+        return None, {"error": "doc_id/page 必须是整数", "code": 400}
+    if doc_id <= 0 or page <= 0:
+        return None, {"error": "缺少 doc_id 或 page", "code": 400}
+    d = None
+    if str(dpi or "").strip():
+        try:
+            d = int(dpi)
+        except (TypeError, ValueError):
+            return None, {"error": "dpi 必须是整数", "code": 400}
+    tm = _teach_mod()
+    fn = getattr(tm, "page_png", None)
+    err_cls = getattr(tm, "TeachError", None)
+    if not callable(fn):
+        return None, {"error": "教材页图后端还没就绪（缺 page_png）", "code": 503}
+    conn = None
+    try:
+        conn = _conn(readonly=True)
+        try:
+            r = fn(conn, doc_id, page, d)
+        finally:
+            if conn is not None:
+                conn.close()
+    except Exception as e:  # noqa: BLE001
+        if err_cls is not None and isinstance(e, err_cls):
+            return None, {"error": getattr(e, "message", str(e)),
+                          "code": int(getattr(e, "code", 400) or 400)}
+        return None, {"error": "教材页图失败：%s" % e, "code": 500}
+    if not isinstance(r, dict) or not r.get("png"):
+        return None, {"error": "教材页图渲染失败", "code": 500}
+    return r["png"], {"code": 200,
+                      "pages": int(r.get("pages") or 0),
+                      "page": int(r.get("page") or page),
+                      "dpi": int(r.get("dpi") or (d or 0))}
+
+
+def _teach_after_kp_build(doc_id):
+    """整理知识点成功后顺手补做教材补充（零模型；异常吞掉，绝不影响整理状态）。"""
+    try:
+        from core import teach as _tm
+        fn = getattr(_tm, "build_supplement", None)
+        if callable(fn):
+            fn(int(doc_id))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def api_kp_build_start(payload):
     """启动整理（后台线程）。返回产物路径与备份路径，前端据此提示"去哪儿看结果"。"""
     try:
@@ -10276,9 +10700,17 @@ def api_kp_build_start(payload):
     # 而 `kp_build.start_background(doc_id: int, **kw)` 也只收 1 个位置参，
     # 旧写法（三个位置参）必然 `TypeError: start_background() takes 1 positional
     # argument but 3 were given` → 看板「开始整理」按钮 500。
-    rep = kp_build_mod.start_background(
-        did, max_cost=max_cost, force=force, out_path=str(out),
-    )
+    # task-27：整理成功后顺手补做教材补充（回调异常不影响整理；惰性 import）
+    try:
+        rep = kp_build_mod.start_background(
+            did, max_cost=max_cost, force=force, out_path=str(out),
+            on_done=_teach_after_kp_build,
+        )
+    except TypeError:
+        # 老版 kp_build 不认 on_done：退回原调用，不因增强功能让整理起不来
+        rep = kp_build_mod.start_background(
+            did, max_cost=max_cost, force=force, out_path=str(out),
+        )
     if not rep.get('started'):
         return {'error': rep.get('error') or '启动失败'}
 
@@ -13909,6 +14341,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"读图失败：{e}"}, 500)
         self._send(200, body, "image/png")
 
+    def _teach_page(self, doc_id, page, dpi) -> None:
+        """教材某页 PNG（task-27）：只放行 role=textbook 的 PDF；
+        失败一律 JSON 4xx/5xx（不是 500 空响应），与 /img/slide 同风格。"""
+        png, info = api_teach_page(doc_id, page, dpi)
+        if png is None:
+            return self._json({"error": info.get("error") or "教材页图不可用"},
+                              int(info.get("code") or 500))
+        self._send(200, png, "image/png")
+
     def do_GET(self):
         u = urlparse(self.path)
         qs = {k: v[0] for k, v in parse_qs(u.query).items()}
@@ -13939,6 +14380,14 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- 图片 ----------------
             if path == "/img/slide":
                 return self._slide(qs.get("doc_id") or 0, qs.get("page") or 0)
+
+            # ---------------- 教材页图（task-27） ----------------
+            # PDF 渲染约 0.1~0.2 秒且 core/teach 自带渲染锁：
+            # 不进全局 _lock，避免挡在入库/整理后面。
+            if path == "/api/teach-page":
+                return self._teach_page(qs.get("doc_id") or 0,
+                                        qs.get("page") or 0,
+                                        qs.get("dpi") or "")
 
             # ---------------- 页面知识点 ----------------
             if path == "/api/page-kps":
@@ -14005,6 +14454,15 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/preview/doc":
                         return self._json(api_preview_doc(
                             qs.get("doc_id"), qs.get("chapter")))
+                    # ---------------- 教材补充（task-27） ----------------
+                    # 只读产物文件 + 教材章分组，零模型、零写盘。
+                    if path == "/api/textbook-supplement/status":
+                        return self._json(api_textbook_supplement_status(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
+                    if path == "/api/textbook-supplement/kp":
+                        return self._json(api_textbook_supplement_kp(
+                            conn, _int_arg(qs.get("doc_id"), 0),
+                            qs.get("kp_id", "")))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -14149,6 +14607,11 @@ class Handler(BaseHTTPRequestHandler):
             # 起后台线程跑 core/preview.py，HTTP 立刻返回；进度走 /api/preview/progress。
             if u.path == "/api/preview/start":
                 return self._json(api_preview_start(payload))
+
+            # ---------------- 教材补充：补做（task-27） ----------------
+            # 同步、零模型、可能数秒；不持全局 _lock（build 内部只读 DB + 原子写产物）。
+            if u.path == "/api/textbook-supplement/build":
+                return self._json(api_textbook_supplement_build(payload))
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":
