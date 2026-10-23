@@ -1,0 +1,23 @@
+{
+  "note": "task-36 页签保持 bug：修复前（HEAD 5abe6e6 + task-33 代码）用 CDP 在 qa-review2 复现的 0/100/300/800/1500ms 采样（从探针输出逐字记录）。现象：切回 0ms 弹窗隐藏；100ms 先出现「正在读取知识点总结…」占位（hasBody=false/bodyLen=0，内容闪一下）；300ms 后才是完整内容；若页面滚动恢复重试触发 window.scroll，evPopScroll 还会把刚恢复的弹窗关掉（消失）。",
+  "captured_at": "2026-10-24T01:07+08:00",
+  "version": "before-fix",
+  "returnSamples": [
+    {"ms": 0, "display": "none", "visible": false, "hasBody": true, "bodyLen": 832, "note": "切回瞬间弹窗仍隐藏（要等 go() 异步渲染完才恢复）"},
+    {"ms": 100, "display": "flex", "visible": true, "hasBody": false, "bodyLen": 0, "title": "受体选择性与作用部位", "note": "占位屏闪一下：内容区为空、标题还没 KP id"},
+    {"ms": 300, "display": "flex", "visible": true, "hasBody": true, "bodyLen": 230, "title": "受体选择性与作用部位 KP-N03-1", "note": "完整内容才回来"},
+    {"ms": 800, "display": "flex", "visible": true, "hasBody": true, "bodyLen": 230, "title": "受体选择性与作用部位 KP-N03-1"},
+    {"ms": 1500, "display": "flex", "visible": true, "hasBody": true, "bodyLen": 230, "title": "受体选择性与作用部位 KP-N03-1"}
+  ],
+  "secondCycle": [
+    {"ms": 0, "display": "none", "visible": false},
+    {"ms": 150, "display": "flex", "visible": true, "bodyLen": 230},
+    {"ms": 600, "display": "flex", "visible": true, "bodyLen": 230},
+    {"ms": 1200, "display": "flex", "visible": true, "bodyLen": 230}
+  ],
+  "root_cause": [
+    "切走：evPopOutside 把弹窗 display:none（参数保留但 DOM 内容/位置未快照）",
+    "切回：go() 先清空 #view 并 await VIEWS.render()，之后才 uiRestorePopup() → mmOpenKp 先 mount「正在读取…」占位，网络回来才换内容（闪）",
+    "滚动恢复的 window.scroll 事件被 evPopScroll 捕获 → 再走 evPopClose（消失）"
+  ]
+}

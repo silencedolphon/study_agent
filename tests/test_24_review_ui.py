@@ -1,13 +1,15 @@
-"""task-33：复习板块大改（自测 + 三步复习 + 悬浮窗 + 页签保持 + 笔记分组）前端验收。
+"""task-36：复习 UI v2（结构路径自测 + 已掌握按钮 + 三步窗口化 + 悬浮窗 + 名词整理入口）。
 
-覆盖：
-  · 复习页：课件复习卡（自测状态/熟悉度/名词数/开始自测·继续复习）、月历项「开始复习」；
-  · 自测：行内挖空输入、提交、对错+答案、熟悉度、不熟悉列表、进入三步；
-  · 三步 runner：Step1 KP（名称/总结/要点/页码，记住/再想想/下一步）、Step2 笔记分组、
-    Step3 重点名词翻开、完成页建议；全局悬浮窗 #rev-float（跨页签可见/localStorage）；
-  · 页签状态保持：保存滚动位置、知识点弹窗参数跨页签恢复（主动关闭/评分后不弹）；
-  · 笔记页：按课件→绑定 KP 分组、搜索、打开笔记、跳到知识点；
-  · 5 条 /api/review/* 路由（含 ok:false 降级，不 500；submit 不持全局锁）。
+覆盖（task-33 的复习功能仍然覆盖，已按 v3 契约更新）：
+  · 复习页：课件卡（熟悉度=已掌握/抽样）、月历「开始复习」；
+  · 自测 v2：结构路径 branch 树、展开总结、已掌握/未掌握单选、全部选完才能提交、
+    POST `{results:{kp_id:bool}}`、结果页熟悉度（已掌握/抽样）、进入三步；
+  · 三步 v2：Step1 直接开现有知识点窗口（mmOpenKp）、Step2 笔记窗口、Step3 名词窗口，
+    每步可跳过；悬浮窗 继续/下一个/跳过本步/结束，切页签后「继续」重开当前步窗口；
+  · 页签保持：快照恢复（0ms 可见、不闪不消失）、holdUntil、静默刷新、主动关闭/评分不弹；
+  · 名词整理入口：/api/terms/preview/options + /api/terms/preview/build（及别名），
+    有预习→候选数/来源/0 AI 按钮；无预习→人话；构建后刷新 /api/terms；
+  · 原有 5 条 /api/review/* 路由、笔记分组、其它页面不回归；不真实调 AI。
 """
 
 import sys
@@ -26,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def setUpModule():
     global _SRV, _PAGE, _SRC
     env.prepare(clean_data=True)
-    _SRV = env.Server(tag="reviewui")
+    _SRV = env.Server(tag="reviewuiv2")
     _SRV.start()
     r = _SRV.get("/", timeout=60)
     assert r.status == 200, f"首页返回 {r.status}"
@@ -43,73 +45,103 @@ class TestReviewHome(unittest.TestCase):
     def test_courseware_card_and_month_entry(self):
         for probe in (
             "课件复习流程", "rv-cw", "rv-cw-act", "rv-badge",
-            "已自测 · 熟悉度", "未自测", "开始自测", "继续复习", "重新自测",
+            "已自测 · 熟悉度", "已掌握", "未自测", "开始自测", "继续复习", "重新自测",
             "renderReviewHome", "reviewCoursewaresHtml", "bindReviewCoursewares",
             'data-act="review"', "revStartFromMonth", "开始复习",
+            "到期复习队列", "deckCalendarCard", "遗忘曲线复习",
         ):
             self.assertIn(probe, _PAGE, f"复习首页缺少：{probe}")
-        # 原复习队列/月历仍在
-        for probe in ("到期复习队列", "deckCalendarCard", "遗忘曲线复习"):
-            self.assertIn(probe, _PAGE, f"原有复习功能丢失：{probe}")
 
 
-class TestSelftest(unittest.TestCase):
-    def test_selftest_ui(self):
+class TestSelftestV2(unittest.TestCase):
+    def test_structure_path_and_master_buttons(self):
         for probe in (
             "revStartSelftest", "renderReviewSelftest", "submitReviewSelftest",
-            "reviewSegmentsHtml", "input class=\"rv-blank\"", "提交自测",
-            "判分中", "本次熟悉度", "不熟悉：", "进入三步复习", "再测一次",
-            "不能全部答对的知识点", "熟悉度 = 全对条数 / 抽中条数",
+            "reviewBranchOf", "reviewPathHtml", "reviewSummaryHtml",
+            "rv-path", "rv-pnode", "rv-sum", "展开总结",
+            "rv-master", "rv-mbtn", "已掌握", "未掌握",
+            "标记自己能否复述/掌握", "已掌握条数 / 抽样条数", "已标记",
             "rv-st-submit", "rv-st-flow",
         ):
-            self.assertIn(probe, _PAGE, f"自测缺少：{probe}")
+            self.assertIn(probe, _PAGE, f"自测 v2 缺少：{probe}")
+        for old in ("reviewSegmentsHtml", 'input class="rv-blank"', "data-answer="):
+            self.assertNotIn(old, _PAGE, f"旧挖空实现应已移除：{old}")
+
+    def test_submit_uses_results(self):
+        self.assertIn("results: results", _PAGE)
+        self.assertIn("body: JSON.stringify({doc_id: REV.docId, session_id: d.session_id, results: results})",
+                      _PAGE)
 
 
-class TestFlowRunner(unittest.TestCase):
-    def test_three_steps(self):
+class TestFlowWindows(unittest.TestCase):
+    def test_windowed_steps(self):
         for probe in (
             "revStartFlow", "renderReviewFlow", "renderReviewDone",
-            "① 知识点", "② 笔记", "③ 重点名词",
-            "再想想", "记住了", "进入第二步：整份课件笔记",
-            "教材原文", "rv-term-show", "显示解释", "完成复习",
-            "本次复习完成", "建议：",
+            "revOpenStepWindow", "revOpenNotesWindow", "revOpenTermWindow",
+            "revCloseReviewWindows", "mmOpenKp(kp.kp_id, kp.name, null, false, REV.docId)",
+            "第二步 · 整份课件的笔记", "第三步 · 预习重点名词",
+            "revStepCn", "'跳过' + revStepCn(REV.step)",
+            "rv-note-next", "rv-term-show", "显示解释", "openNote(",
+            "① 知识点", "② 笔记", "③ 重点名词", "本次复习完成",
         ):
-            self.assertIn(probe, _PAGE, f"三步复习缺少：{probe}")
+            self.assertIn(probe, _PAGE, f"三步窗口化缺少：{probe}")
 
-
-class TestFloatAndPersistence(unittest.TestCase):
-    def test_float_widget(self):
-        for probe in ("rev-float", "el.id = 'rev-float'", "revFloatUpdate", "rvf-min",            "复习中", "Step ' + REV.step + '/3'", "最小化", "结束本次复习",
+    def test_float_reopens_current_step(self):
+        for probe in (
+            "revFloatUpdate", "revContinue", "revFloatNext", "revSkipStep",
+            "revCurrentKp", "revCurrentTerm",
+            "继续", "下一个", "下一步", "'跳过' + revStepCn(REV.step)",
+            "Step ' + REV.step + '/3'", "重开当前步窗口",
             "study_agent_review_flow_v1", "localStorage", "reviewBoot",
         ):
-            self.assertIn(probe, _PAGE, f"悬浮窗/持久化缺少：{probe}")
+            self.assertIn(probe, _PAGE, f"悬浮窗 v2 缺少：{probe}")
 
-    def test_tab_state_keep(self):
+
+class TestTabStatePersistence(unittest.TestCase):
+    def test_snapshot_restore_no_flash(self):
         for probe in (
-            "UI_PERSIST", "uiSaveScroll", "uiRestoreScroll", "uiRememberPopup",
-            "uiRestorePopup", "uiForgetPopup", "keepNavClose",
-            "evPopOutside", "TYPE_NAV" if False else "closest('#nav')",
-            "closeModal", "评分", "uiRestoreScroll();",
+            "UI_PERSIST", "uiSnapshotPopup", "uiShowPopupSnapshot", "uiClearSnapshot",
+            "popupSnap", "holdUntil", "uiRefreshMmPopup", "uiRefreshDbPopup",
+            "uiRestoreScroll", "uiSaveScroll", "keepNavClose",
+            "closest('#nav')", "uiRestoreScroll();", "await uiRestorePopup();",
+            "同步**先摆回快照", "不会自己弹回来",
         ):
             self.assertIn(probe, _PAGE, f"页签保持缺少：{probe}")
+        # go() 顺序：先抓快照/摆快照，再渲染视图；渲染完成后恢复滚动+静默刷新
+        go = _PAGE[_PAGE.index("async function go(name){"):_PAGE.index("// ---------------- 问答助手")]
+        self.assertIn("uiShowPopupSnapshot();", go)
+        self.assertLess(go.index("uiShowPopupSnapshot();"), go.index("VIEWS[name].render()"))
+        self.assertIn("await uiRestorePopup();", go)
 
     def test_popup_params_recorded(self):
         for probe in (
             "uiRememberPopup({type: 'mm'", "uiRememberPopup({type: 'db'",
-            "MMPOP.docId", "mmOpenKp", "openKp",
+            "uiSnapshotModal", "uiForgetPopup", "MMPOP.docId", "mmOpenKp", "openKp",
         ):
             self.assertIn(probe, _PAGE, f"弹窗持久化缺少：{probe}")
 
 
-class TestNotesGrouped(unittest.TestCase):
-    def test_notes_grouping(self):
+class TestTermsPreviewEntry(unittest.TestCase):
+    def test_terms_entry_ui(self):
         for probe in (
-            "课件 → 绑定知识点", "nt-grp", "nt-kp", "nt-search", "nt-note",
-            "noteKpNamesFromTree", "复习这份课件的笔记", "跳到知识点",
-            "未绑定课件", "未绑定知识点", "没有匹配的笔记",
-            "async function viewNotes()",
+            'id="term-preview"', "refreshTermsPreview", "buildTermsPreview",
+            "按预习重点名词重新整理（0 AI）", "预习第", "候选",
+            "该教材章节还没有预习总结", "当前来源：", "0 AI",
+            "/api/terms/preview/options", "/api/terms/build-preview",
+            "TERMS.preview",
         ):
-            self.assertIn(probe, _PAGE, f"笔记分组缺少：{probe}")
+            self.assertIn(probe, _PAGE, f"名词整理入口缺少：{probe}")
+
+    def test_terms_routes_source(self):
+        for probe in (
+            '"/api/terms/preview/options"', '"/api/terms/preview/status"',
+            '"/api/terms/build-preview"', '"/api/terms/preview/build"',
+            "def api_terms_preview_options(", "def api_terms_build_preview(",
+            "terms_preview_status(doc_id, conn=conn)",
+            "build_terms_from_preview(",
+            "_terms_preview_mod",
+        ):
+            self.assertIn(probe, _SRC, f"名词整理路由/胶水缺少：{probe}")
 
 
 class TestReviewRoutes(unittest.TestCase):
@@ -122,14 +154,17 @@ class TestReviewRoutes(unittest.TestCase):
             "def api_review_selftest(", "def api_review_selftest_submit(",
             "def api_review_selftest_status(",
             "list_courseware_reviews(conn)", "build_flow(conn, doc_id)",
-            "start_selftest(doc_id)", "submit_selftest(doc_id, session_id, answers)",
+            "start_selftest(doc_id)", "submit_selftest(doc_id, session_id, results)",
             "selftest_status(doc_id)",
+            'results = payload.get("results"',
         ):
             self.assertIn(probe, _SRC, f"路由/胶水缺少：{probe}")
-        # submit 不在 _lock 里（会原子写文件）
         pos = _SRC.index('if u.path == "/api/review/selftest/submit":')
-        around = _SRC[max(0, pos - 260):pos + 200]
+        around = _SRC[max(0, pos - 260):pos + 220]
         self.assertNotIn("with _lock", around, "submit 不应持全局 _lock")
+        pos2 = _SRC.index('if u.path == "/api/terms/build-preview"')
+        around2 = _SRC[max(0, pos2 - 300):pos2 + 240]
+        self.assertNotIn("with _lock", around2, "build-preview 不应持全局 _lock")
 
     def test_api_runtime_degrades(self):
         st, d = _SRV.get_json("/api/review/coursewares", timeout=60)
@@ -140,21 +175,19 @@ class TestReviewRoutes(unittest.TestCase):
             ("/api/review/flow", {"doc_id": 0}),
             ("/api/review/selftest", {"doc_id": 0}),
             ("/api/review/selftest/status", {"doc_id": 0}),
+            ("/api/terms/preview/options", {"doc_id": 0}),
+            ("/api/terms/preview/status", {"doc_id": 0}),
         ):
             st, d = _SRV.get_json(path, timeout=60, **params)
             self.assertIn(st, (200, 400), f"{path} 不能 500")
             self.assertIn("ok", d)
             self.assertFalse(d.get("ok"), f"{path} 错参应如实失败")
-        st, d = _SRV.post_json("/api/review/selftest/submit", timeout=60,
-                               payload={"doc_id": 0, "session_id": "",
-                                        "answers": {}})
-        self.assertIn(st, (200, 400))
-        self.assertFalse(d.get("ok"))
-
-    def test_answer_hidden_from_initial_html(self):
-        # 自测答案由接口下发、页面只渲染空白输入；静态页不能出现答案字段名兜底错误
-        self.assertIn("data-answer=", _PAGE)
-        self.assertIn("reviewSegmentsHtml", _PAGE)
+        for path in ("/api/review/selftest/submit", "/api/terms/build-preview",
+                     "/api/terms/preview/build"):
+            payload = {"doc_id": 0, "session_id": "", "answers": {}, "results": {}}
+            st, d = _SRV.post_json(path, timeout=60, payload=payload)
+            self.assertIn(st, (200, 400), f"{path} 不能 500")
+            self.assertFalse(d.get("ok"))
 
 
 class TestOtherFeaturesIntact(unittest.TestCase):

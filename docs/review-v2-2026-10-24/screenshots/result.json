@@ -1,0 +1,157 @@
+{
+  "base": "http://127.0.0.1:8936",
+  "out": "_work\\review-ui-v2\\shots",
+  "prefix": "V2",
+  "shots": {
+    "V2-14-terms-preview-entry": "_work\\review-ui-v2\\shots\\V2-14-terms-preview-entry.png",
+    "V2-15-terms-after-build": "_work\\review-ui-v2\\shots\\V2-15-terms-after-build.png",
+    "V2-16-terms-no-preview": "_work\\review-ui-v2\\shots\\V2-16-terms-no-preview.png"
+  },
+  "texts": {
+    "V2-14-terms-preview-entry": 1354,
+    "V2-15-terms-after-build": 2304,
+    "V2-16-terms-no-preview": 1348
+  },
+  "metrics": {},
+  "steps": {
+    "s1-click": {
+      "ok": true
+    },
+    "V2-14-select-doc46": {
+      "status": "预习第6章候选 11 个名词 · 当前来源：暂无 · 0 AI 按预习重点名词重新整理（0 AI）",
+      "hasBtn": true,
+      "terms": 0
+    },
+    "s6-click": {
+      "ok": true
+    },
+    "V2-15-confirm-text": {
+      "confirmOn": true,
+      "text": "不调用 AI、不产生模型费用：只把该教材章节预习总结里的重点名词，按\"必须出自课件材料\"过滤后写入名词解释产物（覆盖旧文件前自动备份 .bak）。"
+    },
+    "s9-click": {
+      "ok": true
+    },
+    "V2-15-built-state": {
+      "status": "预习第6章候选 11 个名词 · 当前来源：预习重点名词（10 个） · 0 AI 按预习重点名词重新整理（0 AI）",
+      "terms": 10,
+      "firstTerm": "胆碱受体激动药",
+      "toast": null
+    },
+    "V2-16-no-preview-doc": {
+      "status": "该教材章节还没有预习总结（第12章），先在「预习」页生成预习总结，再来按重点名词整理。",
+      "hasBtn": false
+    }
+  },
+  "errors": [],
+  "styles": {
+    "body": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(15, 17, 21)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#nav": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#nav button": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "normal",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "main": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#view": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "h1": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "17px",
+      "lineHeight": "28.05px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "600",
+      "letterSpacing": "0.3px"
+    },
+    "h2": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "21.45px",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "500",
+      "letterSpacing": "normal"
+    },
+    ".card": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(23, 26, 33)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    ".small": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "12px",
+      "lineHeight": "19.8px",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "500",
+      "letterSpacing": "normal"
+    },
+    ".muted": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "12px",
+      "lineHeight": "19.8px",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "500",
+      "letterSpacing": "normal"
+    },
+    "button.act": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "normal",
+      "color": "rgb(8, 17, 31)",
+      "background": "rgb(91, 157, 255)",
+      "fontWeight": "600",
+      "letterSpacing": "normal"
+    },
+    "input": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "21.45px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(30, 34, 43)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    }
+  }
+}

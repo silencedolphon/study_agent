@@ -1,0 +1,110 @@
+{
+  "body": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "14px",
+    "lineHeight": "23.1px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgb(15, 17, 21)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  "#nav": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "14px",
+    "lineHeight": "23.1px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  "#nav button": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "13px",
+    "lineHeight": "normal",
+    "color": "rgb(154, 163, 178)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  "main": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "14px",
+    "lineHeight": "23.1px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  "#view": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "14px",
+    "lineHeight": "23.1px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  "h1": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "17px",
+    "lineHeight": "28.05px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "600",
+    "letterSpacing": "0.3px"
+  },
+  "h2": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "13px",
+    "lineHeight": "21.45px",
+    "color": "rgb(154, 163, 178)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "500",
+    "letterSpacing": "normal"
+  },
+  ".card": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "14px",
+    "lineHeight": "23.1px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgb(23, 26, 33)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  },
+  ".small": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "12px",
+    "lineHeight": "19.8px",
+    "color": "rgb(154, 163, 178)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "500",
+    "letterSpacing": "normal"
+  },
+  ".muted": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "12px",
+    "lineHeight": "19.8px",
+    "color": "rgb(154, 163, 178)",
+    "background": "rgba(0, 0, 0, 0)",
+    "fontWeight": "500",
+    "letterSpacing": "normal"
+  },
+  "button.act": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "13px",
+    "lineHeight": "normal",
+    "color": "rgb(8, 17, 31)",
+    "background": "rgb(91, 157, 255)",
+    "fontWeight": "600",
+    "letterSpacing": "normal"
+  },
+  "input": {
+    "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    "fontSize": "13px",
+    "lineHeight": "21.45px",
+    "color": "rgb(230, 233, 239)",
+    "background": "rgb(30, 34, 43)",
+    "fontWeight": "400",
+    "letterSpacing": "normal"
+  }
+}

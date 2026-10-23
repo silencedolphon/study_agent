@@ -1,0 +1,545 @@
+{
+ "generated_at": "2026-10-24T01:12:10",
+ "doc_ids": [
+  40,
+  41,
+  43,
+  44,
+  45,
+  46,
+  47,
+  48,
+  49
+ ],
+ "docs": [
+  {
+   "doc_id": 40,
+   "title": "1中枢神经系统药理学概论",
+   "n_pages": 26,
+   "n_candidates": 5,
+   "ratio": 19.2,
+   "candidate_pages": [
+    3,
+    10,
+    2,
+    7,
+    22
+   ],
+   "images": 26,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 5,
+   "est_cost_off": 0.037786,
+   "est_cost_peak": 0.075572,
+   "text_gaps": {
+    "pages_with_gaps": 3,
+    "total_missing_chars": 352,
+    "total_xml_chars": 2285,
+    "coverage_ratio": 0.846,
+    "top_pages": [
+     {
+      "page": 26,
+      "pptx_top_chars": 13,
+      "xml_chars": 341,
+      "missing_chars": 324,
+      "missing_runs": 92,
+      "samples": [
+       "Transmitter",
+       "Postsynaptic effects",
+       "胺",
+       "乙酰胆碱 （",
+       "Ach"
+      ],
+      "error": ""
+     },
+     {
+      "page": 25,
+      "pptx_top_chars": 41,
+      "xml_chars": 60,
+      "missing_chars": 16,
+      "missing_runs": 4,
+      "samples": [
+       "作用于",
+       "CNS",
+       "中枢兴奋药",
+       "中枢抑制药"
+      ],
+      "error": ""
+     },
+     {
+      "page": 10,
+      "pptx_top_chars": 94,
+      "xml_chars": 115,
+      "missing_chars": 12,
+      "missing_runs": 4,
+      "samples": [
+       "Cl",
+       "-",
+       "IPSP",
+       "抑制性递质"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 41,
+   "title": "镇静催眠抗焦虑药",
+   "n_pages": 46,
+   "n_candidates": 2,
+   "ratio": 4.3,
+   "candidate_pages": [
+    6,
+    46
+   ],
+   "images": 46,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 2,
+   "est_cost_off": 0.015114,
+   "est_cost_peak": 0.030229,
+   "text_gaps": {
+    "pages_with_gaps": 0,
+    "total_missing_chars": 0,
+    "total_xml_chars": 5496,
+    "coverage_ratio": 1.0,
+    "top_pages": []
+   }
+  },
+  {
+   "doc_id": 43,
+   "title": "外周神经药理学概论",
+   "n_pages": 64,
+   "n_candidates": 12,
+   "ratio": 18.8,
+   "candidate_pages": [
+    16,
+    4,
+    6,
+    14,
+    25,
+    34,
+    41,
+    43,
+    44,
+    46,
+    50,
+    51
+   ],
+   "images": 64,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 12,
+   "est_cost_off": 0.090687,
+   "est_cost_peak": 0.181374,
+   "text_gaps": {
+    "pages_with_gaps": 5,
+    "total_missing_chars": 789,
+    "total_xml_chars": 5842,
+    "coverage_ratio": 0.8649,
+    "top_pages": [
+     {
+      "page": 56,
+      "pptx_top_chars": 2,
+      "xml_chars": 328,
+      "missing_chars": 272,
+      "missing_runs": 167,
+      "samples": [
+       "效  应  器",
+       "受  体",
+       "效  应",
+       "受体",
+       "效  应"
+      ],
+      "error": ""
+     },
+     {
+      "page": 2,
+      "pptx_top_chars": 0,
+      "xml_chars": 202,
+      "missing_chars": 195,
+      "missing_runs": 26,
+      "samples": [
+       "中枢神经系统",
+       "Central",
+       "Nervous System",
+       "外周神经系统",
+       "Peripheral"
+      ],
+      "error": ""
+     },
+     {
+      "page": 57,
+      "pptx_top_chars": 2,
+      "xml_chars": 176,
+      "missing_chars": 161,
+      "missing_runs": 90,
+      "samples": [
+       "效  应  器",
+       "受  体",
+       "效  应",
+       "受  体",
+       "效  应"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 44,
+   "title": "3抗癫痫药和抗惊厥药",
+   "n_pages": 53,
+   "n_candidates": 2,
+   "ratio": 3.8,
+   "candidate_pages": [
+    23,
+    36
+   ],
+   "images": 53,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 2,
+   "est_cost_off": 0.015114,
+   "est_cost_peak": 0.030229,
+   "text_gaps": {
+    "pages_with_gaps": 2,
+    "total_missing_chars": 400,
+    "total_xml_chars": 5774,
+    "coverage_ratio": 0.9307,
+    "top_pages": [
+     {
+      "page": 44,
+      "pptx_top_chars": 6,
+      "xml_chars": 278,
+      "missing_chars": 262,
+      "missing_runs": 69,
+      "samples": [
+       "药   物",
+       "作   用",
+       "用   途",
+       "苯妥英钠",
+       "阻滞使用依赖性"
+      ],
+      "error": ""
+     },
+     {
+      "page": 6,
+      "pptx_top_chars": 5,
+      "xml_chars": 147,
+      "missing_chars": 138,
+      "missing_runs": 36,
+      "samples": [
+       "主要亚型",
+       "临床表现",
+       "局灶性",
+       "发作",
+       "1."
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 45,
+   "title": "3胆碱受体激动剂",
+   "n_pages": 23,
+   "n_candidates": 3,
+   "ratio": 13.0,
+   "candidate_pages": [
+    8,
+    7,
+    12
+   ],
+   "images": 23,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 3,
+   "est_cost_off": 0.022672,
+   "est_cost_peak": 0.045343,
+   "text_gaps": {
+    "pages_with_gaps": 2,
+    "total_missing_chars": 318,
+    "total_xml_chars": 2051,
+    "coverage_ratio": 0.845,
+    "top_pages": [
+     {
+      "page": 5,
+      "pptx_top_chars": 0,
+      "xml_chars": 221,
+      "missing_chars": 221,
+      "missing_runs": 15,
+      "samples": [
+       "【",
+       "药理作用",
+       "】",
+       "【",
+       "应用"
+      ],
+      "error": ""
+     },
+     {
+      "page": 4,
+      "pptx_top_chars": 0,
+      "xml_chars": 118,
+      "missing_chars": 97,
+      "missing_runs": 16,
+      "samples": [
+       "胆碱能受体激动剂",
+       "(",
+       "直接激动胆碱受体药",
+       ")",
+       "抗胆碱酯酶药"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 46,
+   "title": "3. 具有神经节阻断作用和促进组胺释放作用。",
+   "n_pages": 25,
+   "n_candidates": 0,
+   "ratio": 0.0,
+   "candidate_pages": [],
+   "images": 25,
+   "missing_images": [],
+   "warnings": [
+    "源 pptx 疑似纯文本转换件（平均每页 1.0 个形状/图片）：矢量结构式可能在旧版 .ppt 里；请用 PowerPoint 把 .ppt 另存为 .pptx 后重新扫描。"
+   ],
+   "est_calls": 0,
+   "est_cost_off": 0.0,
+   "est_cost_peak": 0.0,
+   "text_gaps": {
+    "pages_with_gaps": 0,
+    "total_missing_chars": 0,
+    "total_xml_chars": 2979,
+    "coverage_ratio": 1.0,
+    "top_pages": []
+   }
+  },
+  {
+   "doc_id": 47,
+   "title": "5抗精神失常药物",
+   "n_pages": 86,
+   "n_candidates": 16,
+   "ratio": 18.6,
+   "candidate_pages": [
+    60,
+    69,
+    14,
+    65,
+    77,
+    26,
+    47,
+    64,
+    70,
+    78,
+    83,
+    16,
+    79,
+    53,
+    55,
+    29
+   ],
+   "images": 86,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 16,
+   "est_cost_off": 0.120916,
+   "est_cost_peak": 0.241832,
+   "text_gaps": {
+    "pages_with_gaps": 15,
+    "total_missing_chars": 380,
+    "total_xml_chars": 9380,
+    "coverage_ratio": 0.9595,
+    "top_pages": [
+     {
+      "page": 55,
+      "pptx_top_chars": 68,
+      "xml_chars": 153,
+      "missing_chars": 79,
+      "missing_runs": 15,
+      "samples": [
+       "新型抗抑郁药",
+       "传统抗抑郁药",
+       "NA",
+       "及特异性",
+       "5-HT"
+      ],
+      "error": ""
+     },
+     {
+      "page": 60,
+      "pptx_top_chars": 32,
+      "xml_chars": 104,
+      "missing_chars": 72,
+      "missing_runs": 8,
+      "samples": [
+       "单胺氧化酶抑制药（MAOI）",
+       "非特异性的影响5-TH、NA、DA等",
+       "疗效低；不良反应多",
+       "烦躁、失眠、便秘、厌食、恶心、",
+       "呕吐"
+      ],
+      "error": ""
+     },
+     {
+      "page": 3,
+      "pptx_top_chars": 19,
+      "xml_chars": 69,
+      "missing_chars": 50,
+      "missing_runs": 16,
+      "samples": [
+       "病种",
+       "估计数（百万）",
+       "心境障碍",
+       "(",
+       "抑郁）"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 48,
+   "title": "抗胆碱酯酶药和胆碱酶复活药",
+   "n_pages": 22,
+   "n_candidates": 4,
+   "ratio": 18.2,
+   "candidate_pages": [
+    12,
+    7,
+    13,
+    16
+   ],
+   "images": 22,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 4,
+   "est_cost_off": 0.030229,
+   "est_cost_peak": 0.060458,
+   "text_gaps": {
+    "pages_with_gaps": 1,
+    "total_missing_chars": 56,
+    "total_xml_chars": 2233,
+    "coverage_ratio": 0.9749,
+    "top_pages": [
+     {
+      "page": 13,
+      "pptx_top_chars": 32,
+      "xml_chars": 90,
+      "missing_chars": 56,
+      "missing_runs": 20,
+      "samples": [
+       "共价结合",
+       "1.",
+       "有机磷酸酯",
+       "AChE",
+       "+"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": 49,
+   "title": "1神经系统概论",
+   "n_pages": 36,
+   "n_candidates": 3,
+   "ratio": 8.3,
+   "candidate_pages": [
+    26,
+    33,
+    3
+   ],
+   "images": 36,
+   "missing_images": [],
+   "warnings": [],
+   "est_calls": 3,
+   "est_cost_off": 0.022672,
+   "est_cost_peak": 0.045343,
+   "text_gaps": {
+    "pages_with_gaps": 3,
+    "total_missing_chars": 569,
+    "total_xml_chars": 3292,
+    "coverage_ratio": 0.8272,
+    "top_pages": [
+     {
+      "page": 4,
+      "pptx_top_chars": 0,
+      "xml_chars": 351,
+      "missing_chars": 306,
+      "missing_runs": 21,
+      "samples": [
+       "Angiogenin",
+       "HSPC",
+       "MyePro",
+       "↑   tiRNA",
+       "↓   Protein Synthesis"
+      ],
+      "error": ""
+     },
+     {
+      "page": 10,
+      "pptx_top_chars": 6,
+      "xml_chars": 209,
+      "missing_chars": 195,
+      "missing_runs": 26,
+      "samples": [
+       "中枢神经系统",
+       "Central",
+       "Nervous System",
+       "周围神经系统",
+       "Peripheral"
+      ],
+      "error": ""
+     },
+     {
+      "page": 3,
+      "pptx_top_chars": 63,
+      "xml_chars": 143,
+      "missing_chars": 68,
+      "missing_runs": 17,
+      "samples": [
+       "受体",
+       "PlexinB2",
+       "细胞应激下成活",
+       "tiRNA",
+       "应急粒子"
+      ],
+      "error": ""
+     }
+    ]
+   }
+  }
+ ],
+ "totals": {
+  "pages": 381,
+  "candidates": 47,
+  "ratio": 12.3,
+  "est_calls": 47,
+  "est_cost_cny_off_peak": 0.35519,
+  "est_cost_cny_peak": 0.71038,
+  "full_deck_calls": 381,
+  "saving_ratio": 0.877,
+  "text_gap_pages": 31,
+  "text_missing_chars": 2864,
+  "text_xml_chars": 39332,
+  "text_coverage": 0.9272
+ },
+ "historical_figure_desc": {
+  "n": 81,
+  "t_in": 2219.2716,
+  "t_out": 3207.3457,
+  "cost": 0.014,
+  "max_in": 2673,
+  "max_cost": 0.0561
+ },
+ "assumptions": "输入 ≤3000 tokens（取历史 figure_desc 81 页 prompt_tokens 峰值 2673 的上界）、输出 ≤max_tokens（默认 1024）；价格取 core/figures.py::_PRICE（USD/1M tokens，汇率 7.1）。真实记账按接口返回 usage 计。"
+}

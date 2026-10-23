@@ -208,6 +208,15 @@ MATRIX = [
     dict(id="F118", feature="复习前端：自测填空 + 三步 runner + 全局悬浮窗 + 页签状态保持 + 笔记按课件整理",
          entry="复习页/自测页/#rev-float + UI_PERSIST + viewNotes 分组",
          kind="ui", priority="P1", tests=["test_24_review_ui"], evidence="json+shot"),
+    dict(id="F119", feature="复习自测 v2：结构路径+已掌握/未掌握、窗口化三步可跳过、页签保持",
+         entry="core/review.py C-0128-v3 + dashboard 自测/三步窗口/快照恢复",
+         kind="ui", priority="P1", tests=["test_26_review_v3", "test_24_review_ui"], evidence="json+shot"),
+    dict(id="F120", feature="预习重点名词驱动的课件名词整理（相关度过滤，零 AI）",
+         entry="core/terms_preview.py + /api/terms/preview/{options,status,build}",
+         kind="read", priority="P1", tests=["test_27_terms_preview"], evidence="json"),
+    dict(id="F121", feature="化学结构式补全：PPTX 矢量页扫描 + 选择性识图管线（默认 dry-run）",
+         entry="core/structures.py + tools/structure_build.py + 提示词-结构式识图",
+         kind="cli", priority="P1", tests=["test_29_structure_scan"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

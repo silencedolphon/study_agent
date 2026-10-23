@@ -1171,6 +1171,37 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
   .row{gap:8px}
   .setbox{width:100%}
 }
+/* ---------------- task-36：复习 UI v2 追加样式（结构路径自测 / 窗口化 / 悬浮窗） ---------------- */
+/* 自测：结构路径树 + 已掌握/未掌握单选 */
+.rv-path{padding:6px 10px;margin:2px 0 8px;border-left:2px solid #2b3a52;background:#10151d;border-radius:0 8px 8px 0}
+.rv-pnode{font-size:12.5px;line-height:1.85;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rv-pnode .rv-ptree{color:#3d4b63;margin-right:4px}
+.rv-pnode.self{color:var(--accent);font-size:13.5px;font-weight:600}
+.rv-q-name{font-size:15px;font-weight:700;color:var(--fg);margin:2px 0 6px;word-break:break-word}
+.rv-sum{margin:4px 0 8px}
+.rv-sum>summary{cursor:pointer;font-size:12px;color:var(--accent);width:max-content;
+  padding:2px 9px;border:1px solid #2b3a52;border-radius:20px;list-style:none}
+.rv-sum>summary::-webkit-details-marker{display:none}
+.rv-sum[open]>summary{margin-bottom:6px}
+.rv-sum-body{font-size:12.5px;line-height:1.9;color:var(--fg);background:#11161e;border-radius:8px;
+  padding:8px 10px;white-space:pre-wrap;word-break:break-word}
+.rv-sum-body ul{margin:6px 0 0;padding-left:18px}
+.rv-master{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:4px}
+.rv-mbtn{font:inherit;font-size:12.5px;padding:4px 14px;border-radius:20px;cursor:pointer;
+  border:1px solid var(--line);background:#1b212b;color:var(--dim)}
+.rv-mbtn:hover{border-color:#3d4b63;color:var(--fg)}
+.rv-mbtn.ok.on{background:#16281b;border-color:var(--ok);color:var(--ok);font-weight:700}
+.rv-mbtn.bad.on{background:#33191a;border-color:var(--bad);color:var(--bad);font-weight:700}
+.rv-kp-hint{font-size:12px;line-height:1.8;color:var(--dim);margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}
+/* 悬浮窗多按钮：窄屏自动换行，不撑出视口 */
+#rev-float .rvf-act{display:flex;gap:5px;flex-wrap:wrap}
+#rev-float .rvf-act button{font-size:11.5px;padding:2px 8px;white-space:nowrap}
+/* 名词窗口（modal 内复用 .rv-term），窄屏压缩 */
+@media (max-width:560px){
+  .rv-master{justify-content:flex-start}
+  .rv-mbtn{padding:3px 10px}
+  #rev-float{max-width:calc(100vw - 20px)}
+}
 </style>
 </head>
 <body>
@@ -1315,17 +1346,35 @@ function renderFirstrun(){
 
 let CURRENT = 'overview';
 async function go(name){
-  // 页签状态保持（task-33）：离开前存滚动位置；回来自动恢复。
-  if (CURRENT && CURRENT !== name) uiSaveScroll();
+  // task-36：页签保持修复。
+  // 离开：保存滚动位置；若弹窗还开着，先抓 DOM+参数快照再隐藏（不丢状态）。
+  if (CURRENT && CURRENT !== name){
+    uiSaveScroll();
+    if (UI_PERSIST.popup && EVPOP && EVPOP.style.display !== 'none'){
+      UI_PERSIST.keepNavClose = true;
+      uiSnapshotPopup();
+      evPopClose();
+    }
+    const _m = document.getElementById('modal');
+    if (_m && _m.classList.contains('on') && UI_PERSIST.popup &&
+        UI_PERSIST.popup.type === 'db'){
+      uiSnapshotModal();
+      _m.classList.remove('on');
+    }
+  }
   CURRENT = name;
   renderNav(name);
+  // 切回：**同步**先摆回快照（0ms 可见，不闪），随后再渲染页面/静默刷新弹窗内容。
+  uiShowPopupSnapshot();
   $('#view').innerHTML = '<div class="empty">加载中…</div>';
   // 卡 C-0071：与页面渲染**并行**拉一次首次运行体检（本地毫秒级），
   // 入库完成 / 配好密钥后切页，横幅会自动收掉，不用手动刷新。
   loadFirstrun(true);
   try { await VIEWS[name].render(); }
   catch(e){ $('#view').innerHTML = `<div class="empty">出错：${esc(e.message)}</div>`; }
-  // 回到本页：先恢复滚动位置；再把上次没关的知识点弹窗放回来（主动关闭/评分过的不会弹）。
+  if (CURRENT !== name) return;
+  // 恢复期压住"滚动即关"（滚动位置重试会触发 window.scroll）。
+  UI_PERSIST.holdUntil = Math.max(UI_PERSIST.holdUntil || 0, Date.now() + 2000);
   uiRestoreScroll();
   await uiRestorePopup();
   // 切页后恢复进度条：入库可能跑十几分钟，用户中途刷新或切走再回来，
@@ -1502,9 +1551,10 @@ function evPopOutside(e){
 }
 
 function evPopClose(){
-  // task-33：主动关闭（✕/Esc/点窗外）才清掉"待恢复的弹窗"；
-  // 切页签时由 evPopOutside 置 keepNavClose，保留参数。
-  if (!UI_PERSIST.keepNavClose) uiForgetPopup();
+  // task-36：切页签收起前先抓 DOM+参数快照（切回时 0ms 摆回，不闪）；
+  // 主动关闭（✕/Esc/点窗外）则连参数带快照一起清掉，不会自己弹回来。
+  if (UI_PERSIST.keepNavClose) uiSnapshotPopup();
+  else { uiForgetPopup(); uiClearSnapshot(); }
   UI_PERSIST.keepNavClose = false;
   // 顺手清掉"小窗当前挂着哪个知识点"的标记（见 mmOpenKp）：
   // 关掉即作废，否则在途的 /api/mindmap/kp 响应回来会把小窗又弹出来。
@@ -1547,6 +1597,9 @@ function evPopEsc(e){ if (e.key === 'Escape') evPopClose(); }
 // 滚一下就被关掉的话根本读不完（scroll 不冒泡，却在捕获阶段经过 window，
 // 所以这里只能靠判 target 是不是弹窗内部来解决）。
 function evPopScroll(e){
+  // task-36：切回后的恢复期（快照恢复 + 滚动位置重试）不能被
+  // window.scroll 误关，否则表现为"闪一下然后消失"。
+  if (Date.now() < (UI_PERSIST.holdUntil || 0)) return;
   if (EVPOP && e && e.target && EVPOP.contains(e.target)) return;
   evPopClose();
 }
@@ -2279,7 +2332,8 @@ async function markDeckDone(planId, round){
 // 后端契约见 /api/review/*（core/review.py 并行开发；未就绪时页面给一句人话，不报 500）。
 
 // ---------------- 页签状态保持（滚动 + 知识点弹窗） ----------------
-const UI_PERSIST = {scroll: {}, popup: null, keepNavClose: false, restoring: false};
+const UI_PERSIST = {scroll: {}, popup: null, popupSnap: null,
+                     keepNavClose: false, restoring: false, holdUntil: 0};
 
 function uiSaveScroll(){
   try { UI_PERSIST.scroll[CURRENT] = window.scrollY || document.documentElement.scrollTop || 0; }
@@ -2310,21 +2364,112 @@ async function uiRestorePopup(){
   const p = UI_PERSIST.popup;
   if (!p || (p.view || '') !== CURRENT) return;
   UI_PERSIST.restoring = true;
+  UI_PERSIST.holdUntil = Date.now() + 2000;
   try {
-    if (p.type === 'mm' && typeof mmOpenKp === 'function'){
-      evPopEl().dataset.kpPop = '1';
-      await mmOpenKp(p.kpId, p.name || '', null, false, p.docId);
-    } else if (p.type === 'db' && typeof openKp === 'function'){
-      await openKp(p.id);
-    }
-  } catch(e){ /* 恢复失败就安静放弃，不打断当前页 */ }
-  finally { UI_PERSIST.restoring = false; }
+    // 快照已由 uiShowPopupSnapshot 同步摆回；这里只负责静默刷新内容，
+    // 成功后清掉快照（下次切页会从最新 DOM 重新抓）。
+    if (p.type === 'mm') await uiRefreshMmPopup(p);
+    else if (p.type === 'db') await uiRefreshDbPopup(p);
+    if (UI_PERSIST.popupSnap) uiClearSnapshot();
+  } catch(e){ /* 刷新失败就保留快照，绝不清空已显示内容 */ }
+  finally {
+    UI_PERSIST.restoring = false;
+    UI_PERSIST.holdUntil = Date.now() + 1500;
+  }
 }
 
+// ============ task-36：页签保持修复（快照恢复，不闪不消失） ============
+// 用户 bug：打开知识点弹窗→切走→切回，内容闪一下然后消失。
+// 根因：①切走时 popup 被 evPopClose 隐藏，切回后要走网络重新渲染，期间先出现
+// "正在读取…"占位（闪）；②恢复后滚动位置重试的 window.scroll 事件被 evPopScroll
+// 捕获，又把刚恢复的弹窗关掉（消失）。
+// 修法：离开前抓 DOM+参数快照；切回时**同步**先把快照摆回来（0ms 即可见），
+// 页面渲染完再静默刷新内容；恢复期用 holdUntil 压住"滚动即关"的自动关闭。
+// 主动关闭/Esc/评分仍会清空参数+快照，不会自己弹回来。
+
+function uiSnapshotPopup(){
+  const p = UI_PERSIST.popup;
+  if (!p || !EVPOP || EVPOP.style.display === 'none') return;
+  UI_PERSIST.popupSnap = {
+    kind: 'ev', view: p.view, params: Object.assign({}, p),
+    html: EVPOP.innerHTML, cls: EVPOP.className,
+    dataset: {kp: EVPOP.dataset.kp || '', deck: EVPOP.dataset.deck || '',
+              kpPop: EVPOP.dataset.kpPop || ''},
+    side: {side: !!MMSIDE.open, teach: !!MMTEACH.open},
+    at: Date.now(),
+  };
+}
+function uiClearSnapshot(kind){
+  const s = UI_PERSIST.popupSnap;
+  if (!s) return;
+  if (!kind || s.kind === kind) UI_PERSIST.popupSnap = null;
+}
+function uiSnapshotModal(){
+  const p = UI_PERSIST.popup;
+  const m = document.getElementById('modal');
+  if (!p || !m || !m.classList.contains('on')) return;
+  UI_PERSIST.popupSnap = {
+    kind: 'modal', view: p.view, params: Object.assign({}, p),
+    html: (document.getElementById('modalbox') || {}).innerHTML || '',
+    at: Date.now(),
+  };
+}
+function uiShowPopupSnapshot(){
+  const s = UI_PERSIST.popupSnap;
+  if (!s || (s.view || '') !== CURRENT) return;
+  UI_PERSIST.holdUntil = Date.now() + 2500;
+  if (s.kind === 'ev'){
+    if (!EVPOP) return;
+    EVPOP.innerHTML = s.html;
+    EVPOP.className = s.cls;
+    EVPOP.dataset.kp = s.dataset.kp || '';
+    EVPOP.dataset.deck = s.dataset.deck || '';
+    EVPOP.dataset.kpPop = s.dataset.kpPop || '1';
+    EVPOP.dataset.cite = '';
+    EVPOP.style.display = 'flex';
+    EVPOP.style.visibility = 'hidden';
+    MMSIDE.open = !!s.side.side;
+    MMTEACH.open = !!s.side.teach;
+    try { mmKpScrollGuard(EVPOP); } catch(e){}
+    document.addEventListener('click', evPopOutside, true);
+    document.addEventListener('keydown', evPopEsc);
+    window.addEventListener('scroll', evPopScroll, true);
+    try { evPopPlace(null); } catch(e){ EVPOP.style.visibility = 'visible'; }
+  } else if (s.kind === 'modal'){
+    const m = document.getElementById('modal');
+    const box = document.getElementById('modalbox');
+    if (!m || !box) return;
+    box.innerHTML = s.html;
+    m.classList.add('on');
+  }
+}
+async function uiRefreshMmPopup(p){
+  const pop = evPopEl();
+  // 快照已经在屏幕上，不再 mount "正在读取…" 占位；直接请求后整块替换。
+  pop.dataset.kp = String(p.kpId || '');
+  pop.dataset.deck = '';
+  pop.dataset.kpPop = '1';
+  pop.style.display = 'flex';
+  pop.style.visibility = 'visible';
+  MMPOP.anchor = null;
+  MMPOP.docId = p.docId;
+  pop.classList.remove('mmkp-has-side', 'mm-tree-open', 'mmkp-has-teach', 'mm-teach-open');
+  let d;
+  try {
+    d = await api('/api/summary-kp?doc_id=' + encodeURIComponent(p.docId) +
+                  '&kp_id=' + encodeURIComponent(p.kpId));
+  } catch(e){ return; }   // 失败就保留快照，不把内容清掉
+  if ((evPopEl().dataset.kp || '') !== String(p.kpId) || CURRENT !== p.view) return;
+  UI_PERSIST.holdUntil = Date.now() + 1500;
+  mmRenderKp(d, null, false);
+}
+async function uiRefreshDbPopup(p){
+  try { await openKp(p.id); } catch(e){ /* 失败就保留快照 */ }
+}
 // ---------------- 复习状态（内存 + localStorage） ----------------
 const REV = {stage: '', docId: 0, title: '', flowData: null, st: null, step: 1,
-             kpIdx: 0, termIdx: 0, result: null, coursewares: [],
-             active: false, minimized: false};
+             kpIdx: 0, termIdx: 0, result: null, coursewares: [], stResults: {},
+             stepOpen: '', active: false, minimized: false};
 const REV_LS = 'study_agent_review_flow_v1';
 
 function revSave(){
@@ -2352,6 +2497,20 @@ function reviewBoot(){
 }
 
 // ---------------- 悬浮进度窗 ----------------
+// ---------------- 悬浮进度窗 v2（继续=重开当前步窗口；下一步/跳过本步/结束） ----------------
+function revFloatActions(){
+  if (REV.stage === 'selftest'){
+    return [['continue', '继续'], ['end', '结束']];
+  }
+  if (REV.stage !== 'flow') return [['continue', '继续'], ['end', '结束']];
+  const acts = [['continue', '继续']];
+  if (REV.step === 1) acts.push(['next', '下一个']);
+  else if (REV.step === 2) acts.push(['next', '下一步']);
+  else acts.push(['next', '下一个词']);
+  acts.push(['skip', '跳过' + revStepCn(REV.step)], ['end', '结束']);
+  return acts;
+}
+
 function revFloatUpdate(){
   let el = document.getElementById('rev-float');
   if (!el){
@@ -2361,36 +2520,54 @@ function revFloatUpdate(){
   }
   if (!REV.active){ el.classList.remove('on', 'rvf-min'); return; }
   const f = REV.flowData || {};
-  const nKp = (f.kps || []).length || 0;
+  const kps = f.kps || [];
+  const items = (f.terms || {}).items || [];
   const stageTxt = REV.stage === 'selftest' ? '自测'
     : (REV.stage === 'flow' ? ('Step ' + REV.step + '/3') : '复习');
-  const pos = REV.stage === 'flow' && REV.step === 1 && nKp
-    ? (' · ' + Math.min(REV.kpIdx + 1, nKp) + '/' + nKp)
-    : (REV.stage === 'selftest' && REV.st
-        ? (' · ' + (REV.st.n_sample || 0) + ' 条') : '');
+  let pos = '';
+  if (REV.stage === 'selftest' && REV.st){
+    const picked = REV.stResults || {};
+    const n = (REV.st.items || REV.st.kps || []).length;
+    const k = (REV.st.items || REV.st.kps || []).filter(x =>
+      Object.prototype.hasOwnProperty.call(picked, String(x.kp_id))).length;
+    pos = ` · 已标记 ${k}/${n}`;
+  } else if (REV.stage === 'flow'){
+    if (REV.step === 1) pos = ` · ${Math.min(REV.kpIdx + 1, kps.length)}/${kps.length}${revCurrentKp().name ? ' ' + revCurrentKp().name : ''}`;
+    else if (REV.step === 2) pos = ' · 笔记';
+    else pos = ` · 名词 ${Math.min(REV.termIdx + 1, Math.max(1, items.length))}/${items.length}`;
+  }
+  const acts = revFloatActions();
+  const btns = acts.map(([k, label]) => `<button class="${k === 'continue' ? 'act' : (k === 'end' ? '' : 'ghost')}"
+    data-f="${k}"${k === 'end' ? ' style="color:var(--bad);border-color:#4a1f1c"' : ''}>${label}</button>`).join('');
   el.className = 'on' + (REV.minimized ? ' rvf-min' : '');
   el.innerHTML = REV.minimized
-    ? `<div class="rvf-t">📖 复习中 · ${esc(stageTxt)} · 点开继续</div>`
+    ? `<div class="rvf-t">📖 复习中 · ${esc(stageTxt)}${esc(pos)} · 点开继续</div>`
     : `<div class="rvf-t">📖 复习中 · ${esc(REV.title || '课件')}</div>
        <div class="rvf-m">${esc(stageTxt)}${esc(pos)}</div>
-       <div class="rvf-act">
-         <button class="act" data-f="go">继续</button>
-         <button class="ghost" data-f="min">最小化</button>
-         <button class="ghost" data-f="end" style="color:var(--bad);border-color:#4a1f1c">结束</button>
-       </div>`;
-  const act = (f2) => {
-    const b = el.querySelector(`[data-f="${f2}"]`);
+       <div class="rvf-act">${btns}</div>`;
+  const bind = (key) => {
+    const b = el.querySelector(`[data-f="${key}"]`);
     if (!b) return;
     b.onclick = (e) => {
       e.stopPropagation();
-      if (f2 === 'go'){ REV.minimized = false; revSave(); go('review'); }
-      else if (f2 === 'min'){ REV.minimized = true; revSave(); revFloatUpdate(); }
-      else if (f2 === 'end'){ revEnd(); }
+      if (key === 'continue') revContinue();
+      else if (key === 'next') revFloatNext();
+      else if (key === 'skip') revSkipStep();
+      else if (key === 'end') revEnd();
     };
   };
-  if (REV.minimized){ el.onclick = () => { REV.minimized = false; revSave(); revFloatUpdate(); }; }
-  else { el.onclick = null; ['go', 'min', 'end'].forEach(act); }
+  if (REV.minimized){
+    el.onclick = () => { REV.minimized = false; revSave(); revFloatUpdate(); };
+  } else {
+    el.onclick = null;
+    acts.forEach(([k]) => bind(k));
+  }
 }
+
+async function revFloatNext(){
+  if (REV.stage !== 'flow') return;
+  await revFlowNext();
+}
 
 async function revEnd(){
   if (REV.active){
@@ -2398,6 +2575,7 @@ async function revEnd(){
       '进度会从「复习」页的课件卡重新开始；已得熟悉度会保留。');
     if (!ok) return;
   }
+  revCloseReviewWindows();
   REV.active = false; REV.stage = ''; REV.step = 1; REV.kpIdx = 0;
   REV.flowData = null; REV.st = null;
   revDrop(); revFloatUpdate();
@@ -2466,12 +2644,13 @@ async function reviewCoursewaresHtml(items, err){
   const cards = items.map(it => {
     const stt = it.selftest || {};
     const fam = Math.round((parseFloat(stt.familiarity) || 0) * 100);
-    // 熟悉度 = 全对条数 / 抽中条数：卡片显示全对/抽中，避免"100% 但不熟 N"的歧义
-    // （后端持久化文件可能保留历史不熟悉条目，见 task-33 报告 §风险）。
+    // 自测 v3：熟悉度 = 已掌握 / 抽样（n_mastered/n_sample）；卡片按这个口径显示
     const nSample = parseInt(stt.n_sample, 10) || 0;
-    const nFam = Math.round((parseFloat(stt.familiarity) || 0) * nSample);
+    const nMastered = (stt.n_mastered != null)
+      ? parseInt(stt.n_mastered, 10) || 0
+      : Math.round((parseFloat(stt.familiarity) || 0) * nSample);
     const badge = stt.exists
-      ? `<span class="rv-badge ok">已自测 · 熟悉度 ${fam}%（全对 ${nFam}/${nSample}）</span>`
+      ? `<span class="rv-badge ok">已自测 · 熟悉度 ${fam}%（已掌握 ${nMastered}/${nSample}）</span>`
       : '<span class="rv-badge warn">未自测</span>';
     const terms = it.terms || {};
     const ch = it.chapter || {};
@@ -2522,12 +2701,12 @@ async function revStartFromMonth(docId){
   return revStartSelftest(docId);
 }
 
-// ---------------- 自测 ----------------
+// ---------------- 自测 v2 ----------------
 async function revStartSelftest(docId){
   try {
     const d = await api('/api/review/selftest?doc_id=' + encodeURIComponent(docId));
     if (!d || d.ok === false) throw new Error((d && d.error) || '自测数据读不到');
-    REV.st = d; REV.stage = 'selftest'; REV.result = null;
+    REV.st = d; REV.stage = 'selftest'; REV.result = null; REV.stResults = {};
     REV.docId = parseInt(d.doc_id || docId, 10) || docId;
     REV.title = d.title || '';
     REV.active = true; REV.minimized = false;
@@ -2536,62 +2715,115 @@ async function revStartSelftest(docId){
   } catch(e){ toast('开始自测失败：' + e.message); }
 }
 
-function reviewSegmentsHtml(kp, qi){
-  const segs = kp.segments || [];
-  if (!segs.length) return `<span>${esc(kp.name || '')}（这条没有可挖空的总结文字）</span>`;
-  return segs.map(s => s.t === 'blank'
-    ? `<input class="rv-blank" data-kp="${esc(kp.kp_id)}" data-i="${s.i}"
-        data-answer="${esc(s.answer)}" placeholder="____" autocomplete="off"
-        aria-label="第 ${qi + 1} 题 空 ${s.i + 1}">`
-    : `<span>${esc(s.text || '')}</span>`).join('');
+function reviewBranchOf(kp){
+  if (Array.isArray(kp.branch) && kp.branch.length) return kp.branch;
+  // 兼容旧后端：只有 node_path 时按层级展开（打头的是课件标题，不画成树节点）
+  const path = (kp.node_path || []).filter(Boolean);
+  const start = path.length > 1 ? 1 : 0;
+  return path.slice(start).map((name, i) => ({name: String(name), level: i + 1}));
+}
+
+function reviewPathHtml(kp, qi){
+  const br = reviewBranchOf(kp);
+  if (!br.length){
+    return `<div class="rv-path"><div class="rv-pnode lv1 self">${esc(kp.name || kp.kp_id || '')}</div></div>`;
+  }
+  const rows = br.map((b, i) => {
+    const self = i === br.length - 1;
+    const last = i === br.length - 1;
+    const pad = Math.max(0, (parseInt(b.level, 10) || i + 1) - 1) * 16;
+    return `<div class="rv-pnode${self ? ' self' : ''}" style="margin-left:${pad}px">
+      <span class="rv-ptree">${last ? '└─' : '├─'}</span>
+      <span>${esc(b.name || '')}</span></div>`;
+  }).join('');
+  return `<div class="rv-path" aria-label="第 ${qi + 1} 条知识点的结构路径">${rows}</div>`;
+}
+
+function reviewSummaryHtml(kp){
+  const sum = String(kp.summary || '').trim();
+  const pts = kp.points || [];
+  if (!sum && !pts.length) return '';
+  return `<details class="rv-sum"><summary>展开总结</summary>
+    <div class="rv-sum-body">${esc(sum || '（这条没有总结正文，下面是要点）')}${
+      pts.length ? `<ul>${pts.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}</div>
+  </details>`;
 }
 
 function renderReviewSelftest(){
   const d = REV.st || {};
   const res = REV.result;
-  // 后端 start_selftest 同时给 kps（摘要）与 items（带 segments）；优先 items。
   const kps = d.items || d.kps || [];
+  const picked = REV.stResults || {};
+  const nPicked = kps.filter(k => Object.prototype.hasOwnProperty.call(picked, String(k.kp_id))).length;
   const cards = kps.map((kp, qi) => {
     let ansHtml = '';
     if (res){
       const r = (res.results || []).find(x => String(x.kp_id) === String(kp.kp_id)) || {};
-      const ok = !!r.correct;
-      ansHtml = `<div class="rv-q-ans">
-        <span class="${ok ? 'ok' : 'bad'}">${ok ? '✓ 全对（熟悉）' : '✗ 有错（不熟悉）'}</span>
-        · 正确答案：${(r.answers || []).map(x => esc(x)).join(' / ')}</div>`;
+      const ok = !!r.mastered;
+      ansHtml = `<div class="rv-q-ans"><span class="${ok ? 'ok' : 'bad'}">${
+        ok ? '✓ 已掌握' : '✗ 未掌握'}</span></div>`;
     }
+    const mark = picked[String(kp.kp_id)];
+    const clsOk = mark === true ? ' on ok' : '';
+    const clsBad = mark === false ? ' on bad' : '';
     return `<div class="rv-q" data-kp="${esc(kp.kp_id)}">
-      <div class="rv-q-h"><b>${qi + 1}. ${esc(kp.name || kp.kp_id)}</b>
-        ${kp.unfamiliar ? '<span class="rv-badge warn">上次不熟</span>' : ''}</div>
-      <div class="rv-q-text">${reviewSegmentsHtml(kp, qi)}</div>
+      ${reviewPathHtml(kp, qi)}
+      <div class="rv-q-name">${esc(kp.name || kp.kp_id)}</div>
+      ${reviewSummaryHtml(kp)}
+      ${res ? '' : `<div class="rv-master" role="group" aria-label="这条知识点是否已掌握">
+        <button type="button" class="rv-mbtn ok${clsOk}" data-kp="${esc(kp.kp_id)}" data-val="1">已掌握</button>
+        <button type="button" class="rv-mbtn bad${clsBad}" data-kp="${esc(kp.kp_id)}" data-val="0">未掌握</button>
+      </div>`}
     </div>${ansHtml}`;
   }).join('');
-  const resultHtml = res ? `<div class="rv-res">
-      <div>本次熟悉度 <span class="big">${Math.round((parseFloat(res.familiarity) || 0) * 100)}%</span>
-        <span class="small muted">（全对 ${res.n_familiar || 0} / 抽中 ${res.n_sample || 0} 条）</span></div>
-      ${(res.unfamiliar_ids || []).length ? `<div class="small" style="margin-top:6px;color:var(--warn)">
-        不熟悉：${(res.unfamiliar_ids || []).map(id => {
-          const kp = kps.find(x => String(x.kp_id) === String(id)) || {};
-          return esc(kp.name || id);
-        }).join('、')}</div>` : '<div class="small" style="margin-top:6px;color:var(--ok)">全部答对，这份课件算熟悉 🎉</div>'}
-    </div>` : '';
+  const resultHtml = res ? (() => {
+    const nM = parseInt(res.n_mastered, 10) || 0;
+    const nS = parseInt(res.n_sample, 10) || kps.length;
+    const fam = Math.round((parseFloat(res.familiarity) || 0) * 100);
+    const badIds = res.unfamiliar_ids || [];
+    const badNames = badIds.map(id => {
+      const kp = kps.find(x => String(x.kp_id) === String(id)) || {};
+      return esc(kp.name || id);
+    });
+    return `<div class="rv-res">
+      <div>本次熟悉度 <span class="big">${fam}%</span>
+        <span class="small muted">（已掌握 ${nM} / 抽样 ${nS}）</span></div>
+      ${badNames.length ? `<div class="small" style="margin-top:6px;color:var(--warn)">
+        未掌握：${badNames.join('、')}</div>`
+        : '<div class="small" style="margin-top:6px;color:var(--ok)">全部标记为已掌握，这份课件算熟悉 🎉</div>'}
+    </div>`;
+  })() : '';
   const actions = res
     ? `<button class="act" id="rv-st-flow">进入三步复习</button>
        <button class="ghost" id="rv-st-again">再测一次</button>
        <button class="ghost" id="rv-st-home">返回复习页</button>`
-    : `<button class="act" id="rv-st-submit">提交自测</button>
+    : `<button class="act" id="rv-st-submit" ${nPicked < kps.length ? 'disabled' : ''}>${
+        nPicked < kps.length ? `提交自测（${nPicked}/${kps.length} 已标记）` : '提交自测'}
+       </button>
        <button class="ghost" id="rv-st-home">返回复习页</button>`;
   $('#view').innerHTML = `
     <div class="card rv-card">
       <div class="rv-st-head"><h2>📝 课件自测 · ${esc(d.title || '')}</h2>
         <span class="rv-badge">随机抽 ${d.n_sample || kps.length} / ${d.n_total || kps.length} 条知识点</span></div>
-      <div class="rv-st-tip">用总结文字挖空，填出被挖掉的名词（Tab 切换、Enter 提交）。
-        <b>不能全部答对的知识点 = 不熟悉</b>；熟悉度 = 全对条数 / 抽中条数。</div>
+      <div class="rv-st-tip">看结构路径回忆这条知识点，点「展开总结」核对；然后<b>标记自己能否复述/掌握</b>。
+        不要求写字；熟悉度 = <b>已掌握条数 / 抽样条数</b>，全部标记完才能提交。</div>
       <div class="rv-q-list">${cards}</div>
       ${resultHtml}
       <div class="rv-nav">${actions}</div>
     </div>`;
   bindReviewSelftest();
+}
+
+function reviewSyncSelftestButtons(){
+  const kps = (REV.st && (REV.st.items || REV.st.kps)) || [];
+  const picked = REV.stResults || {};
+  const nPicked = kps.filter(k => Object.prototype.hasOwnProperty.call(picked, String(k.kp_id))).length;
+  const btn = $('#rv-st-submit');
+  if (btn){
+    btn.disabled = nPicked < kps.length;
+    btn.textContent = nPicked < kps.length
+      ? `提交自测（${nPicked}/${kps.length} 已标记）` : '提交自测';
+  }
 }
 
 function bindReviewSelftest(){
@@ -2603,46 +2835,50 @@ function bindReviewSelftest(){
   if (flow) flow.onclick = () => revStartFlow(REV.docId, {step: 1});
   const submit = $('#rv-st-submit');
   if (submit) submit.onclick = () => submitReviewSelftest();
-  // Enter/Tab：Enter 跳到下一个空，最后一个空 Enter 直接提交
-  const inputs = [...document.querySelectorAll('#view input.rv-blank')];
-  inputs.forEach((inp, idx) => {
-    inp.addEventListener('keydown', e => {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      if (idx < inputs.length - 1) inputs[idx + 1].focus();
-      else submitReviewSelftest();
-    });
+  document.querySelectorAll('#view .rv-master .rv-mbtn').forEach(b => {
+    b.onclick = () => {
+      const kp = b.dataset.kp;
+      const val = b.dataset.val === '1';
+      if (!REV.stResults) REV.stResults = {};
+      REV.stResults[kp] = val;
+      const box = b.closest('.rv-master');
+      box.querySelectorAll('.rv-mbtn').forEach(x => x.classList.remove('on', 'ok', 'bad'));
+      b.classList.add('on');
+      b.classList.add(val ? 'ok' : 'bad');
+      reviewSyncSelftestButtons();
+    };
   });
 }
 
 async function submitReviewSelftest(){
   const d = REV.st;
   if (!d) return;
-  const answers = {};
-  document.querySelectorAll('#view .rv-q').forEach(q => {
-    const kp = q.dataset.kp;
-    answers[kp] = [];
-    q.querySelectorAll('input.rv-blank').forEach(inp => {
-      answers[kp][parseInt(inp.dataset.i, 10) || 0] = (inp.value || '').trim();
-    });
+  const kps = d.items || d.kps || [];
+  const results = {};
+  let missing = 0;
+  kps.forEach(kp => {
+    const key = String(kp.kp_id);
+    if (!Object.prototype.hasOwnProperty.call(REV.stResults || {}, key)) missing++;
+    else results[kp.kp_id] = !!REV.stResults[key];
   });
+  if (missing){ toast(`还有 ${missing} 条没标记（已掌握/未掌握）；全部标记后才能提交`); return; }
   const btn = $('#rv-st-submit');
-  if (btn){ btn.disabled = true; btn.textContent = '判分中…'; }
+  if (btn){ btn.disabled = true; btn.textContent = '提交中…'; }
   try {
     const r = await api('/api/review/selftest/submit', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({doc_id: REV.docId, session_id: d.session_id, answers: answers})});
+      body: JSON.stringify({doc_id: REV.docId, session_id: d.session_id, results: results})});
     if (!r || r.ok === false) throw new Error((r && r.error) || '提交失败');
     REV.result = r;
     renderReviewSelftest();
-    toast(`自测完成：熟悉度 ${Math.round((parseFloat(r.familiarity) || 0) * 100)}%`);
+    toast(`自测完成：已掌握 ${r.n_mastered || 0}/${r.n_sample || 0}`);
   } catch(e){
     toast('自测提交失败：' + e.message);
-    if (btn){ btn.disabled = false; btn.textContent = '提交自测'; }
+    reviewSyncSelftestButtons();
   }
 }
-
-// ---------------- 三步复习 runner ----------------
+
+// ---------------- 三步复习 v2（窗口化 + 可跳过 + 悬浮窗回当前步） ----------------
 async function revStartFlow(docId, opts){
   opts = opts || {};
   try {
@@ -2653,143 +2889,268 @@ async function revStartFlow(docId, opts){
     REV.title = (d.doc || {}).title || '';
     REV.step = Math.min(3, Math.max(1, parseInt(opts.step, 10) || 1));
     REV.kpIdx = Math.max(0, parseInt(opts.idx, 10) || 0);
-    REV.termIdx = 0; REV.minimized = false;
+    REV.termIdx = 0; REV.minimized = false; REV.revealed = {}; REV.stepOpen = '';
     revSave(); revFloatUpdate();
     await go('review');
+    await revOpenStepWindow();
   } catch(e){ toast('复习数据读取失败：' + e.message); }
 }
 
-function reviewNotesStepHtml(notes){
-  const groups = ((notes && notes.groups) || []).filter(g => (g.notes || []).length);
-  const unbound = (notes && notes.unbound) || [];
-  const grp = groups.map(g => {
-    const rows = (g.notes || []).map(n => `<div class="rv-note-row">
-      ${esc(n.title || n.file || '')}
-      <span class="rv-note-meta">${esc(n.source_label || '')}${n.chars ? ' · ' + n.chars + ' 字' : ''}
-        ${n.created || n.mtime ? ' · ' + esc(fmtTime(n.created || n.mtime)) : ''}</span>
-      </div>`).join('');
-    return `<details class="rv-note-grp" ${rows ? 'open' : ''}>
-      <summary>${esc(g.kp_name || g.kp_id || '未命名知识点')} · ${(g.notes || []).length} 篇</summary>
-      ${rows || '<div class="rv-empty">这条知识点没有绑定笔记。</div>'}</details>`;
-  }).join('');
-  const un = unbound.length ? `<details class="rv-note-grp">
-      <summary>未绑定具体知识点 · ${unbound.length} 篇</summary>
-      ${unbound.map(n => `<div class="rv-note-row">${esc(n.title || n.file || '')}
-        <span class="rv-note-meta">${esc(n.source_label || '')}${n.chars ? ' · ' + n.chars + ' 字' : ''}</span>
-      </div>`).join('')}</details>` : '';
-  return grp + un || '<div class="rv-empty">这份课件还没有笔记；复习时可以直接跳过这一步。</div>';
+function revCurrentKp(){
+  const f = REV.flowData || {};
+  const kps = f.kps || [];
+  return kps[Math.min(REV.kpIdx, Math.max(0, kps.length - 1))] || {};
+}
+function revCurrentTerm(){
+  const items = ((REV.flowData || {}).terms || {}).items || [];
+  return items[Math.min(REV.termIdx, Math.max(0, items.length - 1))] || {};
+}
+function revStepCn(step){ return ['', '第一步（知识点）', '第二步（笔记）', '第三步（重点名词）'][step] || ''; }
+
+function revCloseReviewWindows(){
+  try { if (EVPOP && EVPOP.style.display !== 'none') evPopClose(); } catch(e){}
+  try {
+    const m = document.getElementById('modal');
+    if (m && m.classList.contains('on')) closeModal();
+  } catch(e){}
+  REV.stepOpen = '';
+}
+
+async function revOpenStepWindow(){
+  if (!REV.active || REV.stage !== 'flow') return;
+  if (CURRENT !== 'review'){ await go('review'); if (CURRENT !== 'review') return; }
+  if (REV.step === 1){
+    const kp = revCurrentKp();
+    if (!kp.kp_id){ toast('这份课件没有可复习的知识点'); return; }
+    REV.stepOpen = 'kp';
+    evPopEl().dataset.kpPop = '1';
+    await mmOpenKp(kp.kp_id, kp.name, null, false, REV.docId);
+    revSave();
+  } else if (REV.step === 2){
+    REV.stepOpen = 'notes';
+    revOpenNotesWindow();
+  } else {
+    REV.stepOpen = 'term';
+    revOpenTermWindow();
+  }
+}
+
+function revNotesRowsHtml(){
+  const f = REV.flowData || {};
+  const notes = f.notes || {};
+  const groups = (notes.groups || []).filter(g => (g.notes || []).length);
+  const un = notes.unbound || [];
+  const groupHtml = groups.map(g => `<details class="rv-note-grp" open>
+    <summary>${esc(g.kp_name || g.kp_id || '未命名知识点')} · ${(g.notes || []).length} 篇</summary>
+    ${g.notes.map(n => `<div class="rv-note-row"><a href="#" class="rv-note-open"
+        data-file="${esc(n.file)}">${esc(n.title || n.file || '')}</a>
+      <span class="rv-note-meta">${esc(n.source_label || '')}${n.chars ? ' · ' + n.chars + ' 字' : ''}${
+        n.created || n.mtime ? ' · ' + esc(fmtTime(n.created || n.mtime)) : ''}</span></div>`).join('')}
+  </details>`).join('');
+  const unHtml = un.length ? `<details class="rv-note-grp"><summary>未绑定具体知识点 · ${un.length} 篇</summary>
+    ${un.map(n => `<div class="rv-note-row"><a href="#" class="rv-note-open" data-file="${esc(n.file)}">${
+      esc(n.title || n.file || '')}</a><span class="rv-note-meta">${esc(n.source_label || '')}</span></div>`).join('')}
+  </details>` : '';
+  return groupHtml + unHtml || '<div class="rv-empty">这份课件还没有笔记；点「跳过第二步」继续。</div>';
+}
+
+function revOpenNotesWindow(){
+  modal(`<h2>📒 第二步 · 整份课件的笔记</h2>
+    <div class="small muted" style="margin-bottom:10px">按绑定知识点分组；点标题看原文（可叠加）。
+      关闭原文后点右下悬浮窗「继续」可回到本窗口。</div>
+    ${revNotesRowsHtml()}
+    <div class="row" style="margin-top:14px">
+      <button class="act" id="rv-note-next">下一步：重点名词</button>
+      <button class="ghost" id="rv-note-skip">跳过第二步</button>
+      <button class="ghost" onclick="closeModal()">收起窗口</button>
+    </div>`);
+  document.querySelectorAll('#modalbox .rv-note-open').forEach(a => {
+    a.onclick = (e) => { e.preventDefault(); openNote(a.dataset.file); };
+  });
+  const next = document.getElementById('rv-note-next');
+  if (next) next.onclick = () => { revCloseReviewWindows(); revFlowGo(3); revOpenStepWindow(); };
+  const skip = document.getElementById('rv-note-skip');
+  if (skip) skip.onclick = () => { revCloseReviewWindows(); revFlowGo(3); revOpenStepWindow(); };
+}
+
+function revTermWindowHtml(){
+  const f = REV.flowData || {};
+  const items = (f.terms || {}).items || [];
+  if (!items.length){
+    return `<h2>🔤 第三步 · 预习重点名词</h2>
+      <div class="rv-empty">这份课件没有可用的预习重点名词（教材预习产物里还没有 terms）。
+        这一步可以直接跳过。</div>
+      <div class="row" style="margin-top:14px">
+        <button class="act" id="rv-term-finish">完成第三步</button>
+        <button class="ghost" id="rv-term-skip">跳过第三步</button>
+      </div>`;
+  }
+  const i = Math.min(REV.termIdx, items.length - 1);
+  const t = items[i];
+  const key = i + ':' + (t.term || '');
+  const open = !!(REV.revealed && REV.revealed[key]);
+  return `<h2>🔤 第三步 · 预习重点名词</h2>
+    <div class="small muted" style="margin-bottom:6px">${esc((f.terms || {}).chapter && ((f.terms).chapter.name) || '')}
+      · 来源 ${esc((f.terms || {}).source === 'preview_chapter' ? '预习名词' : ((f.terms || {}).source || '—'))}</div>
+    <div class="rv-term" id="rv-term">
+      <div class="rv-term-en">${esc(t.en || '')}</div>
+      <div class="rv-term-t">${esc(t.term || '')}</div>
+      ${open ? `<div class="rv-term-def">${esc(t.def || '')}</div>
+        ${t.why ? `<div class="rv-term-why">为什么重要：${esc(t.why)}</div>` : ''}`
+        : '<div class="small muted" style="margin-top:10px">点「显示解释」看定义与重要性</div>'}
+    </div>
+    <div class="rv-nav" style="justify-content:center">
+      <button class="ghost" id="rv-term-prev" ${i <= 0 ? 'disabled' : ''}>‹ 上一个</button>
+      <button class="act" id="rv-term-show">${open ? '收起解释' : '显示解释'}</button>
+      <button class="ghost" id="rv-term-next" ${i >= items.length - 1 ? 'disabled' : ''}>下一个 ›</button>
+      <span class="rv-prog">${i + 1} / ${items.length}</span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="act" id="rv-term-finish">完成第三步</button>
+      <button class="ghost" id="rv-term-skip">跳过第三步</button>
+      <button class="ghost" onclick="closeModal()">收起窗口</button>
+    </div>`;
+}
+
+function revBindTermWindow(){
+  const show = document.getElementById('rv-term-show');
+  if (show) show.onclick = () => {
+    const items = ((REV.flowData || {}).terms || {}).items || [];
+    const i = Math.min(REV.termIdx, items.length - 1);
+    const key = i + ':' + ((items[i] || {}).term || '');
+    if (!REV.revealed) REV.revealed = {};
+    REV.revealed[key] = !REV.revealed[key];
+    revOpenTermWindow();
+  };
+  const prev = document.getElementById('rv-term-prev');
+  if (prev && REV.termIdx > 0) prev.onclick = () => { REV.termIdx--; revSave(); revFloatUpdate(); revOpenTermWindow(); };
+  const next = document.getElementById('rv-term-next');
+  if (next) next.onclick = () => {
+    const items = ((REV.flowData || {}).terms || {}).items || [];
+    if (REV.termIdx < items.length - 1){ REV.termIdx++; revSave(); revFloatUpdate(); revOpenTermWindow(); }
+  };
+  const finish = document.getElementById('rv-term-finish');
+  if (finish) finish.onclick = () => { revCloseReviewWindows(); renderReviewDone(); };
+  const skip = document.getElementById('rv-term-skip');
+  if (skip) skip.onclick = () => { revCloseReviewWindows(); renderReviewDone(); };
+}
+
+function revOpenTermWindow(){
+  modal(revTermWindowHtml());
+  revBindTermWindow();
 }
 
 function renderReviewFlow(){
   const f = REV.flowData;
   if (!f){ $('#view').innerHTML = '<div class="empty">正在读取复习数据…</div>'; revResumeFlow(); return; }
   const kps = f.kps || [];
+  const items = (f.terms || {}).items || [];
+  const notes = f.notes || {};
+  const nNotes = (notes.groups || []).reduce((a, g) => a + (g.notes || []).length, 0) +
+                 (notes.unbound || []).length;
   const stepChips = [1, 2, 3].map(i => `<span class="rv-step${REV.step === i ? ' on' : (REV.step > i ? ' done' : '')}">
      ${i === 1 ? '① 知识点' : i === 2 ? '② 笔记' : '③ 重点名词'}</span>`).join('');
   let body = '';
   if (REV.step === 1){
-    const kp = kps[Math.min(REV.kpIdx, Math.max(0, kps.length - 1))] || {};
+    const kp = revCurrentKp();
     body = `<div class="rv-kp">
       <h3>${esc(kp.name || '（没有知识点）')}</h3>
       <div class="rv-kp-meta">导图位置 ${esc((kp.node_path || []).join(' › ') || '—')}
         ${(kp.pages || []).length ? ' · 页码 ' + (kp.pages || []).map(p => 'p.' + p).join('、') : ''}
         ${kp.note_count ? ' · 笔记 ' + kp.note_count + ' 条' : ''}
-        ${kp.unfamiliar ? ' · <span style="color:var(--warn)">自测不熟悉</span>' : ''}</div>
-      <div class="rv-kp-sum">${esc(kp.summary || '（这条没有总结正文）')}</div>
-      ${(kp.points || []).length ? `<ul>${(kp.points || []).map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+        ${kp.mastered === false || kp.unfamiliar ? ' · <span style="color:var(--warn)">自测未掌握</span>' : ''}</div>
+      <div class="rv-kp-hint">已直接打开这条知识点的原文窗口；关掉窗口不影响复习进度，
+        用右下悬浮窗「继续」可重新打开。</div>
     </div>`;
   } else if (REV.step === 2){
-    body = reviewNotesStepHtml(f.notes || {}) +
-      `<div class="row" style="margin-top:10px">
-        <button class="act" id="rv-flow-next">进入第三步：重点名词</button></div>`;
-  } else if (REV.step === 3){
-    const items = ((f.terms || {}).items) || [];
-    if (!items.length){
-      body = `<div class="rv-empty">这份课件没有可用的预习重点名词（教材预习产物里还没有 terms）。
-        这一步可以直接完成复习。</div>
-        <div class="row" style="margin-top:10px"><button class="act" id="rv-flow-done">完成复习</button></div>`;
-    } else {
-      const i = Math.min(REV.termIdx, items.length - 1);
-      const t = items[i];
-      const key = i + ':' + (t.term || '');
-      const open = REV.revealed && REV.revealed[key];
-      body = `<div class="rv-term" id="rv-term">
-        <div class="rv-term-en">${esc(t.en || '')}</div>
-        <div class="rv-term-t">${esc(t.term || '')}</div>
-        ${open ? `<div class="rv-term-def">${esc(t.def || '')}</div>
-          ${t.why ? `<div class="rv-term-why">为什么重要：${esc(t.why)}</div>` : ''}`
-          : `<div class="small muted" style="margin-top:10px">点「显示解释」看定义与重要性</div>`}
-      </div>
-      <div class="rv-nav" style="max-width:560px;margin:10px auto 0">
-        <button class="ghost" id="rv-term-prev" ${i <= 0 ? 'disabled' : ''}>‹ 上一个</button>
-        <button class="act" id="rv-term-show">${open ? '收起解释' : '显示解释'}</button>
-        <button class="ghost" id="rv-term-next" ${i >= items.length - 1 ? 'disabled' : ''}>下一个 ›</button>
-        <span class="rv-prog">${i + 1} / ${items.length}</span>
-      </div>
-      <div class="row" style="max-width:560px;margin:8px auto 0">
-        <button class="ghost" id="rv-flow-done">完成复习</button></div>`;
-    }
+    body = `<div class="rv-kp"><h3>整份课件的笔记</h3>
+      <div class="rv-kp-meta">${(notes.groups || []).filter(g => (g.notes || []).length).length} 个知识点分组 · 共 ${nNotes} 篇笔记</div>
+      <div class="rv-kp-hint">笔记窗口已打开；点标题看原文。也可用下面的按钮重新打开窗口。</div></div>`;
+  } else {
+    const t = revCurrentTerm();
+    body = `<div class="rv-kp"><h3>预习重点名词 · ${items.length} 个</h3>
+      <div class="rv-kp-meta">${items.length ? `当前 ${Math.min(REV.termIdx + 1, items.length)} / ${items.length}：${esc(t.term || '')}` : '该章没有预习重点名词，可直接跳过这一步'}</div>
+      <div class="rv-kp-hint">名词窗口已打开（翻面看定义）；也可用下面的按钮重新打开窗口。</div></div>`;
   }
-  const nKp = kps.length;
+  const winLabel = REV.step === 1 ? '知识点窗口' : (REV.step === 2 ? '笔记窗口' : '名词窗口');
   $('#view').innerHTML = `
     <div class="card rv-card">
       <div class="rv-flow-head"><h2>📖 ${esc(REV.title || '课件复习')}</h2>
         <button class="ghost" id="rv-flow-home">退出复习</button></div>
       <div class="rv-steps">${stepChips}</div>
       ${body}
-      ${REV.step === 1 ? `<div class="rv-nav">
-        <button class="ghost" id="rv-kp-prev" ${REV.kpIdx <= 0 ? 'disabled' : ''}>‹ 上一个</button>
-        <button class="ghost" id="rv-kp-think">再想想</button>
-        <button class="act" id="rv-kp-remember">记住了</button>
-        ${REV.kpIdx >= nKp - 1
-          ? `<button class="act" id="rv-flow-next">进入第二步：整份课件笔记</button>` : ''}
-        <span class="rv-prog">${nKp ? (Math.min(REV.kpIdx + 1, nKp) + ' / ' + nKp) : '0 / 0'}</span>
-      </div>` : ''}
+      <div class="rv-nav">
+        <button class="act" id="rv-reopen">重新打开${winLabel}</button>
+        ${REV.step < 3 ? `<button class="ghost" id="rv-step-next">下一步：${
+          REV.step === 1 ? '整份课件笔记' : '重点名词'}</button>` : ''}
+        <button class="ghost" id="rv-step-skip">跳过${revStepCn(REV.step)}</button>
+        ${REV.step === 3 ? '<button class="act" id="rv-flow-done">完成复习</button>' : ''}
+      </div>
     </div>`;
   bindReviewFlow();
 }
 
 function revFlowGo(step){
   REV.step = Math.min(3, Math.max(1, step));
-  if (REV.step === 1) REV.kpIdx = Math.min(REV.kpIdx, Math.max(0, (REV.flowData.kps || []).length - 1));
+  if (REV.step === 1) REV.kpIdx = Math.min(REV.kpIdx, Math.max(0, ((REV.flowData || {}).kps || []).length - 1));
   revSave(); revFloatUpdate(); renderReviewFlow();
 }
 
 function bindReviewFlow(){
   const home = $('#rv-flow-home');
-  if (home) home.onclick = () => { REV.stage = ''; REV.flowData = null; go('review'); };
-  const prev = $('#rv-kp-prev');
-  if (prev && REV.kpIdx > 0) prev.onclick = () => { REV.kpIdx--; revSave(); revFloatUpdate(); renderReviewFlow(); };
-  const nxt = $('#rv-kp-remember');
-  if (nxt) nxt.onclick = () => {
-    if (REV.kpIdx < (REV.flowData.kps || []).length - 1){ REV.kpIdx++; revSave(); revFloatUpdate(); renderReviewFlow(); }
-    else toast('最后一个知识点：可点「进入第二步」');
-  };
-  const think = $('#rv-kp-think');
-  if (think) think.onclick = () => {
-    if (REV.kpIdx < (REV.flowData.kps || []).length - 1){ REV.kpIdx++; revSave(); revFloatUpdate(); renderReviewFlow(); }
-    else toast('最后一个知识点：可点「进入第二步」');
-  };
-  const stepNext = $('#rv-flow-next');
-  if (stepNext) stepNext.onclick = () => revFlowGo(REV.step + 1);
-  const show = $('#rv-term-show');
-  if (show) show.onclick = () => {
-    const items = (REV.flowData.terms || {}).items || [];
-    const i = Math.min(REV.termIdx, items.length - 1);
-    const key = i + ':' + (items[i].term || '');
-    if (!REV.revealed) REV.revealed = {};
-    REV.revealed[key] = !REV.revealed[key];
-    renderReviewFlow();
-  };
-  const tp = $('#rv-term-prev');
-  if (tp && REV.termIdx > 0) tp.onclick = () => { REV.termIdx--; revSave(); renderReviewFlow(); };
-  const tn = $('#rv-term-next');
-  if (tn) tn.onclick = () => {
-    const items = (REV.flowData.terms || {}).items || [];
-    if (REV.termIdx < items.length - 1){ REV.termIdx++; revSave(); renderReviewFlow(); }
-  };
+  if (home) home.onclick = () => { revCloseReviewWindows(); REV.stage = ''; REV.flowData = null; revFloatUpdate(); go('review'); };
+  const reop = $('#rv-reopen');
+  if (reop) reop.onclick = () => revOpenStepWindow();
+  const next = $('#rv-step-next');
+  if (next) next.onclick = () => revFlowNext();
+  const skip = $('#rv-step-skip');
+  if (skip) skip.onclick = () => revSkipStep();
   const done = $('#rv-flow-done');
-  if (done) done.onclick = () => renderReviewDone();
+  if (done) done.onclick = () => { revCloseReviewWindows(); renderReviewDone(); };
+}
+
+async function revFlowNext(){
+  if (REV.step === 1){
+    const n = ((REV.flowData || {}).kps || []).length;
+    if (REV.kpIdx < n - 1){
+      REV.kpIdx++; revSave(); revFloatUpdate();
+      await revOpenStepWindow();
+    } else {
+      revCloseReviewWindows(); revFlowGo(2); await revOpenStepWindow();
+    }
+  } else if (REV.step === 2){
+    revCloseReviewWindows(); revFlowGo(3); await revOpenStepWindow();
+  } else {
+    const items = ((REV.flowData || {}).terms || {}).items || [];
+    if (REV.termIdx < items.length - 1){
+      REV.termIdx++; revSave(); revFloatUpdate(); await revOpenStepWindow();
+    } else {
+      revCloseReviewWindows(); renderReviewDone();
+    }
+  }
+}
+
+async function revSkipStep(){
+  if (REV.step >= 3){ revCloseReviewWindows(); renderReviewDone(); return; }
+  const went = REV.step + 1;
+  revCloseReviewWindows();
+  revFlowGo(went);
+  await revOpenStepWindow();
+  toast(`已跳过${revStepCn(went - 1)}`);
+}
+
+async function revContinue(){
+  if (!REV.active) return;
+  REV.minimized = false; revSave(); revFloatUpdate();
+  if (CURRENT !== 'review') await go('review');
+  if (REV.stage === 'selftest'){ if (REV.st) renderReviewSelftest(); return; }
+  if (REV.stage === 'flow'){
+    if (!REV.flowData){
+      await revResumeFlow();
+      return;
+    }
+    await revOpenStepWindow();
+  }
 }
 
 async function revResumeFlow(){
@@ -2798,30 +3159,35 @@ async function revResumeFlow(){
     const d = await api('/api/review/flow?doc_id=' + encodeURIComponent(REV.docId));
     if (!d || d.ok === false) throw new Error((d && d.error) || '读不到复习数据');
     REV.flowData = d; REV.title = (d.doc || {}).title || REV.title;
-    renderReviewFlow();
-  } catch(e){ $('#view').innerHTML = `<div class="empty">复习数据读取失败：${esc(e.message)}</div>`; }
+    if (CURRENT === 'review') renderReviewFlow();
+    await revOpenStepWindow();
+  } catch(e){ toast('复习数据读取失败：' + e.message); }
 }
 
 function renderReviewDone(){
   const f = REV.flowData || {};
   const nKp = (f.kps || []).length;
-  const nNotes = ((f.notes || {}).groups || []).reduce((a, g) => a + (g.notes || []).length, 0);
+  const notes = f.notes || {};
+  const nNotes = (notes.groups || []).reduce((a, g) => a + (g.notes || []).length, 0) +
+                 (notes.unbound || []).length;
   const nTerms = ((f.terms || {}).items || []).length;
+  const nM = REV.result ? (parseInt(REV.result.n_mastered, 10) || 0) : null;
+  const nS = REV.result ? (parseInt(REV.result.n_sample, 10) || 0) : null;
   const fam = REV.result ? Math.round((parseFloat(REV.result.familiarity) || 0) * 100) : null;
   const unl = (REV.result && REV.result.unfamiliar_ids) || [];
   REV.stage = 'done';
   revSave();
   const sug = [];
-  if (unl.length) sug.push(`明天再刷 ${unl.length} 条「不熟悉」的知识点（自测里标黄的）。`);
+  if (unl.length) sug.push(`明天再刷 ${unl.length} 条「未掌握」的知识点（自测里标红的）。`);
   if (nNotes) sug.push('把这份课件的笔记再翻一遍，尤其是自己写过的易错点。');
   if (nTerms) sug.push('重点名词按「能一句话解释」的标准过第二遍。');
-  if (!sug.length) sug.push('保持这个节奏：先自测、再按知识点过、最后看名词。');
+  if (!sug.length) sug.push('保持这个节奏：先自测标掌握度，再按知识点/笔记/名词三步过。');
   $('#view').innerHTML = `
     <div class="rv-done">
       <h2>✅ 本次复习完成</h2>
       <div class="rv-done-line">课件：<b>${esc(REV.title || '')}</b></div>
       ${fam != null ? `<div class="rv-done-line">本次自测熟悉度：<b>${fam}%</b>
-        （抽中 ${REV.result.n_sample || 0} 条，不熟 ${unl.length} 条）</div>`
+        （已掌握 ${nM}/${nS}）${unl.length ? ` · 未掌握 ${unl.length} 条` : ''}</div>`
         : '<div class="rv-done-line">本次未做自测，只完成了三步复习。</div>'}
       <div class="rv-done-line">复习条目：知识点 ${nKp} 条 · 笔记 ${nNotes} 篇 · 重点名词 ${nTerms} 个</div>
       <div class="rv-done-sug">建议：${sug.map(s => esc(s)).join(' ')}</div>
@@ -2830,13 +3196,79 @@ function renderReviewDone(){
         <button class="ghost" id="rv-done-end">结束本次复习</button>
       </div>
     </div>`;
-  REV.active = false; revDrop(); revFloatUpdate();
+  REV.active = false; REV.stepOpen = ''; revDrop(); revFloatUpdate();
   const h = $('#rv-done-home');
   if (h) h.onclick = () => { REV.stage = ''; go('review'); };
   const e = $('#rv-done-end');
   if (e) e.onclick = () => { REV.stage = ''; go('review'); };
 }
+
 
+// ---------------- 名词整理入口（task-36）：预习重点名词 → 课件名词解释（0 AI） ----------------
+// termsCard 底部加一行状态 +「按预习重点名词重新整理（0 AI）」；数据来自
+// /api/terms/preview/options（有预习产物才显示按钮，无预习给人话），
+// 点击 → confirmBox（说明零 AI/只留相关词）→ POST /api/terms/build-preview → 刷新 /api/terms。
+async function refreshTermsPreview(){
+  const box = $('#term-preview');
+  if (!box) return;
+  const did = TERMS.docId;
+  if (!did){ box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="small muted">检查预习重点名词…</span>';
+  let d = null;
+  try { d = await api('/api/terms/preview/options?doc_id=' + encodeURIComponent(did)); }
+  catch(e){
+    box.innerHTML = `<span class="small muted">名词整理选项读取失败：${esc(e.message)}</span>`;
+    return;
+  }
+  if (!d || d.ok === false){
+    box.innerHTML = `<span class="small muted">${esc((d && d.error) || '名词整理后端未就绪')}</span>`;
+    return;
+  }
+  TERMS.preview = d;
+  const pv = d.preview || {}, cur = d.current || {}, ch = d.chapter || {};
+  const cand = parseInt(pv.n_candidates, 10) || 0;
+  const available = !!pv.exists && cand > 0;
+  const curSrc = cur.exists ? String(cur.source || '') : '';
+  const srcLabel = curSrc === 'preview_key_terms' ? '预习重点名词'
+    : (curSrc ? '旧 AI 管线（' + curSrc + '）' : '暂无');
+  if (!available){
+    box.innerHTML = `<div class="small muted">该教材章节还没有预习总结${
+      ch.no ? '（第' + esc(ch.no) + '章）' : ''}，先在「预习」页生成预习总结，再来按重点名词整理。</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="small muted">预习第${esc(ch.no || '?')}章候选
+        <b style="color:var(--fg)">${cand}</b> 个名词 ·
+        当前来源：<b style="color:var(--fg)">${esc(srcLabel)}</b>${
+          cur.exists ? `（${cur.n_terms || 0} 个）` : ''} · 0 AI</span>
+      <button class="ghost" id="term-preview-build">按预习重点名词重新整理（0 AI）</button>
+    </div>`;
+  const b = $('#term-preview-build');
+  if (b) b.onclick = () => buildTermsPreview(did);
+}
+
+async function buildTermsPreview(docId){
+  const ok = await confirmBox('按预习重点名词重新整理？',
+    '不调用 AI、不产生模型费用：只把该教材章节预习总结里的重点名词，' +
+    '按"必须出自课件材料"过滤后写入名词解释产物（覆盖旧文件前自动备份 .bak）。');
+  if (!ok) return;
+  const b = $('#term-preview-build');
+  if (b){ b.disabled = true; b.textContent = '整理中…'; }
+  try {
+    const r = await api('/api/terms/build-preview', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: docId, force: true})});
+    if (!r || r.ok === false) throw new Error((r && r.error) || '整理失败');
+    const meta = r.meta || {};
+    const nCand = r.n_candidates != null ? r.n_candidates : (meta.n_candidates != null ? meta.n_candidates : '?');
+    const nSel = r.n_selected != null ? r.n_selected : (meta.n_selected != null ? meta.n_selected : '?');
+    toast(`已按预习重点名词整理：候选 ${nCand} → 保留 ${nSel} 个（0 AI）`);
+    await loadTerms();
+  } catch(e){
+    toast('名词整理失败：' + e.message);
+    if (b){ b.disabled = false; b.textContent = '按预习重点名词重新整理（0 AI）'; }
+  }
+}
 // ---------------- 笔记页签：按课件 → 绑定 KP 分组 ----------------
 function noteKpNamesFromTree(tree){
   const out = {};
@@ -4906,6 +5338,7 @@ function termsCard(){
       <select id="term-doc" style="flex:1;min-width:260px"></select>
       <button class="ghost" id="term-unfold">展开</button>
     </div>
+    <div id="term-preview" class="small muted" style="margin:8px 0"></div>
     <div id="term-box"><div class="small muted">加载中…</div></div>
   </div>`;
 }
@@ -4987,6 +5420,7 @@ async function loadTerms(){
   TERMS.data = d;
   TERMS.n = (d.terms || []).length;
   renderTerms();
+  try { await refreshTermsPreview(); } catch(e){ /* 预览状态读不到不影响名词列表 */ }
 }
 
 async function mountTerms(){
@@ -8357,7 +8791,7 @@ async function subjRenameGo(){
 
 // ---------------- 通用 ----------------
 function modal(html){ $('#modalbox').innerHTML = html; $('#modal').classList.add('on'); }
-function closeModal(){ $('#modal').classList.remove('on'); uiForgetPopup(); }
+function closeModal(){ $('#modal').classList.remove('on'); uiForgetPopup(); uiClearSnapshot('modal'); }
 function toast(msg){
   const el = document.createElement('div');
   el.textContent = msg;
@@ -12043,13 +12477,15 @@ def api_review_selftest_submit(payload):
     except (TypeError, ValueError):
         return {"ok": False, "error": "doc_id 必须是整数"}
     session_id = str(payload.get("session_id") or "").strip()
-    answers = payload.get("answers")
+    # task-36 / review v3：前端提交 {results:{kp_id:bool}}（true=已掌握）；
+    # 兼容旧测试/旧前端仍传 answers 的调用。
+    results = payload.get("results", payload.get("answers"))
     if doc_id <= 0 or not session_id:
         return {"ok": False, "error": "缺少 doc_id 或 session_id"}
-    if not isinstance(answers, (dict, list)):
-        return {"ok": False, "error": "answers 必须是对象或数组"}
+    if not isinstance(results, (dict, list)):
+        return {"ok": False, "error": "results 必须是对象或数组"}
     try:
-        r = _review_mod().submit_selftest(doc_id, session_id, answers)
+        r = _review_mod().submit_selftest(doc_id, session_id, results)
     except Exception as e:  # noqa: BLE001
         return _review_err("自测提交失败", e)
     if not isinstance(r, dict):
@@ -12075,6 +12511,56 @@ def api_review_selftest_status(doc_id):
     return r
 
 
+# ---------------- 名词整理（task-36）：预习重点名词 → 课件名词解释（零 AI） ----------------
+# core/terms_preview.py 并行交付（零 AI）；只做惰性 import + 统一 JSON 降级。
+# 路由（任务书口径 + 后端建议别名都挂，前端默认用前者）：
+#   GET  /api/terms/preview/options?doc_id=  → terms_preview_status(doc_id)
+#   GET  /api/terms/preview/status?doc_id=   （别名）
+#   POST /api/terms/build-preview {doc_id,force?} → build_terms_from_preview(...)
+#   POST /api/terms/preview/build {doc_id,force?} （别名）
+
+
+def _terms_preview_mod():
+    from core import terms_preview as _tp
+    return _tp
+
+
+def api_terms_preview_options(conn, doc_id):
+    """预习名词整理入口状态：候选数 / 当前产物来源 / 是否可重做（0 AI、0 写）。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    try:
+        r = _terms_preview_mod().terms_preview_status(doc_id, conn=conn)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "读不到预习名词状态：%s: %s" % (type(e).__name__, e)}
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "预习名词状态返回异常"}
+    r.setdefault("ok", True)
+    return r
+
+
+def api_terms_build_preview(payload):
+    """按预习重点名词重新整理课件名词解释（0 AI、0 模型费用；覆盖前自动 .bak）。"""
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    force = bool(payload.get("force", True))
+    try:
+        r = _terms_preview_mod().build_terms_from_preview(
+            doc_id, force=force, log=lambda *a, **k: None)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "名词整理失败：%s: %s" % (type(e).__name__, e)}
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "名词整理返回异常"}
+    r.setdefault("ok", True)
+    return r
 def api_kp_build_start(payload):
     """启动整理（后台线程）。返回产物路径与备份路径，前端据此提示"去哪儿看结果"。"""
     try:
@@ -15899,6 +16385,10 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/review/flow":
                         return self._json_auto(api_review_flow(
                             conn, _int_arg(qs.get("doc_id"), 0)))
+                    # ---------------- 名词整理（task-36）：预习名词入口状态（只读） ----------------
+                    if path == "/api/terms/preview/options" or path == "/api/terms/preview/status":
+                        return self._json_auto(api_terms_preview_options(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -16057,6 +16547,10 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- 复习流程（task-33）：自测提交（锁外，原子写） ----------------
             if u.path == "/api/review/selftest/submit":
                 return self._json_auto(api_review_selftest_submit(payload))
+
+            # ---------------- 名词整理（task-36）：按预习重点名词重新整理（锁外，0 AI、写产物） ----------------
+            if u.path == "/api/terms/build-preview" or u.path == "/api/terms/preview/build":
+                return self._json_auto(api_terms_build_preview(payload))
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":

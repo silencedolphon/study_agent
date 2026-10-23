@@ -1,0 +1,192 @@
+{
+  "base": "http://127.0.0.1:8936",
+  "steps": {
+    "open": {
+      "t": 5391,
+      "display": "flex",
+      "csDisplay": "flex",
+      "visible": true,
+      "hasBody": true,
+      "title": "受体选择性与作用部位\n          KP-",
+      "bodyLen": 230,
+      "current": "kps",
+      "saved": "kps",
+      "holdUntil": 1792775425667
+    },
+    "leave": {
+      "t": 5468,
+      "display": "none",
+      "csDisplay": "none",
+      "visible": false,
+      "hasBody": true,
+      "title": "受体选择性与作用部位\n          KP-",
+      "bodyLen": 832,
+      "current": "assistant",
+      "saved": "kps",
+      "holdUntil": 1792775429421
+    },
+    "returnSamples": [
+      {
+        "t": 6386,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775430846
+      },
+      {
+        "t": 6497,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775430372
+      },
+      {
+        "t": 6699,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775429980
+      },
+      {
+        "t": 7210,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775429980
+      },
+      {
+        "t": 7913,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775429980
+      },
+      {
+        "t": 8724,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775429980
+      },
+      {
+        "t": 10237,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775429980
+      }
+    ],
+    "cycle2": [
+      {
+        "t": 11160,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775435620
+      },
+      {
+        "t": 11313,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775434761
+      },
+      {
+        "t": 11917,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775434761
+      },
+      {
+        "t": 13121,
+        "display": "flex",
+        "csDisplay": "flex",
+        "visible": true,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 230,
+        "current": "kps",
+        "saved": "kps",
+        "holdUntil": 1792775434761
+      }
+    ],
+    "closeThenCheck": {
+      "closed": {
+        "t": 13655,
+        "display": "none",
+        "csDisplay": "none",
+        "visible": false,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 832,
+        "current": "kps",
+        "saved": null,
+        "holdUntil": 1792775434761
+      },
+      "after": {
+        "t": 16172,
+        "display": "none",
+        "csDisplay": "none",
+        "visible": false,
+        "hasBody": true,
+        "title": "受体选择性与作用部位\n          KP-",
+        "bodyLen": 832,
+        "current": "kps",
+        "saved": null,
+        "holdUntil": 1792775438362
+      }
+    }
+  },
+  "errors": []
+}
