@@ -199,6 +199,9 @@ MATRIX = [
     dict(id="F114", feature="教材补充 AI 卡（成本预估/生成/结果/重试/旧版重做）+ 导图 AI 横幅",
          entry="小窗 AI 卡 + /api/textbook-supplement/kp/{estimate,build} + 导图横幅 AI 文案",
          kind="ui", priority="P1", tests=["test_22_teach_ai_ui"], evidence="json+shot"),
+    dict(id="F116", feature="知识点总结提示词 v5：写后自检 + audit 留痕（图片/OCR 错误纠偏）",
+         entry="logs/knowledge/提示词-知识点总结-v2.md（SYS 自检段 + audit 字段）",
+         kind="read", priority="P1", tests=["test_25_prompt_audit"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
