@@ -202,6 +202,12 @@ MATRIX = [
     dict(id="F116", feature="知识点总结提示词 v5：写后自检 + audit 留痕（图片/OCR 错误纠偏）",
          entry="logs/knowledge/提示词-知识点总结-v2.md（SYS 自检段 + audit 字段）",
          kind="read", priority="P1", tests=["test_25_prompt_audit"], evidence="json"),
+    dict(id="F117", feature="复习后端：自测随机一半挖名词/熟悉度持久化 + 三步 flow（KP/笔记/预习名词）",
+         entry="core/review.py + /api/review/{coursewares,flow,selftest,selftest/submit,selftest/status}",
+         kind="read", priority="P1", tests=["test_23_review_flow"], evidence="json"),
+    dict(id="F118", feature="复习前端：自测填空 + 三步 runner + 全局悬浮窗 + 页签状态保持 + 笔记按课件整理",
+         entry="复习页/自测页/#rev-float + UI_PERSIST + viewNotes 分组",
+         kind="ui", priority="P1", tests=["test_24_review_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

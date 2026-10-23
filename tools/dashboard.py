@@ -980,6 +980,115 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
   .pv-ch-title{max-width:none}
   .pv-ch-meta{width:100%;padding-left:17px}
 }
+/* ---------------- 复习流程（task-33）：课件卡 / 自测 / 三步 / 悬浮窗 / 笔记分组 ---------- */
+/* 1) 复习页课件卡 */
+.rv-card{margin-bottom:14px}
+.rv-cws{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:10px}
+.rv-cw{border:1px solid var(--line);border-radius:10px;background:#151920;padding:10px 12px}
+.rv-cw-h{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.rv-cw-h b{flex:1;min-width:0;font-size:13.5px;word-break:break-word}
+.rv-cw-meta{color:var(--dim);font-size:11.5px;line-height:1.75;margin:5px 0 8px}
+.rv-cw-act{display:flex;gap:6px;flex-wrap:wrap}
+.rv-badge{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.rv-badge.ok{color:var(--ok);border-color:#1c3a24}
+.rv-badge.warn{color:var(--warn);border-color:#3d3218}
+.rv-empty{padding:10px;color:var(--dim);font-size:12.5px;line-height:1.75}
+/* 2) 自测 */
+.rv-st-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.rv-st-head h2{margin:0;font-size:17px}
+.rv-st-tip{color:var(--dim);font-size:12px;line-height:1.7;margin:4px 0 12px}
+.rv-q{border:1px solid var(--line);border-radius:10px;background:#151920;padding:10px 12px;margin-bottom:10px}
+.rv-q-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.rv-q-h b{font-size:13.5px}
+.rv-q-text{font-size:13px;line-height:2.05;color:var(--fg);word-break:break-word}
+.rv-q-text input.rv-blank{width:110px;max-width:150px;padding:1px 6px;font-size:13px;line-height:1.6;
+  border:1px solid var(--line);border-right:none;border-left:none;border-top:none;border-radius:0;
+  background:#0f141c;color:var(--accent);text-align:center;font-family:inherit}
+.rv-q-text input.rv-blank:focus{outline:none;border-bottom-color:var(--accent)}
+.rv-q-ans{font-size:12px;line-height:1.85;margin-top:6px;color:var(--dim)}
+.rv-q-ans .ok{color:var(--ok)}
+.rv-q-ans .bad{color:var(--bad)}
+.rv-res{border:1px solid var(--line);border-radius:10px;background:#151920;padding:12px 14px;margin:12px 0}
+.rv-res .big{font-size:26px;color:var(--accent);font-weight:700}
+.rv-res ul{margin:6px 0;padding-left:18px;font-size:12.5px;line-height:1.85}
+/* 3) 三步 runner */
+.rv-flow-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.rv-flow-head h2{margin:0;font-size:17px}
+.rv-steps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+.rv-step{font-size:11.5px;padding:3px 10px;border-radius:20px;border:1px solid var(--line);color:var(--dim)}
+.rv-step.on{color:var(--accent);border-color:var(--accent);background:rgba(91,157,255,.08)}
+.rv-step.done{color:var(--ok);border-color:#1c3a24}
+.rv-kp{border:1px solid var(--line);border-radius:10px;background:#151920;padding:12px 14px}
+.rv-kp h3{margin:0 0 6px;font-size:16px;word-break:break-word}
+.rv-kp .rv-kp-meta{color:var(--dim);font-size:11.5px;margin-bottom:8px;line-height:1.7}
+.rv-kp .rv-kp-sum{font-size:13px;line-height:1.95;color:var(--fg);white-space:pre-wrap;word-break:break-word}
+.rv-kp ul{margin:8px 0 0;padding-left:20px;font-size:12.5px;line-height:1.9}
+.rv-nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.rv-prog{color:var(--dim);font-size:12px;margin-left:auto;white-space:nowrap}
+.rv-note-grp{border:1px solid var(--line);border-radius:9px;background:#151920;margin-bottom:9px;padding:8px 10px}
+.rv-note-grp>summary{cursor:pointer;font-size:13px;line-height:1.7}
+.rv-note-row{padding:6px 0;border-top:1px dashed rgba(42,47,58,.7);font-size:12.5px;line-height:1.75}
+.rv-note-row:first-of-type{border-top:none}
+.rv-note-row .rv-note-meta{color:var(--dim);font-size:11px;margin-top:2px}
+.rv-term{max-width:560px;margin:20px auto;border:1px solid var(--line);border-radius:14px;
+  background:linear-gradient(180deg,#1c212b,#151920);padding:26px 22px;text-align:center}
+.rv-term .rv-term-en{color:var(--dim);font-size:12px;letter-spacing:.5px}
+.rv-term .rv-term-t{font-size:24px;font-weight:700;margin:8px 0 4px;word-break:break-word}
+.rv-term .rv-term-def{font-size:13px;line-height:1.9;color:var(--fg);margin-top:12px;text-align:left}
+.rv-term .rv-term-why{font-size:12px;line-height:1.85;color:var(--dim);margin-top:8px;text-align:left}
+.rv-done{max-width:640px;margin:20px auto;border:1px solid var(--line);border-radius:14px;background:#151920;padding:20px 22px}
+.rv-done h2{margin:0 0 8px;font-size:18px}
+.rv-done .rv-done-line{font-size:13px;line-height:1.9;color:var(--fg)}
+.rv-done .rv-done-sug{color:var(--dim);font-size:12.5px;line-height:1.85;margin-top:10px;
+  border-top:1px dashed var(--line);padding-top:10px}
+/* 4) 全局浮动进度窗 */
+#rev-float{position:fixed;right:14px;bottom:14px;z-index:30;width:min(250px,calc(100vw - 24px));
+  border:1px solid var(--accent);border-radius:12px;background:#141a24;
+  box-shadow:0 12px 34px rgba(0,0,0,.55);padding:9px 11px;display:none}
+#rev-float.on{display:block}
+#rev-float .rvf-t{font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+#rev-float .rvf-m{color:var(--dim);font-size:11px;line-height:1.7;margin:3px 0 7px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#rev-float .rvf-act{display:flex;gap:6px;flex-wrap:wrap}
+#rev-float .rvf-act button{font-size:11.5px;padding:2px 9px}
+#rev-float.rvf-min{width:auto;max-width:240px;border-radius:20px;padding:6px 12px;cursor:pointer}
+#rev-float.rvf-min .rvf-m,#rev-float.rvf-min .rvf-act{display:none}
+@media (max-width:560px){
+  #rev-float{right:10px;bottom:10px;width:min(210px,calc(100vw - 20px));padding:8px 10px}
+  .rv-cws{grid-template-columns:1fr}
+  .rv-term{margin:8px 0;padding:18px 14px}
+  .rv-term .rv-term-t{font-size:20px}
+  .rv-q-text input.rv-blank{width:86px}
+  /* 月历 7 列在 390 下必须能压进视口（这是复习页原有卡片，添加入口后一并修） */
+  #dc-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+  .day{min-height:62px;padding:4px 3px}
+  .day .dnum{font-size:10px;gap:2px;flex-wrap:wrap}
+  .day .dnum .badge{font-size:9px;padding:0 3px}
+  .day .ev{font-size:9px;padding:0 2px}
+  #dc-daylist{overflow-x:auto}
+}
+/* 5) 笔记页签：按课件 → KP 分组 */
+.nt-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.nt-head h2{margin:0;font-size:17px}
+.nt-search{margin-left:auto;width:min(260px,60vw);padding:6px 10px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:8px;color:var(--fg);font:inherit;font-size:12.5px}
+.nt-grp{border:1px solid var(--line);border-radius:10px;background:#151920;margin-bottom:10px;padding:8px 11px}
+.nt-grp>summary{cursor:pointer;font-size:13.5px;line-height:1.8;list-style:none}
+.nt-grp>summary::-webkit-details-marker{display:none}
+.nt-grp>summary::before{content:'▸ ';color:var(--dim)}
+.nt-grp[open]>summary::before{content:'▾ ';color:var(--dim)}
+.nt-grp .nt-g-meta{color:var(--dim);font-size:11px;font-weight:400;margin-left:8px}
+.nt-kp{border-top:1px dashed rgba(42,47,58,.7);padding:7px 0 2px;margin-top:6px}
+.nt-kp>summary{cursor:pointer;font-size:12.5px;color:var(--accent);line-height:1.7;list-style:none}
+.nt-kp>summary::-webkit-details-marker{display:none}
+.nt-kp>summary::before{content:'· ';color:var(--dim)}
+.nt-note{display:flex;align-items:flex-start;gap:10px;padding:5px 0 5px 10px;font-size:12.5px;
+  line-height:1.7;flex-wrap:wrap;border-left:2px solid #233047;margin:4px 0}
+.nt-note a{color:var(--fg);font-weight:600;word-break:break-word}
+.nt-note .nt-meta{color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
+.nt-note .nt-act{flex:0 0 auto}
+.nt-empty{padding:12px;color:var(--dim);font-size:12.5px;line-height:1.8}
 /* ---------------- 遗忘曲线月历（卡 C-0061） ----------------
    纯手写网格（零 CDN / 零第三方库），全部用既有 CSS 变量，不引入新色。
    颜色来源：--accent（今天/选中）、#33191a + --bad（逾期，与 .badge.bad 同族）、
@@ -1206,6 +1315,8 @@ function renderFirstrun(){
 
 let CURRENT = 'overview';
 async function go(name){
+  // 页签状态保持（task-33）：离开前存滚动位置；回来自动恢复。
+  if (CURRENT && CURRENT !== name) uiSaveScroll();
   CURRENT = name;
   renderNav(name);
   $('#view').innerHTML = '<div class="empty">加载中…</div>';
@@ -1214,6 +1325,9 @@ async function go(name){
   loadFirstrun(true);
   try { await VIEWS[name].render(); }
   catch(e){ $('#view').innerHTML = `<div class="empty">出错：${esc(e.message)}</div>`; }
+  // 回到本页：先恢复滚动位置；再把上次没关的知识点弹窗放回来（主动关闭/评分过的不会弹）。
+  uiRestoreScroll();
+  await uiRestorePopup();
   // 切页后恢复进度条：入库可能跑十几分钟，用户中途刷新或切走再回来，
   // 不该失去"它还在跑"的反馈（后端状态还在，问一句就知道）。
   if (!_progTimer) {
@@ -1222,7 +1336,7 @@ async function go(name){
       if (p && p.active) { renderProgress(p); watchProgress(); }
     } catch(e){}
   }
-}
+}
 
 // ---------------- 问答助手 ----------------
 // 极简 Markdown 渲染。先转义 HTML 再生成标签，顺序不能反——
@@ -1379,10 +1493,19 @@ function evPopEl(){
 // 点击小窗外部关闭。用**捕获**阶段：否则消息里的 onclick/按钮会先处理，
 // 而且冒泡阶段可能被 stopPropagation 拦掉，导致"点外面关不掉"。
 function evPopOutside(e){
-  if (EVPOP && !EVPOP.contains(e.target)) evPopClose();
+  if (!EVPOP || EVPOP.contains(e.target)) return;
+  // task-33：点顶部页签是"切页"，不是"主动关窗"——先把弹窗收起来，
+  // 但保留参数，回到该页签时自动放回来（主动关/评分的清空见 evPopClose/closeModal）。
+  const nav = e.target && e.target.closest ? e.target.closest('#nav') : null;
+  if (nav){ UI_PERSIST.keepNavClose = true; evPopClose(); return; }
+  evPopClose();
 }
 
 function evPopClose(){
+  // task-33：主动关闭（✕/Esc/点窗外）才清掉"待恢复的弹窗"；
+  // 切页签时由 evPopOutside 置 keepNavClose，保留参数。
+  if (!UI_PERSIST.keepNavClose) uiForgetPopup();
+  UI_PERSIST.keepNavClose = false;
   // 顺手清掉"小窗当前挂着哪个知识点"的标记（见 mmOpenKp）：
   // 关掉即作废，否则在途的 /api/mindmap/kp 响应回来会把小窗又弹出来。
   // 卡 C-0036：课件展开状态（dataset.deck / .deck-open）也一起清——
@@ -1928,43 +2051,12 @@ async function viewOverview(){
 
 // ---------------- 复习 ----------------
 async function viewReview(){
-  const {queue} = await api('/api/queue?limit=30');
-  // ⚠ 卡 C-0061：这里原来是"队列为空就 early return"，只渲染一句 empty。
-  // 那样一旦课件级月历接进来，人录完课件打开复习页会**什么都看不到**。
-  // 现在两件事各归各的：
-  //   ① 队列卡片保持原样——空态文案与改动前**逐字一致**；
-  //   ② 无论队列空不空，下面都接上遗忘曲线月历卡片。
-  const queueHtml = !queue.length
-    ? `<div class="empty">今天没有到期的复习 🎉<br>
-      <span class="small">还没有知识点的话，先去「资料」页入库课件并整理知识点；
-      有了知识点后会出现在这里的复习队列。</span><br>
-      <button class="act" id="rv-go-kps">去「知识点」页</button></div>`
-    : `<div class="card">
-      <h2>到期复习队列 · 共 ${queue.length} 项</h2>
-      <table><thead><tr><th>知识点</th><th>科目</th><th>掌握度</th><th>已复习</th>
-      </tr></thead><tbody>${queue.map(x => `
-    <tr>
-      <td><a href="#" onclick="openKp(${x.id});return false">${esc(x.name)}</a>
-        ${x.status==='new'
-          ? '<span class="badge">新</span>'
-          : (x.overdue_days>0?`<span class="badge warn">逾期${x.overdue_days}天</span>`:'')}
-        <div class="small muted">${esc(x.summary||'')}</div></td>
-      <td class="small">${x.subject?esc(x.subject):'—'}</td>
-      <td style="width:150px">
-        <div class="bar"><i style="width:${pct(x.mastery)}%"></i></div>
-        <span class="small muted">${pct(x.mastery)}%</span></td>
-      <td class="small">${x.reps||0} 次</td>
-    </tr>`).join('')}</tbody></table>
-      <div class="sub" style="margin-top:12px">
-        点知识点名称可查看它的原文出处并直接打分。评分 0–2 视为答错（复习间隔归零、
-        稍后重学），3 勉强、4 正确、5 轻松。
-      </div>
-    </div>`;
-  $('#view').innerHTML = queueHtml + deckCalendarCard();
-  const rvGo = $('#rv-go-kps');
-  if (rvGo) rvGo.onclick = () => go('kps');
-  await mountDeckCalendar();
-}
+  // 复习流程的三个阶段（自测 / 三步 / 完成）优先；否则渲染复习首页（课件卡 + 队列 + 月历）。
+  if (REV.stage === 'selftest' && REV.st){ renderReviewSelftest(); return; }
+  if (REV.stage === 'flow' && REV.flowData){ renderReviewFlow(); return; }
+  if (REV.stage === 'done'){ REV.stage = ''; }
+  await renderReviewHome();
+}
 
 // ---------------- 遗忘曲线月历（卡 C-0061） ----------------
 // 粒度是**课件**（documents.id），算法是固定间隔表 1/3/7/16/35 天，
@@ -2133,7 +2225,7 @@ function renderDeckDay(){
     return;
   }
   box.innerHTML = `<table class="dc-list"><thead><tr><th>课件</th><th>轮次</th>
-    <th>状态</th><th style="width:230px">操作</th></tr></thead><tbody>${
+    <th>状态</th><th style="width:320px">操作</th></tr></thead><tbody>${
     list.map(x => `<tr>
       <td><b>${esc(x.title)}</b><div class="small muted">doc#${x.doc_id}</div></td>
       <td class="small">第 ${x.round}/${x.n_rounds} 轮</td>
@@ -2141,11 +2233,15 @@ function renderDeckDay(){
         ? '<span class="badge ok">已完成</span>'
         : (x.overdue > 0 ? `<span class="badge bad">逾期 ${x.overdue} 天</span>`
                          : '<span class="badge">待复习</span>')}</td>
-      <td><button class="ghost" data-act="open" data-doc="${x.doc_id}">打开课件</button>${
+      <td><button class="act" data-act="review" data-doc="${x.doc_id}">开始复习</button>${
+        ' <button class="ghost" data-act="open" data-doc="' + x.doc_id + '">打开课件</button>'}${
         x.state === 'done' ? ''
-        : ` <button class="act" data-act="done" data-plan="${x.plan_id}"` +
+        : ` <button class="ghost" data-act="done" data-plan="${x.plan_id}"` +
           ` data-round="${x.round}">标记完成</button>`}</td>
     </tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('button[data-act="review"]').forEach(b => {
+    b.onclick = () => revStartFromMonth(parseInt(b.dataset.doc, 10) || 0);
+  });
   box.querySelectorAll('button[data-act="open"]').forEach(b => {
     b.onclick = () => openDeckMindmap(parseInt(b.dataset.doc, 10) || 0);
   });
@@ -2153,7 +2249,7 @@ function renderDeckDay(){
     b.onclick = () => markDeckDone(parseInt(b.dataset.plan, 10) || 0,
                                    parseInt(b.dataset.round, 10) || 0);
   });
-}
+}
 
 // 跳到该课件的思维导图：切到知识点页签，并让 mountMindmap 优先打开这一份。
 function openDeckMindmap(docId){
@@ -2175,6 +2271,719 @@ async function markDeckDone(planId, round){
   } catch(e){ toast('标记失败：' + e.message); }
 }
 
+// ================= 复习流程（task-33）：自测 / 三步 runner / 悬浮窗 / 页签保持 =================
+//
+// 用户需求：复习前自测（随机抽一半 KP，总结文字挖名词填空，不能全对=不熟悉）→ 熟悉度；
+// 自测后三步复习（思维导图逐个 KP → 整份课件笔记 → 预习重点名词）；遗忘曲线月历当入口；
+// 全局进度悬浮窗；切页签后知识点弹窗要回来；笔记页按课件+绑定 KP 整理。
+// 后端契约见 /api/review/*（core/review.py 并行开发；未就绪时页面给一句人话，不报 500）。
+
+// ---------------- 页签状态保持（滚动 + 知识点弹窗） ----------------
+const UI_PERSIST = {scroll: {}, popup: null, keepNavClose: false, restoring: false};
+
+function uiSaveScroll(){
+  try { UI_PERSIST.scroll[CURRENT] = window.scrollY || document.documentElement.scrollTop || 0; }
+  catch(e){ /* 滚动位置保存失败不影响切页 */ }
+}
+function uiRestoreScroll(){
+  const y = UI_PERSIST.scroll[CURRENT] || 0;
+  if (!y) return;
+  // 页面内容是异步渲染的：刚渲染完时页面可能还不够高（滚动被钳到 0），
+  // 所以分几次重试，等内容/图片把高度撑起来后再落到目标位置。
+  let tries = 0;
+  const apply = () => {
+    try { window.scrollTo(0, y); } catch(e){}
+    const cur = window.scrollY || document.documentElement.scrollTop || 0;
+    if (Math.abs(cur - y) > 8 && tries < 5){
+      tries++;
+      setTimeout(apply, 160 + tries * 140);
+    }
+  };
+  requestAnimationFrame(apply);
+}
+function uiRememberPopup(p){
+  if (UI_PERSIST.restoring) return;
+  UI_PERSIST.popup = Object.assign({view: CURRENT}, p || {});
+}
+function uiForgetPopup(){ UI_PERSIST.popup = null; }
+async function uiRestorePopup(){
+  const p = UI_PERSIST.popup;
+  if (!p || (p.view || '') !== CURRENT) return;
+  UI_PERSIST.restoring = true;
+  try {
+    if (p.type === 'mm' && typeof mmOpenKp === 'function'){
+      evPopEl().dataset.kpPop = '1';
+      await mmOpenKp(p.kpId, p.name || '', null, false, p.docId);
+    } else if (p.type === 'db' && typeof openKp === 'function'){
+      await openKp(p.id);
+    }
+  } catch(e){ /* 恢复失败就安静放弃，不打断当前页 */ }
+  finally { UI_PERSIST.restoring = false; }
+}
+
+// ---------------- 复习状态（内存 + localStorage） ----------------
+const REV = {stage: '', docId: 0, title: '', flowData: null, st: null, step: 1,
+             kpIdx: 0, termIdx: 0, result: null, coursewares: [],
+             active: false, minimized: false};
+const REV_LS = 'study_agent_review_flow_v1';
+
+function revSave(){
+  try {
+    localStorage.setItem(REV_LS, JSON.stringify({
+      active: !!REV.active, docId: REV.docId, title: REV.title,
+      step: REV.step, kpIdx: REV.kpIdx, termIdx: REV.termIdx,
+      minimized: !!REV.minimized, updated: Date.now(),
+    }));
+  } catch(e){ /* 隐私模式写不进去：不影响本次会话使用 */ }
+}
+function revDrop(){
+  try { localStorage.removeItem(REV_LS); } catch(e){}
+}
+function reviewBoot(){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(REV_LS) || 'null'); } catch(e){ s = null; }
+  if (s && s.active && s.docId){
+    REV.active = true; REV.docId = parseInt(s.docId, 10) || 0;
+    REV.title = String(s.title || ''); REV.step = Math.min(3, Math.max(1, parseInt(s.step, 10) || 1));
+    REV.kpIdx = parseInt(s.kpIdx, 10) || 0; REV.termIdx = parseInt(s.termIdx, 10) || 0;
+    REV.minimized = !!s.minimized;
+  }
+  revFloatUpdate();
+}
+
+// ---------------- 悬浮进度窗 ----------------
+function revFloatUpdate(){
+  let el = document.getElementById('rev-float');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'rev-float';
+    document.body.appendChild(el);
+  }
+  if (!REV.active){ el.classList.remove('on', 'rvf-min'); return; }
+  const f = REV.flowData || {};
+  const nKp = (f.kps || []).length || 0;
+  const stageTxt = REV.stage === 'selftest' ? '自测'
+    : (REV.stage === 'flow' ? ('Step ' + REV.step + '/3') : '复习');
+  const pos = REV.stage === 'flow' && REV.step === 1 && nKp
+    ? (' · ' + Math.min(REV.kpIdx + 1, nKp) + '/' + nKp)
+    : (REV.stage === 'selftest' && REV.st
+        ? (' · ' + (REV.st.n_sample || 0) + ' 条') : '');
+  el.className = 'on' + (REV.minimized ? ' rvf-min' : '');
+  el.innerHTML = REV.minimized
+    ? `<div class="rvf-t">📖 复习中 · ${esc(stageTxt)} · 点开继续</div>`
+    : `<div class="rvf-t">📖 复习中 · ${esc(REV.title || '课件')}</div>
+       <div class="rvf-m">${esc(stageTxt)}${esc(pos)}</div>
+       <div class="rvf-act">
+         <button class="act" data-f="go">继续</button>
+         <button class="ghost" data-f="min">最小化</button>
+         <button class="ghost" data-f="end" style="color:var(--bad);border-color:#4a1f1c">结束</button>
+       </div>`;
+  const act = (f2) => {
+    const b = el.querySelector(`[data-f="${f2}"]`);
+    if (!b) return;
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (f2 === 'go'){ REV.minimized = false; revSave(); go('review'); }
+      else if (f2 === 'min'){ REV.minimized = true; revSave(); revFloatUpdate(); }
+      else if (f2 === 'end'){ revEnd(); }
+    };
+  };
+  if (REV.minimized){ el.onclick = () => { REV.minimized = false; revSave(); revFloatUpdate(); }; }
+  else { el.onclick = null; ['go', 'min', 'end'].forEach(act); }
+}
+
+async function revEnd(){
+  if (REV.active){
+    const ok = await confirmBox('结束本次复习？',
+      '进度会从「复习」页的课件卡重新开始；已得熟悉度会保留。');
+    if (!ok) return;
+  }
+  REV.active = false; REV.stage = ''; REV.step = 1; REV.kpIdx = 0;
+  REV.flowData = null; REV.st = null;
+  revDrop(); revFloatUpdate();
+  toast('已结束本次复习');
+  if (CURRENT === 'review') go('review');
+}
+
+// ---------------- 复习页（课件复习流程 + 原队列 + 月历） ----------------
+async function renderReviewHome(){
+  REV.stage = ''; REV.st = null; REV.result = null;
+  let queue = [];
+  try { queue = (await api('/api/queue?limit=30')).queue || []; } catch(e){ queue = []; }
+  let cws = null, cwErr = '';
+  try {
+    const d = await api('/api/review/coursewares');
+    if (d && d.ok === false) cwErr = d.error || '复习后端还没就绪';
+    else cws = d.items || d.documents || d.coursewares || [];
+    if (!Array.isArray(cws)) cws = [];
+  } catch(e){ cwErr = e.message; }
+  REV.coursewares = cws || [];
+  const queueHtml = reviewQueueHtml(queue);
+  const cwHtml = await reviewCoursewaresHtml(cws, cwErr);
+  $('#view').innerHTML = cwHtml + queueHtml + deckCalendarCard();
+  bindReviewCoursewares();
+  const rvGo = $('#rv-go-kps');
+  if (rvGo) rvGo.onclick = () => go('kps');
+  await mountDeckCalendar();
+}
+
+function reviewQueueHtml(queue){
+  return !queue.length
+    ? `<div class="empty">今天没有到期的复习 🎉<br>
+      <span class="small">还没有知识点的话，先去「资料」页入库课件并整理知识点；
+      有了知识点后会出现在这里的复习队列。</span><br>
+      <button class="act" id="rv-go-kps">去「知识点」页</button></div>`
+    : `<div class="card">
+      <h2>到期复习队列 · 共 ${queue.length} 项</h2>
+      <table><thead><tr><th>知识点</th><th>科目</th><th>掌握度</th><th>已复习</th>
+      </tr></thead><tbody>${queue.map(x => `
+    <tr>
+      <td><a href="#" onclick="openKp(${x.id});return false">${esc(x.name)}</a>
+        ${x.status==='new' ? '<span class="badge">新</span>'
+          : (x.overdue_days>0?`<span class="badge warn">逾期${x.overdue_days}天</span>`:'')}
+        <div class="small muted">${esc(x.summary||'')}</div></td>
+      <td class="small">${x.subject?esc(x.subject):'—'}</td>
+      <td style="width:150px">
+        <div class="bar"><i style="width:${pct(x.mastery)}%"></i></div>
+        <span class="small muted">${pct(x.mastery)}%</span></td>
+      <td class="small">${x.reps||0} 次</td>
+    </tr>`).join('')}</tbody></table>
+      <div class="sub" style="margin-top:12px">
+        点知识点名称可查看它的原文出处并直接打分。评分 0–2 视为答错（复习间隔归零、
+        稍后重学），3 勉强、4 正确、5 轻松。
+      </div>
+    </div>`;
+}
+
+async function reviewCoursewaresHtml(items, err){
+  if (!items.length){
+    return `<div class="card rv-card">
+      <h2>课件复习流程</h2>
+      <div class="rv-empty">${err ? '读不到课件复习数据：' + esc(err) : '还没有可用复习流程的课件。'}
+        <br><span class="small">课件要先在「知识点 → 课件思维导图」里整理过知识点，才会有复习流程。</span>
+        ${err ? `<br><button class="ghost" id="rv-cw-retry">重试</button>` : ''}</div></div>`;
+  }
+  const cards = items.map(it => {
+    const stt = it.selftest || {};
+    const fam = Math.round((parseFloat(stt.familiarity) || 0) * 100);
+    // 熟悉度 = 全对条数 / 抽中条数：卡片显示全对/抽中，避免"100% 但不熟 N"的歧义
+    // （后端持久化文件可能保留历史不熟悉条目，见 task-33 报告 §风险）。
+    const nSample = parseInt(stt.n_sample, 10) || 0;
+    const nFam = Math.round((parseFloat(stt.familiarity) || 0) * nSample);
+    const badge = stt.exists
+      ? `<span class="rv-badge ok">已自测 · 熟悉度 ${fam}%（全对 ${nFam}/${nSample}）</span>`
+      : '<span class="rv-badge warn">未自测</span>';
+    const terms = it.terms || {};
+    const ch = it.chapter || {};
+    const chName = String(ch.name || '');
+    const chTxt = (ch.no || chName)
+      ? (/第\s*\d+\s*章/.test(chName) ? chName : `第${ch.no || '?'}章 ${chName}`) : '';
+    const meta = [`${it.n_kps || 0} 条知识点`,
+                  terms.available ? `预习名词 ${terms.n || 0} 个` : '暂无预习名词',
+                  chTxt].filter(Boolean).join(' · ');
+    const nextAct = stt.exists ? 'flow' : 'selftest';
+    const mainTxt = stt.exists ? '继续复习' : '开始自测';
+    return `<div class="rv-cw">
+      <div class="rv-cw-h"><b>${esc(it.title || ('doc#' + it.doc_id))}</b>${badge}</div>
+      <div class="rv-cw-meta">${meta}</div>
+      <div class="rv-cw-act">
+        <button class="act" data-doc="${it.doc_id}" data-act="${nextAct}">${mainTxt}</button>
+        ${stt.exists ? `<button class="ghost" data-doc="${it.doc_id}" data-act="selftest">重新自测</button>` : ''}
+      </div></div>`;
+  }).join('');
+  return `<div class="card rv-card">
+    <h2>课件复习流程 <span class="small muted">自测 → 知识点 → 笔记 → 重点名词</span></h2>
+    <div class="small muted" style="margin-top:4px">
+      自测随机抽该课件一半知识点、挖名词填空；不能全对的知识点算「不熟悉」，
+      熟悉度 = 全对条数 / 抽中条数。${err ? '（后端异常：' + esc(err) + '）' : ''}</div>
+    <div class="rv-cws">${cards}</div></div>`;
+}
+
+function bindReviewCoursewares(){
+  const retry = $('#rv-cw-retry');
+  if (retry) retry.onclick = () => go('review');
+  $('#view').querySelectorAll('.rv-cw-act button[data-doc]').forEach(b => {
+    b.onclick = () => {
+      const doc = parseInt(b.dataset.doc, 10) || 0;
+      if (!doc) return;
+      if (b.dataset.act === 'flow') revStartFlow(doc, {step: 1});
+      else revStartSelftest(doc);
+    };
+  });
+}
+
+// 月历某天的课件 → 「开始复习」：已有自测直接三步，没有先自测。
+async function revStartFromMonth(docId){
+  if (!docId) return;
+  try {
+    const st = await api('/api/review/selftest/status?doc_id=' + encodeURIComponent(docId));
+    if (st && st.ok !== false && st.exists) return revStartFlow(docId, {step: 1});
+  } catch(e){ /* 状态读不到就按未自测处理 */ }
+  return revStartSelftest(docId);
+}
+
+// ---------------- 自测 ----------------
+async function revStartSelftest(docId){
+  try {
+    const d = await api('/api/review/selftest?doc_id=' + encodeURIComponent(docId));
+    if (!d || d.ok === false) throw new Error((d && d.error) || '自测数据读不到');
+    REV.st = d; REV.stage = 'selftest'; REV.result = null;
+    REV.docId = parseInt(d.doc_id || docId, 10) || docId;
+    REV.title = d.title || '';
+    REV.active = true; REV.minimized = false;
+    revSave(); revFloatUpdate();
+    await go('review');
+  } catch(e){ toast('开始自测失败：' + e.message); }
+}
+
+function reviewSegmentsHtml(kp, qi){
+  const segs = kp.segments || [];
+  if (!segs.length) return `<span>${esc(kp.name || '')}（这条没有可挖空的总结文字）</span>`;
+  return segs.map(s => s.t === 'blank'
+    ? `<input class="rv-blank" data-kp="${esc(kp.kp_id)}" data-i="${s.i}"
+        data-answer="${esc(s.answer)}" placeholder="____" autocomplete="off"
+        aria-label="第 ${qi + 1} 题 空 ${s.i + 1}">`
+    : `<span>${esc(s.text || '')}</span>`).join('');
+}
+
+function renderReviewSelftest(){
+  const d = REV.st || {};
+  const res = REV.result;
+  // 后端 start_selftest 同时给 kps（摘要）与 items（带 segments）；优先 items。
+  const kps = d.items || d.kps || [];
+  const cards = kps.map((kp, qi) => {
+    let ansHtml = '';
+    if (res){
+      const r = (res.results || []).find(x => String(x.kp_id) === String(kp.kp_id)) || {};
+      const ok = !!r.correct;
+      ansHtml = `<div class="rv-q-ans">
+        <span class="${ok ? 'ok' : 'bad'}">${ok ? '✓ 全对（熟悉）' : '✗ 有错（不熟悉）'}</span>
+        · 正确答案：${(r.answers || []).map(x => esc(x)).join(' / ')}</div>`;
+    }
+    return `<div class="rv-q" data-kp="${esc(kp.kp_id)}">
+      <div class="rv-q-h"><b>${qi + 1}. ${esc(kp.name || kp.kp_id)}</b>
+        ${kp.unfamiliar ? '<span class="rv-badge warn">上次不熟</span>' : ''}</div>
+      <div class="rv-q-text">${reviewSegmentsHtml(kp, qi)}</div>
+    </div>${ansHtml}`;
+  }).join('');
+  const resultHtml = res ? `<div class="rv-res">
+      <div>本次熟悉度 <span class="big">${Math.round((parseFloat(res.familiarity) || 0) * 100)}%</span>
+        <span class="small muted">（全对 ${res.n_familiar || 0} / 抽中 ${res.n_sample || 0} 条）</span></div>
+      ${(res.unfamiliar_ids || []).length ? `<div class="small" style="margin-top:6px;color:var(--warn)">
+        不熟悉：${(res.unfamiliar_ids || []).map(id => {
+          const kp = kps.find(x => String(x.kp_id) === String(id)) || {};
+          return esc(kp.name || id);
+        }).join('、')}</div>` : '<div class="small" style="margin-top:6px;color:var(--ok)">全部答对，这份课件算熟悉 🎉</div>'}
+    </div>` : '';
+  const actions = res
+    ? `<button class="act" id="rv-st-flow">进入三步复习</button>
+       <button class="ghost" id="rv-st-again">再测一次</button>
+       <button class="ghost" id="rv-st-home">返回复习页</button>`
+    : `<button class="act" id="rv-st-submit">提交自测</button>
+       <button class="ghost" id="rv-st-home">返回复习页</button>`;
+  $('#view').innerHTML = `
+    <div class="card rv-card">
+      <div class="rv-st-head"><h2>📝 课件自测 · ${esc(d.title || '')}</h2>
+        <span class="rv-badge">随机抽 ${d.n_sample || kps.length} / ${d.n_total || kps.length} 条知识点</span></div>
+      <div class="rv-st-tip">用总结文字挖空，填出被挖掉的名词（Tab 切换、Enter 提交）。
+        <b>不能全部答对的知识点 = 不熟悉</b>；熟悉度 = 全对条数 / 抽中条数。</div>
+      <div class="rv-q-list">${cards}</div>
+      ${resultHtml}
+      <div class="rv-nav">${actions}</div>
+    </div>`;
+  bindReviewSelftest();
+}
+
+function bindReviewSelftest(){
+  const home = $('#rv-st-home');
+  if (home) home.onclick = () => { REV.stage = ''; REV.st = null; go('review'); };
+  const again = $('#rv-st-again');
+  if (again) again.onclick = () => revStartSelftest(REV.docId);
+  const flow = $('#rv-st-flow');
+  if (flow) flow.onclick = () => revStartFlow(REV.docId, {step: 1});
+  const submit = $('#rv-st-submit');
+  if (submit) submit.onclick = () => submitReviewSelftest();
+  // Enter/Tab：Enter 跳到下一个空，最后一个空 Enter 直接提交
+  const inputs = [...document.querySelectorAll('#view input.rv-blank')];
+  inputs.forEach((inp, idx) => {
+    inp.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (idx < inputs.length - 1) inputs[idx + 1].focus();
+      else submitReviewSelftest();
+    });
+  });
+}
+
+async function submitReviewSelftest(){
+  const d = REV.st;
+  if (!d) return;
+  const answers = {};
+  document.querySelectorAll('#view .rv-q').forEach(q => {
+    const kp = q.dataset.kp;
+    answers[kp] = [];
+    q.querySelectorAll('input.rv-blank').forEach(inp => {
+      answers[kp][parseInt(inp.dataset.i, 10) || 0] = (inp.value || '').trim();
+    });
+  });
+  const btn = $('#rv-st-submit');
+  if (btn){ btn.disabled = true; btn.textContent = '判分中…'; }
+  try {
+    const r = await api('/api/review/selftest/submit', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: REV.docId, session_id: d.session_id, answers: answers})});
+    if (!r || r.ok === false) throw new Error((r && r.error) || '提交失败');
+    REV.result = r;
+    renderReviewSelftest();
+    toast(`自测完成：熟悉度 ${Math.round((parseFloat(r.familiarity) || 0) * 100)}%`);
+  } catch(e){
+    toast('自测提交失败：' + e.message);
+    if (btn){ btn.disabled = false; btn.textContent = '提交自测'; }
+  }
+}
+
+// ---------------- 三步复习 runner ----------------
+async function revStartFlow(docId, opts){
+  opts = opts || {};
+  try {
+    const d = await api('/api/review/flow?doc_id=' + encodeURIComponent(docId));
+    if (!d || d.ok === false) throw new Error((d && d.error) || '复习数据读不到');
+    REV.flowData = d; REV.stage = 'flow'; REV.active = true;
+    REV.docId = parseInt((d.doc || {}).id || docId, 10) || docId;
+    REV.title = (d.doc || {}).title || '';
+    REV.step = Math.min(3, Math.max(1, parseInt(opts.step, 10) || 1));
+    REV.kpIdx = Math.max(0, parseInt(opts.idx, 10) || 0);
+    REV.termIdx = 0; REV.minimized = false;
+    revSave(); revFloatUpdate();
+    await go('review');
+  } catch(e){ toast('复习数据读取失败：' + e.message); }
+}
+
+function reviewNotesStepHtml(notes){
+  const groups = ((notes && notes.groups) || []).filter(g => (g.notes || []).length);
+  const unbound = (notes && notes.unbound) || [];
+  const grp = groups.map(g => {
+    const rows = (g.notes || []).map(n => `<div class="rv-note-row">
+      ${esc(n.title || n.file || '')}
+      <span class="rv-note-meta">${esc(n.source_label || '')}${n.chars ? ' · ' + n.chars + ' 字' : ''}
+        ${n.created || n.mtime ? ' · ' + esc(fmtTime(n.created || n.mtime)) : ''}</span>
+      </div>`).join('');
+    return `<details class="rv-note-grp" ${rows ? 'open' : ''}>
+      <summary>${esc(g.kp_name || g.kp_id || '未命名知识点')} · ${(g.notes || []).length} 篇</summary>
+      ${rows || '<div class="rv-empty">这条知识点没有绑定笔记。</div>'}</details>`;
+  }).join('');
+  const un = unbound.length ? `<details class="rv-note-grp">
+      <summary>未绑定具体知识点 · ${unbound.length} 篇</summary>
+      ${unbound.map(n => `<div class="rv-note-row">${esc(n.title || n.file || '')}
+        <span class="rv-note-meta">${esc(n.source_label || '')}${n.chars ? ' · ' + n.chars + ' 字' : ''}</span>
+      </div>`).join('')}</details>` : '';
+  return grp + un || '<div class="rv-empty">这份课件还没有笔记；复习时可以直接跳过这一步。</div>';
+}
+
+function renderReviewFlow(){
+  const f = REV.flowData;
+  if (!f){ $('#view').innerHTML = '<div class="empty">正在读取复习数据…</div>'; revResumeFlow(); return; }
+  const kps = f.kps || [];
+  const stepChips = [1, 2, 3].map(i => `<span class="rv-step${REV.step === i ? ' on' : (REV.step > i ? ' done' : '')}">
+     ${i === 1 ? '① 知识点' : i === 2 ? '② 笔记' : '③ 重点名词'}</span>`).join('');
+  let body = '';
+  if (REV.step === 1){
+    const kp = kps[Math.min(REV.kpIdx, Math.max(0, kps.length - 1))] || {};
+    body = `<div class="rv-kp">
+      <h3>${esc(kp.name || '（没有知识点）')}</h3>
+      <div class="rv-kp-meta">导图位置 ${esc((kp.node_path || []).join(' › ') || '—')}
+        ${(kp.pages || []).length ? ' · 页码 ' + (kp.pages || []).map(p => 'p.' + p).join('、') : ''}
+        ${kp.note_count ? ' · 笔记 ' + kp.note_count + ' 条' : ''}
+        ${kp.unfamiliar ? ' · <span style="color:var(--warn)">自测不熟悉</span>' : ''}</div>
+      <div class="rv-kp-sum">${esc(kp.summary || '（这条没有总结正文）')}</div>
+      ${(kp.points || []).length ? `<ul>${(kp.points || []).map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+    </div>`;
+  } else if (REV.step === 2){
+    body = reviewNotesStepHtml(f.notes || {}) +
+      `<div class="row" style="margin-top:10px">
+        <button class="act" id="rv-flow-next">进入第三步：重点名词</button></div>`;
+  } else if (REV.step === 3){
+    const items = ((f.terms || {}).items) || [];
+    if (!items.length){
+      body = `<div class="rv-empty">这份课件没有可用的预习重点名词（教材预习产物里还没有 terms）。
+        这一步可以直接完成复习。</div>
+        <div class="row" style="margin-top:10px"><button class="act" id="rv-flow-done">完成复习</button></div>`;
+    } else {
+      const i = Math.min(REV.termIdx, items.length - 1);
+      const t = items[i];
+      const key = i + ':' + (t.term || '');
+      const open = REV.revealed && REV.revealed[key];
+      body = `<div class="rv-term" id="rv-term">
+        <div class="rv-term-en">${esc(t.en || '')}</div>
+        <div class="rv-term-t">${esc(t.term || '')}</div>
+        ${open ? `<div class="rv-term-def">${esc(t.def || '')}</div>
+          ${t.why ? `<div class="rv-term-why">为什么重要：${esc(t.why)}</div>` : ''}`
+          : `<div class="small muted" style="margin-top:10px">点「显示解释」看定义与重要性</div>`}
+      </div>
+      <div class="rv-nav" style="max-width:560px;margin:10px auto 0">
+        <button class="ghost" id="rv-term-prev" ${i <= 0 ? 'disabled' : ''}>‹ 上一个</button>
+        <button class="act" id="rv-term-show">${open ? '收起解释' : '显示解释'}</button>
+        <button class="ghost" id="rv-term-next" ${i >= items.length - 1 ? 'disabled' : ''}>下一个 ›</button>
+        <span class="rv-prog">${i + 1} / ${items.length}</span>
+      </div>
+      <div class="row" style="max-width:560px;margin:8px auto 0">
+        <button class="ghost" id="rv-flow-done">完成复习</button></div>`;
+    }
+  }
+  const nKp = kps.length;
+  $('#view').innerHTML = `
+    <div class="card rv-card">
+      <div class="rv-flow-head"><h2>📖 ${esc(REV.title || '课件复习')}</h2>
+        <button class="ghost" id="rv-flow-home">退出复习</button></div>
+      <div class="rv-steps">${stepChips}</div>
+      ${body}
+      ${REV.step === 1 ? `<div class="rv-nav">
+        <button class="ghost" id="rv-kp-prev" ${REV.kpIdx <= 0 ? 'disabled' : ''}>‹ 上一个</button>
+        <button class="ghost" id="rv-kp-think">再想想</button>
+        <button class="act" id="rv-kp-remember">记住了</button>
+        ${REV.kpIdx >= nKp - 1
+          ? `<button class="act" id="rv-flow-next">进入第二步：整份课件笔记</button>` : ''}
+        <span class="rv-prog">${nKp ? (Math.min(REV.kpIdx + 1, nKp) + ' / ' + nKp) : '0 / 0'}</span>
+      </div>` : ''}
+    </div>`;
+  bindReviewFlow();
+}
+
+function revFlowGo(step){
+  REV.step = Math.min(3, Math.max(1, step));
+  if (REV.step === 1) REV.kpIdx = Math.min(REV.kpIdx, Math.max(0, (REV.flowData.kps || []).length - 1));
+  revSave(); revFloatUpdate(); renderReviewFlow();
+}
+
+function bindReviewFlow(){
+  const home = $('#rv-flow-home');
+  if (home) home.onclick = () => { REV.stage = ''; REV.flowData = null; go('review'); };
+  const prev = $('#rv-kp-prev');
+  if (prev && REV.kpIdx > 0) prev.onclick = () => { REV.kpIdx--; revSave(); revFloatUpdate(); renderReviewFlow(); };
+  const nxt = $('#rv-kp-remember');
+  if (nxt) nxt.onclick = () => {
+    if (REV.kpIdx < (REV.flowData.kps || []).length - 1){ REV.kpIdx++; revSave(); revFloatUpdate(); renderReviewFlow(); }
+    else toast('最后一个知识点：可点「进入第二步」');
+  };
+  const think = $('#rv-kp-think');
+  if (think) think.onclick = () => {
+    if (REV.kpIdx < (REV.flowData.kps || []).length - 1){ REV.kpIdx++; revSave(); revFloatUpdate(); renderReviewFlow(); }
+    else toast('最后一个知识点：可点「进入第二步」');
+  };
+  const stepNext = $('#rv-flow-next');
+  if (stepNext) stepNext.onclick = () => revFlowGo(REV.step + 1);
+  const show = $('#rv-term-show');
+  if (show) show.onclick = () => {
+    const items = (REV.flowData.terms || {}).items || [];
+    const i = Math.min(REV.termIdx, items.length - 1);
+    const key = i + ':' + (items[i].term || '');
+    if (!REV.revealed) REV.revealed = {};
+    REV.revealed[key] = !REV.revealed[key];
+    renderReviewFlow();
+  };
+  const tp = $('#rv-term-prev');
+  if (tp && REV.termIdx > 0) tp.onclick = () => { REV.termIdx--; revSave(); renderReviewFlow(); };
+  const tn = $('#rv-term-next');
+  if (tn) tn.onclick = () => {
+    const items = (REV.flowData.terms || {}).items || [];
+    if (REV.termIdx < items.length - 1){ REV.termIdx++; revSave(); renderReviewFlow(); }
+  };
+  const done = $('#rv-flow-done');
+  if (done) done.onclick = () => renderReviewDone();
+}
+
+async function revResumeFlow(){
+  if (!REV.docId) return;
+  try {
+    const d = await api('/api/review/flow?doc_id=' + encodeURIComponent(REV.docId));
+    if (!d || d.ok === false) throw new Error((d && d.error) || '读不到复习数据');
+    REV.flowData = d; REV.title = (d.doc || {}).title || REV.title;
+    renderReviewFlow();
+  } catch(e){ $('#view').innerHTML = `<div class="empty">复习数据读取失败：${esc(e.message)}</div>`; }
+}
+
+function renderReviewDone(){
+  const f = REV.flowData || {};
+  const nKp = (f.kps || []).length;
+  const nNotes = ((f.notes || {}).groups || []).reduce((a, g) => a + (g.notes || []).length, 0);
+  const nTerms = ((f.terms || {}).items || []).length;
+  const fam = REV.result ? Math.round((parseFloat(REV.result.familiarity) || 0) * 100) : null;
+  const unl = (REV.result && REV.result.unfamiliar_ids) || [];
+  REV.stage = 'done';
+  revSave();
+  const sug = [];
+  if (unl.length) sug.push(`明天再刷 ${unl.length} 条「不熟悉」的知识点（自测里标黄的）。`);
+  if (nNotes) sug.push('把这份课件的笔记再翻一遍，尤其是自己写过的易错点。');
+  if (nTerms) sug.push('重点名词按「能一句话解释」的标准过第二遍。');
+  if (!sug.length) sug.push('保持这个节奏：先自测、再按知识点过、最后看名词。');
+  $('#view').innerHTML = `
+    <div class="rv-done">
+      <h2>✅ 本次复习完成</h2>
+      <div class="rv-done-line">课件：<b>${esc(REV.title || '')}</b></div>
+      ${fam != null ? `<div class="rv-done-line">本次自测熟悉度：<b>${fam}%</b>
+        （抽中 ${REV.result.n_sample || 0} 条，不熟 ${unl.length} 条）</div>`
+        : '<div class="rv-done-line">本次未做自测，只完成了三步复习。</div>'}
+      <div class="rv-done-line">复习条目：知识点 ${nKp} 条 · 笔记 ${nNotes} 篇 · 重点名词 ${nTerms} 个</div>
+      <div class="rv-done-sug">建议：${sug.map(s => esc(s)).join(' ')}</div>
+      <div class="row" style="margin-top:14px">
+        <button class="act" id="rv-done-home">回到复习页</button>
+        <button class="ghost" id="rv-done-end">结束本次复习</button>
+      </div>
+    </div>`;
+  REV.active = false; revDrop(); revFloatUpdate();
+  const h = $('#rv-done-home');
+  if (h) h.onclick = () => { REV.stage = ''; go('review'); };
+  const e = $('#rv-done-end');
+  if (e) e.onclick = () => { REV.stage = ''; go('review'); };
+}
+
+// ---------------- 笔记页签：按课件 → 绑定 KP 分组 ----------------
+function noteKpNamesFromTree(tree){
+  const out = {};
+  const walk = (ns) => {
+    (ns || []).forEach(n => {
+      if (!n) return;
+      if (n.lkp_id) out[String(n.lkp_id)] = n.lkp_name || n.name || '';
+      if (Array.isArray(n.lkp_ids)) n.lkp_ids.forEach((id, i) => {
+        out[String(id)] = (n.lkp_names || [])[i] || n.name || '';
+      });
+      if (n.children) walk(n.children);
+    });
+  };
+  walk(tree);
+  return out;
+}
+
+async function viewNotes(){
+  const [{notes}, docsRes] = await Promise.all([
+    api('/api/notes'),
+    api('/api/docs').catch(() => ({documents: []})),
+  ]);
+  const docs = (docsRes && docsRes.documents) || [];
+  const docTitle = {};
+  docs.forEach(d => { docTitle[String(d.id)] = d.title || ('doc#' + d.id); });
+  if (!notes || !notes.length){
+    $('#view').innerHTML = `<div class="empty">还没有笔记。<br>
+      <span class="small">笔记会一直留在这里，下次打开还能看。<br>
+      在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。</span><br>
+      <button class="act" id="nt-go-kps">去「知识点」页</button></div>`;
+    const b = $('#nt-go-kps');
+    if (b) b.onclick = () => go('kps');
+    return;
+  }
+  const byDoc = new Map();
+  notes.forEach(n => {
+    const did = parseInt(n.doc_id || 0, 10) || 0;
+    if (!byDoc.has(did)) byDoc.set(did, []);
+    byDoc.get(did).push(n);
+  });
+  // 拉每份课件的导图树，把 kp_id → 知识点名（失败就用 kp_id，绝不阻塞渲染）
+  const kpNames = {};
+  await Promise.all([...byDoc.keys()].filter(Boolean).map(async did => {
+    try {
+      const mm = await api('/api/mindmap?doc_id=' + encodeURIComponent(did));
+      Object.assign(kpNames, noteKpNamesFromTree(mm.tree || []));
+    } catch(e){ /* 名字拿不到不影响按 kp_id 分组 */ }
+  }));
+  const docIds = [...byDoc.keys()].sort((a, b) => (a ? (b ? a - b : -1) : 1));
+  const groupsHtml = docIds.map(did => {
+    const list = byDoc.get(did).slice();
+    list.sort((a, b) => (b.created || b.mtime || 0) - (a.created || a.mtime || 0));
+    const nChars = list.reduce((a, n) => a + (n.chars || 0), 0);
+    const latest = list[0] ? (list[0].created || list[0].mtime || 0) : 0;
+    const byKp = new Map();
+    list.forEach(n => {
+      const kid = String(n.kp_id || '');
+      if (!byKp.has(kid)) byKp.set(kid, []);
+      byKp.get(kid).push(n);
+    });
+    const kpIds = [...byKp.keys()].sort((a, b) => {
+      if (!a) return 1; if (!b) return -1; return a.localeCompare(b, 'zh');
+    });
+    const kpHtml = kpIds.map(kid => {
+      const ns = byKp.get(kid);
+      const kpName = kid ? (kpNames[kid] || ('知识点 ' + kid)) : '未绑定知识点';
+      const rows = ns.map(n => noteRowHtml(n)).join('');
+      return `<details class="nt-kp" data-search="${esc(((kid ? kpName : '未绑定') + ' ' + ns.map(x => (x.title || '') + ' ' + (x.source_label || '')).join(' ')).toLowerCase())}">
+        <summary>${kid ? '🔗 ' : ''}${esc(kpName)} · ${ns.length} 篇</summary>
+        ${rows}</details>`;
+    }).join('');
+    const title = did ? (docTitle[String(did)] || ('doc#' + did)) : '未绑定课件';
+    return `<details class="nt-grp" data-doc="${did}" open data-search="${esc(((did ? title : '未绑定课件') + ' ' + list.map(x => (x.title || '') + ' ' + (x.source_label || '')).join(' ')).toLowerCase())}">
+      <summary>📚 ${esc(title)} <span class="nt-g-meta">${list.length} 篇 · ${nChars} 字${
+        latest ? ' · 最近 ' + esc(fmtTime(latest)) : ''}</span>
+        ${did ? `<button class="ghost" data-review-notes="${did}" style="margin-left:8px;vertical-align:-2px">复习这份课件的笔记</button>` : ''}
+      </summary>
+      ${kpHtml}</details>`;
+  }).join('');
+  $('#view').innerHTML = `<div class="card rv-card">
+    <div class="nt-head"><h2>笔记 · ${notes.length} 篇</h2>
+      <input class="nt-search" id="nt-q" placeholder="搜索笔记标题 / 来源 / 知识点…" autocomplete="off">
+      <button class="ghost" id="nt-go-kps">去「知识点」页</button></div>
+    <div class="small muted" style="margin-bottom:10px">
+      按<b>课件 → 绑定知识点</b>分组；没绑定的笔记归到「未绑定」。点标题看全文，
+      点「跳到知识点」打开对应知识点窗口。</div>
+    <div id="nt-groups">${groupsHtml}</div>
+    <div class="nt-empty" id="nt-nomatch" style="display:none">没有匹配的笔记。</div>
+  </div>`;
+  bindReviewNotes();
+}
+
+function noteRowHtml(n){
+  const canJump = !!(n.kp_id && n.doc_id);
+  const meta = [noteSourceText(n), n.chars ? n.chars + ' 字' : '',
+                fmtTime(n.created || n.mtime)].filter(Boolean).join(' · ');
+  return `<div class="nt-note" data-search="${esc(((n.title || '') + ' ' + (noteSourceText(n) || '') + ' ' + (n.kp_id || '')).toLowerCase())}">
+    <a href="#" data-note="${esc(n.file)}">${esc(n.title)}</a>
+    <span class="nt-meta">${esc(meta)}</span>
+    ${canJump ? `<span class="nt-act"><button class="ghost" data-jump="${esc(n.doc_id)}"
+      data-kp="${esc(n.kp_id)}">跳到知识点</button></span>` : ''}
+  </div>`;
+}
+
+function bindReviewNotes(){
+  const q = $('#nt-q');
+  if (q) q.oninput = () => {
+    const v = (q.value || '').trim().toLowerCase();
+    let hit = 0;
+    document.querySelectorAll('#view .nt-note').forEach(row => {
+      const ok = !v || (row.dataset.search || '').indexOf(v) >= 0;
+      row.style.display = ok ? '' : 'none';
+      if (ok) hit++;
+    });
+    document.querySelectorAll('#view .nt-kp').forEach(kp => {
+      const rows = [...kp.querySelectorAll('.nt-note')];
+      const vis = rows.filter(r => r.style.display !== 'none').length;
+      kp.style.display = (v && !vis) ? 'none' : '';
+      if (v && vis) kp.open = true;
+    });
+    document.querySelectorAll('#view .nt-grp').forEach(g => {
+      const rows = [...g.querySelectorAll('.nt-note')];
+      const vis = rows.filter(r => r.style.display !== 'none').length;
+      g.style.display = (v && !vis) ? 'none' : '';
+      if (v && vis) g.open = true;
+    });
+    const no = $('#nt-nomatch');
+    if (no) no.style.display = (v && !hit) ? '' : 'none';
+  };
+  $('#view').querySelectorAll('a[data-note]').forEach(a => {
+    a.onclick = e => { e.preventDefault(); openNote(a.dataset.note); };
+  });
+  $('#view').querySelectorAll('button[data-jump]').forEach(b => {
+    b.onclick = () => mmJumpToKp(parseInt(b.dataset.jump, 10), b.dataset.kp, '');
+  });
+  $('#view').querySelectorAll('button[data-review-notes]').forEach(b => {
+    b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      revStartFlow(parseInt(b.dataset.reviewNotes, 10), {step: 2});
+    };
+  });
+  const g = $('#nt-go-kps');
+  if (g) g.onclick = () => go('kps');
+}
+
+// boot：刷新页面后如果上次有进行中的复习，右下角先把悬浮窗挂出来（数据点「继续」再取）
+try { reviewBoot(); } catch(e){ /* 启动恢复失败不影响其它页面 */ }
 // ---------------- 资料 ----------------
 const fmtSize = b => b < 1024 ? b + ' B'
   : (b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(1) + ' MB');
@@ -4913,6 +5722,8 @@ async function mmOpenKp(kpId, name, el, keepDeck, docId){
     'mmkp-has-teach', 'mm-teach-open');
   MMPOP.anchor = el;
   MMPOP.docId = did;
+  // task-33：记住这个知识点弹窗的参数；切页签回来自动恢复（主动关闭即清空）。
+  uiRememberPopup({type: 'mm', kpId: String(kpId), name: name || '', docId: did});
   evPopMount(el, `<div class="ph"><div class="src">
       <div class="loc">${esc(name || kpId)}</div>
       <div class="hdg">正在读取知识点总结…</div>
@@ -6183,6 +6994,8 @@ function bindKpForm(){
 }
 
 async function openKp(id){
+  // task-33：数据库知识点弹窗同样可跨页签恢复；评分/关闭时由 closeModal 清空。
+  uiRememberPopup({type: 'db', id: id});
   const {kp} = await api('/api/kp?id='+id);
   const src = (kp.sources||[]).map(s => `
     <div class="hit">
@@ -6906,81 +7719,7 @@ function noteSourceText(n){
 
 
 
-async function viewNotes(){
-
-  const {notes} = await api('/api/notes');
-
-  if (!notes.length){
-
-    $('#view').innerHTML = `<div class="empty">还没有笔记。<br>
-
-      <span class="small">笔记会一直留在这里，下次打开还能看。<br>
-
-      在「知识点」页打开任一知识点，点【记入笔记】就能写第一条。</span><br>
-
-      <button class="act" id="nt-go-kps">去「知识点」页</button></div>`;
-
-    const b = $('#nt-go-kps');
-
-    if (b) b.onclick = () => go('kps');
-
-    return;
-
-  }
-
-  const rows = notes.map(n => {
-
-    const canJump = !!(n.kp_id && n.doc_id);
-
-    return `<tr>
-
-      <td><a href="#" data-note="${esc(n.file)}">${esc(n.title)}</a></td>
-
-      <td class="small">${esc(noteSourceText(n))}${canJump ? `<br>
-
-        <button class="ghost" style="margin-top:4px" data-jump="${esc(n.doc_id)}"
-
-          data-kp="${esc(n.kp_id)}"
-
-          title="打开绑定了这条笔记的知识点窗口">跳到知识点窗口</button>` : ''}</td>
-
-      <td class="small muted">${esc(fmtTime(n.created || n.mtime))}</td>
-
-      <td class="small">${n.chars}</td>
-
-      <td class="small muted">${esc(n.file)}</td></tr>`;
-
-  }).join('');
-
-  $('#view').innerHTML = `
-
-    <div class="card"><h2>笔记 · ${notes.length} 篇</h2>
-
-      <div class="small muted" style="margin-bottom:8px">
-
-        时间 = 这条笔记<b>记下的时刻</b>（front-matter 的 created；老笔记回落到文件
-
-        修改时间）· 来源 = 从哪个知识点窗口写的，或是哪份课件的 AI 答疑。</div>
-
-    <table><thead><tr><th>标题</th><th>来源</th><th>记录时间</th><th>字数</th>
-
-      <th>文件</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-
-  $('#view').querySelectorAll('a[data-note]').forEach(a => {
-
-    a.onclick = e => { e.preventDefault(); openNote(a.dataset.note); };
-
-  });
-
-  $('#view').querySelectorAll('button[data-jump]').forEach(b => {
-
-    b.onclick = () => mmJumpToKp(parseInt(b.dataset.jump), b.dataset.kp, '');
-
-  });
-
-}
-
-
+// task-33：viewNotes 已改版（按课件→绑定 KP 分组，见复习流程区块）。
 
 async function openNote(name){
 
@@ -7618,7 +8357,7 @@ async function subjRenameGo(){
 
 // ---------------- 通用 ----------------
 function modal(html){ $('#modalbox').innerHTML = html; $('#modal').classList.add('on'); }
-function closeModal(){ $('#modal').classList.remove('on'); }
+function closeModal(){ $('#modal').classList.remove('on'); uiForgetPopup(); }
 function toast(msg){
   const el = document.createElement('div');
   el.textContent = msg;
@@ -11231,6 +11970,109 @@ def _teach_after_kp_build(doc_id):
             fn(int(doc_id))
     except Exception:  # noqa: BLE001
         pass
+
+
+# ---------------- 复习流程（task-33）：/api/review/* 五条路由胶水 ----------------
+# core/review.py 并行交付（零 AI 调用）：只做惰性 import + 统一 JSON 降级，
+# 后端函数抛错一律 {"ok": false, "error": ...}（配合 _json_auto 的 _code 不 500）。
+# 路由职责（见 routes）：
+#   GET  /api/review/coursewares      只读锁内 conn → list_courseware_reviews(conn)
+#   GET  /api/review/flow             只读锁内 conn → build_flow(conn, doc_id)
+#   GET  /api/review/selftest         锁外 → start_selftest(doc_id)（进程内 session，不写盘）
+#   POST /api/review/selftest/submit  锁外 → submit_selftest(...)（原子写 logs/review/*.json）
+#   GET  /api/review/selftest/status  锁外 → selftest_status(doc_id)（纯读文件）
+
+
+def _review_mod():
+    from core import review as _rm
+    return _rm
+
+
+def _review_err(what, e):
+    return {"ok": False, "error": "%s：%s" % (what, e)}
+
+
+def api_review_coursewares(conn):
+    """复习页课件卡数据：有 KP 产物的课件 + 自测状态 + 名词数 + 映射章节。"""
+    try:
+        items = _review_mod().list_courseware_reviews(conn)
+    except Exception as e:  # noqa: BLE001
+        return _review_err("读不到复习课件列表", e)
+    return {"ok": True, "items": items if isinstance(items, list) else []}
+
+
+def api_review_flow(conn, doc_id):
+    """三步复习数据：按导图顺序的 KP + 笔记分组 + 预习重点名词 + 自测摘要。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    try:
+        r = _review_mod().build_flow(conn, doc_id)
+    except Exception as e:  # noqa: BLE001
+        return _review_err("读不到复习流程数据", e)
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "复习流程返回异常"}
+    r.setdefault("ok", True)
+    return r
+
+
+def api_review_selftest(doc_id):
+    """开始一次自测：随机抽一半 KP + 挖空 segments（不写盘；session 在进程内存）。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    try:
+        r = _review_mod().start_selftest(doc_id)
+    except Exception as e:  # noqa: BLE001
+        return _review_err("自测生成失败", e)
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "自测返回异常"}
+    return r
+
+
+def api_review_selftest_submit(payload):
+    """提交自测答案：判分 + 熟悉度 + 持久化（锁外调用，会原子写文件）。"""
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    session_id = str(payload.get("session_id") or "").strip()
+    answers = payload.get("answers")
+    if doc_id <= 0 or not session_id:
+        return {"ok": False, "error": "缺少 doc_id 或 session_id"}
+    if not isinstance(answers, (dict, list)):
+        return {"ok": False, "error": "answers 必须是对象或数组"}
+    try:
+        r = _review_mod().submit_selftest(doc_id, session_id, answers)
+    except Exception as e:  # noqa: BLE001
+        return _review_err("自测提交失败", e)
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "自测提交返回异常"}
+    return r
+
+
+def api_review_selftest_status(doc_id):
+    """上次自测摘要（持久化文件；纯读）。"""
+    try:
+        doc_id = int(doc_id or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    if doc_id <= 0:
+        return {"ok": False, "error": "缺少 doc_id"}
+    try:
+        r = _review_mod().selftest_status(doc_id)
+    except Exception as e:  # noqa: BLE001
+        return _review_err("读不到自测状态", e)
+    if not isinstance(r, dict):
+        return {"ok": False, "error": "自测状态返回异常"}
+    r.setdefault("ok", True)
+    return r
 
 
 def api_kp_build_start(payload):
@@ -14945,6 +15787,13 @@ class Handler(BaseHTTPRequestHandler):
             # 预习进度（task-24）：与 kp-build 同构；必须进锁之前，否则生成中读不到进度
             if path == "/api/preview/progress":
                 return self._json(api_preview_progress())
+            # ---------------- 复习流程（task-33，锁外：纯文件/进程内） ----------------
+            if path == "/api/review/selftest":
+                return self._json_auto(api_review_selftest(
+                    _int_arg(qs.get("doc_id"), 0)))
+            if path == "/api/review/selftest/status":
+                return self._json_auto(api_review_selftest_status(
+                    _int_arg(qs.get("doc_id"), 0)))
             if path == "/api/ingest/batch/progress":
                 return self._json(pool_mod.snapshot(qs.get("batch") or None))
             if path == "/api/kp-build/batch/progress":
@@ -15044,6 +15893,12 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(api_textbook_supplement_kp_estimate(
                             _int_arg(qs.get("doc_id"), 0),
                             qs.get("kp_id", "")))
+                    # ---------------- 复习流程（task-33）：课件卡 / 三步数据（只读 DB） ----------------
+                    if path == "/api/review/coursewares":
+                        return self._json_auto(api_review_coursewares(conn))
+                    if path == "/api/review/flow":
+                        return self._json_auto(api_review_flow(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -15198,6 +16053,10 @@ class Handler(BaseHTTPRequestHandler):
             # 同步 1 次模型调用（5~20 秒）；不持全局 _lock，避免挡住其它请求。
             if u.path == "/api/textbook-supplement/kp/build":
                 return self._json(api_textbook_supplement_kp_build(payload))
+
+            # ---------------- 复习流程（task-33）：自测提交（锁外，原子写） ----------------
+            if u.path == "/api/review/selftest/submit":
+                return self._json_auto(api_review_selftest_submit(payload))
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":

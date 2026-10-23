@@ -1,0 +1,181 @@
+{
+  "base": "http://127.0.0.1:8935",
+  "out": "_work\\review-ui\\shots",
+  "prefix": "RV",
+  "shots": {
+    "RV-01-review-home": "_work\\review-ui\\shots\\RV-01-review-home.png",
+    "RV-02-calendar-daylist": "_work\\review-ui\\shots\\RV-02-calendar-daylist.png",
+    "RV-03-selftest": "_work\\review-ui\\shots\\RV-03-selftest.png",
+    "RV-04-selftest-result": "_work\\review-ui\\shots\\RV-04-selftest-result.png",
+    "RV-05-flow-step1": "_work\\review-ui\\shots\\RV-05-flow-step1.png"
+  },
+  "texts": {
+    "RV-01-review-home": 1054,
+    "RV-02-calendar-daylist": 1126,
+    "RV-03-selftest": 1650,
+    "RV-04-selftest-result": 2312,
+    "RV-05-flow-step1": 462
+  },
+  "metrics": {},
+  "steps": {
+    "s1-click": {
+      "ok": true
+    },
+    "RV-01-home-state": {
+      "nCards": 9,
+      "firstTitles": [
+        "1中枢神经系统药理学概论 | 未自测",
+        "镇静催眠抗焦虑药 | 未自测",
+        "外周神经药理学概论 | 未自测"
+      ],
+      "card46": "3. 具有神经节阻断作用和促进组胺释放作用。 已自测 · 熟悉度 100%（全对 11/11） 22 条知识点 · 预习名词 11 个 · 第6章 作用于胆碱受体药 继续复习 重新自测",
+      "cwErr": null
+    },
+    "RV-02-calendar-entry": {
+      "months": true,
+      "daysWithPlans": 3
+    },
+    "RV-02-select-plan-day": {
+      "day": "2026-10-24",
+      "nRows": 1,
+      "nReviewBtns": 1,
+      "firstDoc": "46"
+    },
+    "s9-click": {
+      "ok": true
+    },
+    "RV-03-selftest-state": {
+      "items": 11,
+      "inputs": 44,
+      "hint": "用总结文字挖空，填出被挖掉的名词（Tab 切换、Enter 提交）。\n        不能全部答对的知识点 = 不熟悉；熟悉度 = 全对条数 / 抽中条数。",
+      "title": "📝 课件自测 · 3. 具有神经节阻断作用和促进组胺释放作用。",
+      "answersHidden": true
+    },
+    "RV-04-fill-answers": {
+      "filled": 44
+    },
+    "s14-click": {
+      "ok": true
+    },
+    "RV-04-result-state": {
+      "familiarity": "100%",
+      "resText": "本次熟悉度 100% （全对 11 / 抽中 11 条） 全部答对，这份课件算熟悉 🎉",
+      "results": 11,
+      "okCount": 11,
+      "badCount": 0
+    },
+    "RV-05-goto-flow": {
+      "ok": true,
+      "step": "\n     ① 知识点"
+    },
+    "RV-05-step1-state": {
+      "title": "受体选择性与作用部位",
+      "prog": "1 / 22",
+      "summaryLen": 158,
+      "points": 5,
+      "float": "📖 复习中 · 3. 具有神经节阻断作用和促进组胺释放作用。\nStep 1/3 · 1/22\n继续\n最小化\n结束"
+    }
+  },
+  "errors": [],
+  "styles": {
+    "body": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(15, 17, 21)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#nav": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#nav button": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "normal",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "main": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "#view": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "h1": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "17px",
+      "lineHeight": "28.05px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "600",
+      "letterSpacing": "0.3px"
+    },
+    "h2": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "17px",
+      "lineHeight": "28.05px",
+      "color": "rgb(154, 163, 178)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "500",
+      "letterSpacing": "normal"
+    },
+    "h3": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "16px",
+      "lineHeight": "26.4px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgba(0, 0, 0, 0)",
+      "fontWeight": "700",
+      "letterSpacing": "normal"
+    },
+    ".card": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "23.1px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(23, 26, 33)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    },
+    "button.act": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "normal",
+      "color": "rgb(8, 17, 31)",
+      "background": "rgb(91, 157, 255)",
+      "fontWeight": "600",
+      "letterSpacing": "normal"
+    },
+    "input": {
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+      "fontSize": "13px",
+      "lineHeight": "21.45px",
+      "color": "rgb(230, 233, 239)",
+      "background": "rgb(30, 34, 43)",
+      "fontWeight": "400",
+      "letterSpacing": "normal"
+    }
+  }
+}
