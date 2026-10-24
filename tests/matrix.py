@@ -217,6 +217,9 @@ MATRIX = [
     dict(id="F121", feature="化学结构式补全：PPTX 矢量页扫描 + 选择性识图管线（默认 dry-run）",
          entry="core/structures.py + tools/structure_build.py + 提示词-结构式识图",
          kind="cli", priority="P1", tests=["test_29_structure_scan"], evidence="json"),
+    dict(id="F122", feature="知识点整理清单按 DB 枚举全部课件（新入库无 outline 也能看到）",
+         entry="api_kp_build_options + _kp_options_sig（DB 签名失效缓存）",
+         kind="read", priority="P1", tests=["test_30_kp_options_all_courseware"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

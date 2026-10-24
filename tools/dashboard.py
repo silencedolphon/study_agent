@@ -514,7 +514,7 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
 .mmteach-banner-t{flex:1 1 260px}
 .mmteach-banner .small{display:block;color:#d8c69a;font-size:11px;margin-top:2px}
 .mmteach-banner button{flex:0 0 auto}
-.mmteach-ready{color:var(--ok);font-size:11.5px;margin:0 0 7px}
+.mmteach-ready{color:var(--ok);font-size:11.5px;margin:0 0 7px}
 /* ---------------- 特性3（task-30）：教材补充 AI 卡 / 旧版提示 / 本地原文折叠 ----------------
    右侧栏结构（自上而下）：教材名 → 整份课件定位章（AI/本地兜底小字）→ 页图
    → AI 补充卡（未生成 estimate+生成 / 已生成 verdict+points+gaps+citations /
@@ -584,7 +584,7 @@ kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;
 @media (max-width:900px){
   .evpop .mteach-ai{padding:7px 8px}
   .evpop .mteach-ai-act button{flex:1 1 auto}
-}
+}
 /* 卡 C-0055：出处小窗里的"这一页"——课件图 + 该页知识点。
    人拍板（2026-09-27）：「AI问答版块点击右下标签时最好可以跳出那一页的课件图片。
    并且可以看到那一页课件对应的知识点，形成一个网状知识体系。」
@@ -1088,7 +1088,7 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
 .nt-note a{color:var(--fg);font-weight:600;word-break:break-word}
 .nt-note .nt-meta{color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
 .nt-note .nt-act{flex:0 0 auto}
-.nt-empty{padding:12px;color:var(--dim);font-size:12.5px;line-height:1.8}
+.nt-empty{padding:12px;color:var(--dim);font-size:12.5px;line-height:1.8}
 /* ---------------- 遗忘曲线月历（卡 C-0061） ----------------
    纯手写网格（零 CDN / 零第三方库），全部用既有 CSS 变量，不引入新色。
    颜色来源：--accent（今天/选中）、#33191a + --bad（逾期，与 .badge.bad 同族）、
@@ -1201,7 +1201,7 @@ button.act:disabled{opacity:.45;cursor:not-allowed;filter:none}
   .rv-master{justify-content:flex-start}
   .rv-mbtn{padding:3px 10px}
   #rev-float{max-width:calc(100vw - 20px)}
-}
+}
 </style>
 </head>
 <body>
@@ -1385,7 +1385,7 @@ async function go(name){
       if (p && p.active) { renderProgress(p); watchProgress(); }
     } catch(e){}
   }
-}
+}
 
 // ---------------- 问答助手 ----------------
 // 极简 Markdown 渲染。先转义 HTML 再生成标签，顺序不能反——
@@ -2109,7 +2109,7 @@ async function viewReview(){
   if (REV.stage === 'flow' && REV.flowData){ renderReviewFlow(); return; }
   if (REV.stage === 'done'){ REV.stage = ''; }
   await renderReviewHome();
-}
+}
 
 // ---------------- 遗忘曲线月历（卡 C-0061） ----------------
 // 粒度是**课件**（documents.id），算法是固定间隔表 1/3/7/16/35 天，
@@ -2302,7 +2302,7 @@ function renderDeckDay(){
     b.onclick = () => markDeckDone(parseInt(b.dataset.plan, 10) || 0,
                                    parseInt(b.dataset.round, 10) || 0);
   });
-}
+}
 
 // 跳到该课件的思维导图：切到知识点页签，并让 mountMindmap 优先打开这一份。
 function openDeckMindmap(docId){
@@ -2465,7 +2465,7 @@ async function uiRefreshMmPopup(p){
 }
 async function uiRefreshDbPopup(p){
   try { await openKp(p.id); } catch(e){ /* 失败就保留快照 */ }
-}
+}
 // ---------------- 复习状态（内存 + localStorage） ----------------
 const REV = {stage: '', docId: 0, title: '', flowData: null, st: null, step: 1,
              kpIdx: 0, termIdx: 0, result: null, coursewares: [], stResults: {},
@@ -2567,7 +2567,7 @@ function revFloatUpdate(){
 async function revFloatNext(){
   if (REV.stage !== 'flow') return;
   await revFlowNext();
-}
+}
 
 async function revEnd(){
   if (REV.active){
@@ -2877,7 +2877,7 @@ async function submitReviewSelftest(){
     reviewSyncSelftestButtons();
   }
 }
-
+
 // ---------------- 三步复习 v2（窗口化 + 可跳过 + 悬浮窗回当前步） ----------------
 async function revStartFlow(docId, opts){
   opts = opts || {};
@@ -3202,7 +3202,7 @@ function renderReviewDone(){
   const e = $('#rv-done-end');
   if (e) e.onclick = () => { REV.stage = ''; go('review'); };
 }
-
+
 
 // ---------------- 名词整理入口（task-36）：预习重点名词 → 课件名词解释（0 AI） ----------------
 // termsCard 底部加一行状态 +「按预习重点名词重新整理（0 AI）」；数据来自
@@ -3268,7 +3268,7 @@ async function buildTermsPreview(docId){
     toast('名词整理失败：' + e.message);
     if (b){ b.disabled = false; b.textContent = '按预习重点名词重新整理（0 AI）'; }
   }
-}
+}
 // ---------------- 笔记页签：按课件 → 绑定 KP 分组 ----------------
 function noteKpNamesFromTree(tree){
   const out = {};
@@ -3415,7 +3415,7 @@ function bindReviewNotes(){
 }
 
 // boot：刷新页面后如果上次有进行中的复习，右下角先把悬浮窗挂出来（数据点「继续」再取）
-try { reviewBoot(); } catch(e){ /* 启动恢复失败不影响其它页面 */ }
+try { reviewBoot(); } catch(e){ /* 启动恢复失败不影响其它页面 */ }
 // ---------------- 资料 ----------------
 const fmtSize = b => b < 1024 ? b + ' B'
   : (b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(1) + ' MB');
@@ -6894,7 +6894,7 @@ async function mmTeachBuild(docId, btn){
   } finally {
     MMBACK.busy = false;
   }
-}
+}
 // ---------------- 知识点窗口的笔记（卡 C-0052） ----------------
 // 人拍板：「在点击思维导图的知识点跳出的知识点窗口增加一个『记入笔记』的按钮……
 // 该笔记与知识点窗口绑定。同时增加一个『查看笔记』的按钮……笔记页签也会出现
@@ -11891,8 +11891,19 @@ def api_terms(conn, doc_id):
 
 
 def _kp_options_sig():
-    """缓存签名：outline 与 knowledge 两个目录的文件时间戳（任一变化就重算）。"""
+    """缓存签名：DB 文件 + outline/knowledge 目录的文件时间戳（任一变化就重算）。
+
+    2026-10-24 修复：原来只盯 outline + knowledge 两个目录，**新入库的课件**
+    既不会写 outline（结构分析关闭/已改 v3 管线）也没有 knowledge 产物，
+    签名因此不变 → 缓存 20 秒内继续返回旧清单。现在把 DB 文件本身也纳入签名，
+    新文档入库（DB 大小/mtime 变化）会立即失效缓存。
+    """
     parts = []
+    try:
+        st = Path(config.DB_PATH).stat()
+        parts.append(("db", st.st_size, st.st_mtime_ns))
+    except OSError:
+        pass
     for d in (Path(config.LOG_DIR) / 'outline', _knowledge_dir()):
         try:
             for p in sorted(d.glob('*.json')):
@@ -11914,24 +11925,49 @@ def api_kp_build_options(conn):
             data["running"] = kp_build_mod.is_running()
             return data
 
-    docs = {r["id"]: dict(r) for r in conn.execute(
-        "SELECT id, title, kind, corpus, n_chunks FROM documents").fetchall()}
-    items = []
+    docs = {int(r["id"]): dict(r) for r in conn.execute(
+        "SELECT id, title, kind, role, corpus, status, n_chunks, "
+        "       COALESCE(updated_at, 0) AS updated_at FROM documents").fetchall()}
+    outline_ids = set()
     for p in sorted(_outline_dir().glob("*.json")):
-        if not p.stem.isdigit():
-            continue
-        did = int(p.stem)
+        if p.stem.isdigit():
+            outline_ids.add(int(p.stem))
+
+    # 2026-10-24 修复：v3 知识点管线**不再依赖 logs/outline/<doc>.json**
+    # （它直接读库里的文本页）。旧实现只遍历 outline 文件，导致"新入库的课件
+    # 不写 outline → 在可整理清单里完全看不到"——用户实测问的就是这个。
+    # 现在以 DB 里的课件为准，outline 只作为历史兜底来源：
+    #   · 有 role 的按 role='courseware'；老数据没有 role 时，按 pptx/pdf 且非教材收；
+    #   · 教材（role='textbook'）不算可整理课件；
+    #   · 估算不通过的课件不再静默丢掉，进 excluded 并带原因，页面可提示。
+    candidates = set(outline_ids)
+    for did, d in docs.items():
+        role = str(d.get("role") or "").strip().lower()
+        kind = str(d.get("kind") or "").strip().lower()
+        if role == "courseware" or (not role and kind in ("pptx", "ppt", "pdf")):
+            candidates.add(did)
+
+    items: list = []
+    excluded: list = []
+    for did in sorted(candidates):
         try:
-            est = kp_build_mod.estimate(did, outline_path=p)
+            # v3 estimate 不需要 outline_path；传了也会被忽略。
+            est = kp_build_mod.estimate(did)
         except Exception as e:
-            items.append({
+            excluded.append({
                 "doc_id": did,
-                "title": f"文档 {did}",
-                "ok": False,
+                "title": (docs.get(did) or {}).get("title") or f"文档 {did}",
                 "error": f"{type(e).__name__}: {e}",
+                "status": (docs.get(did) or {}).get("status") or "",
             })
             continue
         if not est.get("ok"):
+            excluded.append({
+                "doc_id": did,
+                "title": (docs.get(did) or {}).get("title") or f"文档 {did}",
+                "error": str(est.get("error") or "这份资料没有可总结的文本页"),
+                "status": (docs.get(did) or {}).get("status") or "",
+            })
             continue
         prev = kp_build_mod.prev_info(did)
         d = docs.get(did) or {}
@@ -11943,6 +11979,8 @@ def api_kp_build_options(conn):
             "title": d.get("title") or est.get("title") or f"文档 {did}",
             "in_library": did in docs,
             "corpus": d.get("corpus") or "",
+            "kind": d.get("kind") or "",
+            "status": d.get("status") or "",
             "n_pages": est["n_pages"],
             "n_leaf_pages": est["n_leaf_pages"],
             "excluded_parent_pages": est["excluded_parent_pages"],
@@ -11967,9 +12005,12 @@ def api_kp_build_options(conn):
             "out_name": Path(est["out_path"]).name,
         })
     items.sort(key=lambda x: x["doc_id"])
+    excluded.sort(key=lambda x: x["doc_id"])
     data = {
         "documents": items,
         "n": len(items),
+        "excluded": excluded,
+        "n_excluded": len(excluded),
         "running": kp_build_mod.is_running(),
         "progress": kp_build_mod.progress_snapshot(),
         "stages": list(kp_build_mod.KP_STAGES),
@@ -12405,7 +12446,7 @@ def _teach_after_kp_build(doc_id):
     except Exception:  # noqa: BLE001
         pass
 
-
+
 # ---------------- 复习流程（task-33）：/api/review/* 五条路由胶水 ----------------
 # core/review.py 并行交付（零 AI 调用）：只做惰性 import + 统一 JSON 降级，
 # 后端函数抛错一律 {"ok": false, "error": ...}（配合 _json_auto 的 _code 不 500）。
@@ -12510,7 +12551,7 @@ def api_review_selftest_status(doc_id):
     r.setdefault("ok", True)
     return r
 
-
+
 # ---------------- 名词整理（task-36）：预习重点名词 → 课件名词解释（零 AI） ----------------
 # core/terms_preview.py 并行交付（零 AI）；只做惰性 import + 统一 JSON 降级。
 # 路由（任务书口径 + 后端建议别名都挂，前端默认用前者）：
@@ -12560,7 +12601,7 @@ def api_terms_build_preview(payload):
     if not isinstance(r, dict):
         return {"ok": False, "error": "名词整理返回异常"}
     r.setdefault("ok", True)
-    return r
+    return r
 def api_kp_build_start(payload):
     """启动整理（后台线程）。返回产物路径与备份路径，前端据此提示"去哪儿看结果"。"""
     try:
