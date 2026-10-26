@@ -10128,7 +10128,7 @@ def _preview_read_artifact_file(doc_id, chapter_no):
 
 
 def _preview_empty_status():
-    return {"exists": False, "status": "", "n_subsections": 0,
+    return {"exists": False, "status": "", "error": "", "n_subsections": 0,
             "cost_cny": 0.0, "generated_at": "", "is_current_version": False,
             "legacy": False}
 
@@ -10159,6 +10159,7 @@ def _preview_status_map(doc_id):
                 out[no] = {
                     "exists": exists,
                     "status": str(v.get("status") or ("done" if exists else "")),
+                    "error": str(v.get("error") or "")[:400],
                     "n_subsections": int(v.get("n_subsections")
                                          or v.get("n_sections") or 0),
                     "cost_cny": round(float(v.get("cost_cny") or 0), 6),
@@ -10173,6 +10174,7 @@ def _preview_status_map(doc_id):
                     out[no] = {
                         "exists": True,
                         "status": str(old.get("status") or "done"),
+                        "error": str(old.get("error") or "")[:400],
                         "n_subsections": 0,
                         "cost_cny": round(float(old.get("cost_cny") or 0), 6),
                         "generated_at": str(old.get("generated_at") or ""),
