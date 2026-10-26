@@ -121,7 +121,25 @@ def effort() -> str:
 
 
 def max_tokens() -> int:
-    return max(1024, _cfg_int("PREVIEW_MAX_TOKENS", 16384))
+    """整章单次调用的上限。
+
+    2026-10-27 从 16384 提到 32768：第16章实测输出 16382/16384 token 全被
+    思考链+正文吃满，正文 JSON 在第184行被截断；''_preview_call'' 虽会自动
+    加倍重试，但首发就截断会白花一次钱、也更容易撞上网络异常。
+    """
+    return max(1024, _cfg_int("PREVIEW_MAX_TOKENS", 32768))
+
+
+def model_slot_wait_timeout() -> float:
+    """等模型槽位的上限（秒）。0 = 不限。
+
+    默认 300 秒：预习是"人点一次等结果"的交互任务，不该为了等一个挂起的
+    模型槽位让页面看起来卡几十分钟。超时后本步直接失败并给出可操作提示。
+    """
+    try:
+        return max(0.0, float(_cfg_int("PREVIEW_SLOT_TIMEOUT", 300)))
+    except (TypeError, ValueError):
+        return 300.0
 
 
 def enabled() -> bool:
@@ -600,12 +618,23 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
                "chars_in": len(sys_p) + len(user_p),
                "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         try:
-            with kp_build.model_slot(kind):
+            with kp_build.model_slot(kind, timeout=model_slot_wait_timeout()):
                 r = chat.chat_once([{"role": "system", "content": sys_p},
                                     {"role": "user", "content": user_p}],
                                    model=mdl, max_tokens=cap, thinking=thinking,
                                    temperature=temperature, timeout=timeout,
                                    reasoning_effort=(reasoning_effort if thinking else None))
+        except kp_build.ModelSlotTimeout as e:
+            # 等槽位超时：说明有调用挂起没归还。再重试只会再等一轮，直接放弃。
+            last = "%s: %s" % (type(e).__name__, e)
+            rec.update({"ok": False, "error": last,
+                        "elapsed_s": round(time.perf_counter() - t0, 1),
+                        "tokens_in": 0, "tokens_out": 0, "reasoning_tokens": 0,
+                        "cost_cny": 0.0, "raw_chars": 0})
+            last_idx = kp_build._append_call(calls, rec, call_no=1)
+            log("  ★等模型槽位超时（%s 第 %d 次），不再重试：%s"
+                % (kind, attempt + 1, last))
+            break
         except Exception as e:  # noqa: BLE001
             last = "%s: %s" % (type(e).__name__, e)
             rec.update({"ok": False, "error": last,
@@ -1038,6 +1067,7 @@ def prev_info_preview(doc_id: int, chapter=None, out_path=None) -> dict:
         "cost_cny": float(meta.get("cost_cny") or 0.0),
         "cost_cny_all_calls": float(meta.get("cost_cny_all_calls") or 0.0),
         "status": str(meta.get("status") or ""),
+        "error": str(meta.get("error") or "")[:400],
         "model": str(meta.get("model") or ""),
         "reasoning_effort": str((meta.get("params") or {}).get("reasoning_effort") or ""),
         "elapsed_s": float(meta.get("elapsed_s") or 0.0),
@@ -1675,7 +1705,7 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                 .replace("{sections_outline}", outline)
                 .replace("{chapter_material}", material))
         res = _preview_call(calls, "preview.chapter", prompt["sys"], user,
-                            max_tokens=est["max_tokens"], retry=1, log=log,
+                            max_tokens=est["max_tokens"], retry=2, log=log,
                             note="第 %s 章预习（p.%s）" % (est["chapter"],
                                                           est.get("page_label") or ""),
                             run_no=run_no, thinking=est["thinking"],
@@ -1761,6 +1791,7 @@ def preview_status(doc_id: int) -> dict:
         out[no] = {
             "exists": True, "path": str(p),
             "status": str(meta.get("status") or ""),
+            "error": str(meta.get("error") or "")[:400],
             "generated_at": str(meta.get("generated_at") or ""),
             "created_at": meta.get("created_at"),
             "cost_cny": float(meta.get("cost_cny") or 0.0),

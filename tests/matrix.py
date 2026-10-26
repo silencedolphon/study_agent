@@ -220,6 +220,9 @@ MATRIX = [
     dict(id="F122", feature="知识点整理清单按 DB 枚举全部课件（新入库无 outline 也能看到）",
          entry="api_kp_build_options + _kp_options_sig（DB 签名失效缓存）",
          kind="read", priority="P1", tests=["test_30_kp_options_all_courseware"], evidence="json"),
+    dict(id="F123", feature="预习生成健壮性：token 上限提高/槽位超时/网络重试/失败可重试",
+         entry="core/preview.py _preview_call + 失败章 UI（错误+重新预习）",
+         kind="read", priority="P1", tests=["test_31_preview_robust"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

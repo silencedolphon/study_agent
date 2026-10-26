@@ -578,9 +578,9 @@ _FIELDS: list[dict] = [
      "hint": "★ 人明确要求 **high**（**不是**知识点那条管线的 max）。"
              "会逐次写进产物 meta.calls[].reasoning_effort，可回查。"},
     {"pipeline": "preview", "key": "PREVIEW_MAX_TOKENS", "label": "整章总结上限（token）",
-     "type": "int", "default": 16384, "advanced": True,
-     "hint": "思考链与正文共用这个额度；被打满时管线会自动加倍重试一次。"
-             "整章一次调用，这个值给太小会把正文挤空。"},
+     "type": "int", "default": 32768, "advanced": True,
+     "hint": "思考链与正文共用这个额度；被打满时管线会自动加倍重试（上限 65536）。"
+             "2026-10-27 从 16384 提到 32768：第16章实测 16384 被思考链打满、正文 JSON 截断。"},
 ]
 
 _FIELDS_BY_KEY: dict[str, dict] = {f["key"]: f for f in _FIELDS}

@@ -2465,7 +2465,7 @@ async function uiRefreshMmPopup(p){
 }
 async function uiRefreshDbPopup(p){
   try { await openKp(p.id); } catch(e){ /* 失败就保留快照 */ }
-}
+}
 // ---------------- 复习状态（内存 + localStorage） ----------------
 const REV = {stage: '', docId: 0, title: '', flowData: null, st: null, step: 1,
              kpIdx: 0, termIdx: 0, result: null, coursewares: [], stResults: {},
@@ -4037,6 +4037,11 @@ function renderProgress(p, sel){
     : (p.status === 'done'
         ? `<span class="badge ok">完成</span><span class="muted">用时 ${_fmtDur(p.elapsed)}</span>`
         : `<span class="badge bad">失败</span><span class="muted">${esc(p.error||'')}</span>`);
+  // 预习失败后给一个明确的"重新预习"入口（不用回章节列表里找）。
+  const retryBtn = (!p.active && p.status === 'failed' && p.kind === 'preview'
+    && typeof PV !== 'undefined' && PV.docId)
+    ? `<button class="ghost" style="margin-left:8px" onclick="pvRetryFromProgress()">重新预习</button>`
+    : '';
   // 卡 C-0124：知识点整理**单次调用实测最慢 914 秒**（15 分钟），期间阶段名与条数
   // 都不变 ⇒ 界面看着就是卡死。这里补一个**心跳**：把"这一条已经等了多久"和
   // "同类调用的中位耗时"直接写出来，并在两次轮询之间**本地走秒**（轮询 1.5 秒一次，
@@ -4061,7 +4066,7 @@ function renderProgress(p, sel){
       <div class="phead">
         <b>${esc(p.label||'')}</b>
         <span class="muted">${esc(p.stage||'')} ${esc(stepTxt)} ${esc(p.note||'')}</span>
-        <span style="flex:1"></span>${kpExtra}${tail}
+        <span style="flex:1"></span>${kpExtra}${tail}${retryBtn}
       </div>
       <div class="pbar${p.active ? ' active' : ''}"><i style="width:${pct}%"></i></div>
       <div class="pfoot">${stageRow}<span style="flex:1"></span><b>${pct}%</b></div>
@@ -7769,7 +7774,12 @@ function pvChapHtml(ch){
   const selCls = (ch.no === PV.sel.ch) ? ' on' : '';
   let body = '';
   if (open){
-    if (p.exists){
+    if (p.status === 'failed'){
+      // 2026-10-27：失败章不再显示成"可查看的预习"，直接给错误与重试入口，
+      // 避免用户点「查看预习」只看到一句读不到产物、以为页面卡住。
+      body = `<div class="pv-hint" style="color:var(--bad)">上一轮生成失败：${esc(p.error || '模型调用或输出解析失败')}
+        <br><span class="small muted">已自动提高 token 上限、缩短等模型槽位的时间；点下面「重新预习」重试（旧产物会先备份）。</span></div>`;
+    } else if (p.exists){
       const art = PV.arts[pvKeyOf(ch.no)];
       if (!art) body = '<div class="pv-hint">正在读取小节…</div>';
       else if (art.ok === false) body = `<div class="pv-hint">读不到这一章的预习产物：${esc(art.error || '')}</div>`;
@@ -7795,12 +7805,14 @@ function pvChapHtml(ch){
       <span class="pv-ch-meta">${esc(pvPageLabel(ch))}${ch.n_sections ? ' · ' + ch.n_sections + ' 小节' : ''}</span>
       <span class="pv-badge ${b.cls}">${b.text}</span>
       <span class="pv-ch-act">
-        ${p.exists
-          ? `<button class="ghost" data-pvact="view" data-ch="${ch.no}">查看预习</button>
-             <button class="ghost" data-pvact="regen" data-ch="${ch.no}">重新预习</button>`
-          : `<button class="act" data-pvact="gen" data-ch="${ch.no}"
-               ${PV.busy[ch.no] || (PV.prog && PV.prog.active) ? 'disabled' : ''}>
-               ${PV.busy[ch.no] ? '估算中…' : '预习本章'}</button>`}
+        ${p.status === 'failed'
+          ? `<button class="act" data-pvact="regen" data-ch="${ch.no}">重新预习（上次失败）</button>`
+          : (p.exists
+              ? `<button class="ghost" data-pvact="view" data-ch="${ch.no}">查看预习</button>
+                 <button class="ghost" data-pvact="regen" data-ch="${ch.no}">重新预习</button>`
+              : `<button class="act" data-pvact="gen" data-ch="${ch.no}"
+                   ${PV.busy[ch.no] || (PV.prog && PV.prog.active) ? 'disabled' : ''}>
+                   ${PV.busy[ch.no] ? '估算中…' : '预习本章'}</button>`)}
       </span>
     </div>
     ${open ? `<div class="pv-ch-body">${body}</div>` : ''}
@@ -8075,6 +8087,14 @@ async function pvStart(chNo, force){
     PV.busy[chNo] = false;
     pvRender();
   }
+}
+
+function pvRetryFromProgress(){
+  const p = (typeof PV !== 'undefined' && PV.prog) ? PV.prog : {};
+  const m = String(p.chapter || '').match(/(\d+)/);
+  if (!m || !PV.docId){ toast('没有可重试的章节'); return; }
+  const ch = parseInt(m[1], 10);
+  if (ch) pvStart(ch, true);
 }
 
 function pvWatchProgress(){
