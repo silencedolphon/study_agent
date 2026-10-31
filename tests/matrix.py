@@ -352,6 +352,12 @@ MATRIX = [
          kind="read", priority="P4",
          tests=["test_51_kp_pages_split"], evidence="json"),
 
+    dict(id="F152", feature="preview 管线 RunContext 隔离：入口一次快照，_preview_call/meta 用快照，旧路径不变",
+         entry="core/preview.py::build_chapter_preview 建立 make_context(preview); "
+               "_preview_call(run_context=)/_v2_meta(run_context=)/ensure_sections_artifact",
+         kind="read", priority="P0",
+         tests=["test_52_preview_run_context"], evidence="json"),
+
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
          entry="tools/healthcheck.py --json", kind="cli", priority="P1",

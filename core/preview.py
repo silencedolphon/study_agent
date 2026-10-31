@@ -66,6 +66,7 @@ from pathlib import Path
 from . import config
 from . import db as db_mod
 from . import kp_build
+from .pipeline_runtime import context as runtime_context
 
 # ---------------------------------------------------------------- 常量
 # 产物版本：**故意叫 preview_version 而不是 pipeline_version**。
@@ -641,7 +642,8 @@ def render_sections_outline(sec: dict) -> str:
 def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int,
                   retry: int, log, note: str = "", temperature: float = kp_build.TEMPERATURE,
                   run_no: int = 1, thinking: bool = True, reasoning_effort: str = "high",
-                  model: str = "", timeout: int = kp_build.TIMEOUT) -> dict:
+                  model: str = "", timeout: int = kp_build.TIMEOUT,
+                  run_context=None) -> dict:
     """调一次模型，**成功与失败都逐次记账**（`calls` 直接进产物 `meta.calls`）。
 
     ⚠ 字段与 `core/kp_build.py::_v2_call()` **逐字同构**（那份是本项目的记账口径真源）：
@@ -656,9 +658,20 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
     """
     from . import chat  # 延迟 import：dry-run 时不需要 key
 
-    mdl = str(model or model_name())
+    # P0-C：有 RunContext 时 model/max_tokens/thinking/effort 全用冻结快照；
+    # 无 context / PIPELINE_RUNTIME=0 逐字旧路径。
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    if ctx is not None:
+        mdl = str(ctx.model)
+        thinking = bool(ctx.thinking)
+        reasoning_effort = str(ctx.reasoning_effort) if thinking else ""
+        cap = int(ctx.max_tokens or 0)
+    else:
+        mdl = str(model or model_name())
+        thinking = bool(thinking)
+        cap = max(1024, int(max_tokens))
     last, last_idx = "", -1
-    cap = max(1024, int(max_tokens))
     for attempt in range(int(retry) + 1):
         t0 = time.perf_counter()
         rec = {"run": int(run_no), "kind": kind, "attempt": attempt + 1, "note": note,
@@ -675,7 +688,8 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
                                         {"role": "user", "content": user_p}],
                                        model=mdl, max_tokens=cap, thinking=thinking,
                                        temperature=temperature, timeout=timeout,
-                                       reasoning_effort=(reasoning_effort if thinking else None))
+                                       reasoning_effort=(reasoning_effort if thinking else None),
+                                       run_context=ctx)
         except kp_build.ModelSlotTimeout as e:
             # 等槽位超时：说明有调用挂起没归还。再重试只会再等一轮，直接放弃。
             last = "%s: %s" % (type(e).__name__, e)
@@ -726,7 +740,7 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
                     "call": rec}
         last = "JSON 解析失败：%s" % err
         log("  ★输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, err))
-        if usage["tokens_out"] >= cap * 0.98 and cap < 65536:
+        if cap > 0 and usage["tokens_out"] >= cap * 0.98 and cap < 65536:
             cap = min(65536, cap * 2)
             log("    输出被 max_tokens(%d) 打满 → 下一次尝试放宽到 %d"
                 % (rec["max_tokens"], cap))
@@ -900,7 +914,7 @@ def _preview_meta(doc_id: int, info: dict, prompt: dict, est: dict, calls: list,
                      "（纯正则，**不叠模型调用**）→ 原子落盘。"
                      "与知识点总结管线（core/kp_build.py::build_v2）**完全独立**："
                      "本管线不改那一条的任何语义。"
-                     % (model_name(), thinking_on(), effort())),
+                     % (meta_model, meta_think, meta_effort)),
         "inputs": {"read": ["chunks.id", "chunks.ord", "chunks.source_ref", "chunks.text",
                             "chunks.heading_path", "figure_desc.no_info",
                             "documents.title"],
@@ -1346,7 +1360,7 @@ def _list_str(value) -> list:
 
 
 def ensure_sections_artifact(doc_id: int, db_path: str | os.PathLike | None = None,
-                             *, dry_run: bool = False) -> dict:
+                             *, dry_run: bool = False, run_context=None) -> dict:
     """确保卡 C-0092 的《章节细目》存在；缺则用 core.sections **纯本地**生成。
 
     **0 次模型调用**（纯正则）。行为契约：
@@ -1580,10 +1594,21 @@ def _build_summary_v2(raw: dict, material: str) -> dict:
 
 def _v2_meta(doc_id, info, est, prompt, calls, *, started, status, err, inv,
              render_stats, sec, subs, terms, warnings, material_sha, run_no,
-             sections_source, parser, prev_backup, skipped=False) -> dict:
+             sections_source, parser, prev_backup, skipped=False,
+             run_context=None) -> dict:
     """产物 meta（前端查看器 + 验收都要用；字段见任务契约）。"""
     agg = kp_build._v2_cost(calls)
     run_agg = kp_build._v2_cost(calls, run=run_no)
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    if ctx is not None:
+        meta_model = str(ctx.model)
+        meta_think = bool(ctx.thinking)
+        meta_effort = str(ctx.reasoning_effort or "")
+        meta_cap = int(ctx.max_tokens or 0)
+    else:
+        meta_model, meta_think = model_name(), thinking_on()
+        meta_effort, meta_cap = effort(), max_tokens()
     return {
         "preview_version": PREVIEW_VERSION,
         "preview_schema": PREVIEW_SCHEMA,
@@ -1600,8 +1625,8 @@ def _v2_meta(doc_id, info, est, prompt, calls, *, started, status, err, inv,
         "n_blocks": int(est.get("n_blocks") or 0),
         "chapter_source": info.get("source") or "",
         "status": status, "error": err,
-        "model": model_name(), "thinking": thinking_on(),
-        "reasoning_effort": effort(), "max_tokens": max_tokens(),
+        "model": meta_model, "thinking": meta_think,
+        "reasoning_effort": meta_effort, "max_tokens": meta_cap,
         "prompt_path": prompt.get("path") or "",
         "prompt_sha256": prompt.get("sha256") or "",
         "usage_this_run": {"calls": run_agg["calls"],
@@ -1622,9 +1647,9 @@ def _v2_meta(doc_id, info, est, prompt, calls, *, started, status, err, inv,
         "created_at": time.time(),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "run_no": int(run_no), "calls": calls, "runs": kp_build._v2_runs(calls),
-        "params": {"thinking": thinking_on(), "reasoning_effort": effort(),
+        "params": {"thinking": meta_think, "reasoning_effort": meta_effort,
                    "temperature": kp_build.TEMPERATURE,
-                   "max_tokens": max_tokens(), "calls_per_chapter": 1,
+                   "max_tokens": meta_cap, "calls_per_chapter": 1,
                    "max_subsections": MAX_SUBSECTIONS,
                    "expect_subsections": list(EXPECT_SUBSECTIONS)},
         "inputs": {"read": ["chunks.id", "chunks.ord", "chunks.source_ref",
@@ -1687,12 +1712,22 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                 "hint": st["hint"], "switch": st["switch"]}
 
     # ★ 先确保《章节细目》（本地正则，0 模型调用；dry-run 不会走到这里）
-    sec_build = ensure_sections_artifact(doc_id, db_path=db_path)
+    # P0-C：同一任务入口只建一次 context；PIPELINE_RUNTIME=0 不建（旧路径）。
+    run_ctx = (runtime_context.make_context("preview", doc_id=doc_id)
+               if runtime_context.runtime_enabled() else None)
+    sec_build = ensure_sections_artifact(doc_id, db_path=db_path,
+                                         run_context=run_ctx)
     est = estimate_preview(doc_id, chapter, prompt_path=prompt_path,
                            out_path=out_path, db_path=db_path)
     if not est.get("ok"):
         return {"ok": False, "error": est.get("error"), "doc_id": int(doc_id),
                 "chapter": str(chapter)}
+    if run_ctx is not None:
+        est = dict(est)
+        est.update({"model": str(run_ctx.model),
+                    "thinking": bool(run_ctx.thinking),
+                    "reasoning_effort": str(run_ctx.reasoning_effort or ""),
+                    "max_tokens": int(run_ctx.max_tokens or 0)})
     out = Path(est["out_path"])
 
     if est.get("skip_would_happen") and not force:
@@ -1769,7 +1804,7 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                                                           est.get("page_label") or ""),
                             run_no=run_no, thinking=est["thinking"],
                             reasoning_effort=est["reasoning_effort"],
-                            model=est["model"])
+                            model=est["model"], run_context=run_ctx)
         if not res["ok"]:
             raise RuntimeError("预习总结调用失败：%s" % res["error"])
         raw = res["parsed"] if isinstance(res["parsed"], dict) else {}
@@ -1799,7 +1834,7 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                     err=err, inv=inv, render_stats=stats, sec=sec, subs=subs,
                     terms=terms, warnings=warnings, material_sha=material_sha,
                     run_no=run_no, sections_source=sections_source, parser=parser,
-                    prev_backup=prev_backup)
+                    prev_backup=prev_backup, run_context=run_ctx)
     artifact = {
         "meta": meta,
         "chapter": {"no": int(info.get("no") or 0), "name": info.get("name") or "",
