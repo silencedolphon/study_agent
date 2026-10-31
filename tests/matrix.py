@@ -308,6 +308,14 @@ MATRIX = [
          entry="core/pipeline_runtime/cache.py::finish_run/retry_allowed; textbook_kp._build plan step",
          kind="read", priority="P2",
          tests=["test_43_stage_cache"], evidence="json"),
+    dict(id="F142", feature="课件知识点页面归属回归：claim/release/续跑预填/8线程唯一 owner/最终 overlap",
+         entry="core/kp_build.py::claim_pages/release_pages/resume_set/_v2_coverage",
+         kind="read", priority="P2",
+         tests=["test_44_kp_ownership"], evidence="json"),
+    dict(id="F143", feature="教材长章覆盖统计（只增字段：total/segments/dropped/coverage/page_range；不改签名/分段）",
+         entry="core/textbook_kp.py::_plan.coverage/estimate/产物 meta; TEXTBOOK_KP_COVERAGE=0 可关",
+         kind="read", priority="P3",
+         tests=["test_45_textbook_coverage"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
