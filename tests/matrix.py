@@ -260,6 +260,17 @@ MATRIX = [
                "textbook_kp plan/segment_call/write",
          kind="read", priority="P0",
          tests=["test_38_runtime_telemetry"], evidence="json"),
+    dict(id="F132", feature="remote_unknown：发送后结果未知禁止自动重发（一次请求）",
+         entry="core/pipeline_runtime/state.py::RemoteUnknownError/is_remote_unknown/"
+               "request_may_have_been_sent; chat/kp_build/preview/figures/textbook_kp",
+         kind="read", priority="P0",
+         tests=["test_39_remote_unknown"], evidence="json"),
+    dict(id="F133", feature="细粒度 single-flight：同对象只允许一个执行者（跨线程/进程文件锁）",
+         entry="core/pipeline_runtime/state.py::SingleFlight; textbook_kp.start",
+         kind="read", priority="P0",
+         tests=["test_same_key_busy_then_release", "test_thread_concurrency_only_one_wins",
+                "test_busy_error_and_release_after_done"],
+         evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

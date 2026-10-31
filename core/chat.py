@@ -46,8 +46,10 @@ else:
 
 try:
     from .pipeline_runtime import context as pipeline_context
+    from .pipeline_runtime import state as runtime_state
 except Exception:  # noqa: BLE001  （单文件自测模式）
     from core.pipeline_runtime import context as pipeline_context
+    from core.pipeline_runtime import state as runtime_state
 
 # DeepSeek 官方端点与模型
 DEEPSEEK_BASE = "https://api.deepseek.com"
@@ -724,9 +726,15 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = json.loads(r.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
+        # 服务端有响应 = 已知失败（不是 unknown；可安全重试/展示）
         detail = e.read().decode("utf-8", "replace")[:400]
         raise ChatError(f"模型接口返回 HTTP {e.code}：{detail}") from None
     except Exception as e:
+        # P0-B：网络发送后超时/断连/没回包 —— **结果未知，禁止自动重试**。
+        if runtime_state.request_may_have_been_sent(e):
+            raise runtime_state.RemoteUnknownError(
+                "调用模型失败（结果未知，可能已发出，禁止自动重试）：%s: %s"
+                % (type(e).__name__, e), cause=e) from None
         raise ChatError(f"调用模型失败：{type(e).__name__}: {e}") from None
     elapsed = time.perf_counter() - t0
     choice = (body.get("choices") or [{}])[0]
@@ -832,6 +840,10 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
         detail = e.read().decode("utf-8", "replace")[:400]
         raise ChatError(f"模型接口返回 HTTP {e.code}：{detail}") from None
     except Exception as e:
+        if runtime_state.request_may_have_been_sent(e):
+            raise runtime_state.RemoteUnknownError(
+                "调用模型失败（结果未知，可能已发出，禁止自动重试）：%s: %s"
+                % (type(e).__name__, e), cause=e) from None
         raise ChatError(f"调用模型失败：{type(e).__name__}: {e}") from None
 
     usage = {}
@@ -853,6 +865,12 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
                 delta = (ch.get("delta") or {}).get("content")
                 if delta:
                     yield "delta", delta
+    except Exception as e:  # noqa: BLE001 —— 流中途断连：可能已产生计费，禁止自动重放
+        if runtime_state.request_may_have_been_sent(e):
+            raise runtime_state.RemoteUnknownError(
+                "流式调用中断（结果未知，可能已发出，禁止自动重试）：%s: %s"
+                % (type(e).__name__, e), cause=e) from None
+        raise ChatError(f"流式调用失败：{type(e).__name__}: {e}") from None
     finally:
         try:
             resp.close()

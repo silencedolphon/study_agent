@@ -2162,7 +2162,10 @@ def _gen_one(page, win, materials, inv, user, prompt, pages, ch, est, log, own_p
                     timeout=TIMEOUT,
                 )
         except Exception as e:
+            from .pipeline_runtime import state as runtime_state
             last_err = '第 %d 次调用仍失败：%s' % (attempt, e)
+            if runtime_state.is_unknown_failure(e):
+                raise RuntimeError(last_err + "（结果未知，已停止自动重试）") from None
             if attempt < RETRY:
                 time.sleep(1)
                 continue
@@ -3011,6 +3014,14 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                         "cost_cny": 0.0, "raw_chars": 0})
             last_idx = _append_call(calls, rec, call_no=call_no, kp_seq=kp_seq)
             log("  ★调用失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
+            # P0-B：发送后结果未知（超时/断连/没回包）→ **只允许一次请求**，
+            # 不自动重试（可能已扣费/已产生副作用）；把 unknown 标记交回上层。
+            from .pipeline_runtime import state as runtime_state
+            if runtime_state.is_unknown_failure(e):
+                log("  ★remote_unknown：结果未知，禁止自动重试（P0-B）")
+                return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
+                        "model": MODEL, "error": last, "call_index": last_idx,
+                        "call": rec, "remote_unknown": True}
             # 卡 C-0123：**挂起类错误不重试**——重试只会再挂一个陪跑线程、
             # 再白等一个硬上限；而且它通常意味着整条网络路径不通，立即把错误
             # 交回上层记账（上层据此把这一条判失败、让整轮能收尾）。

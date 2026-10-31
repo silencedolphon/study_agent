@@ -693,6 +693,13 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
                         "cost_cny": 0.0, "raw_chars": 0})
             last_idx = kp_build._append_call(calls, rec, call_no=1)
             log("  ★调用失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
+            # P0-B：发送后结果未知 → 只允许一次请求，不自动重试。
+            from .pipeline_runtime import state as runtime_state
+            if runtime_state.is_unknown_failure(e):
+                log("  ★remote_unknown：结果未知，禁止自动重试（P0-B）")
+                return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
+                        "model": mdl, "error": last, "call_index": last_idx,
+                        "call": rec, "remote_unknown": True}
             if attempt < retry:
                 time.sleep(2 * (attempt + 1))
             continue

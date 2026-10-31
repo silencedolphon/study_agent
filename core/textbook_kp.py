@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import agent_bridge, chat, config, kp_build
 from .pipeline_runtime import context as runtime_context
+from .pipeline_runtime import state as runtime_state
 from .pipeline_runtime import telemetry
 
 # 模块常量只作**回退/兼容**：真正生效的值每次从设置中心读（2026-10-31 接入）。
@@ -377,9 +378,11 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
             part = _call(segment, plan, run_context=ctx)
         except Exception as exc:
             usage = getattr(exc, "usage", None)
+            remote_unknown = runtime_state.is_unknown_failure(exc)
             try:
                 tokens = telemetry.usage_tokens(usage)
-                telemetry.record("segment_call", run_context=ctx, status="failed",
+                telemetry.record("segment_call", run_context=ctx,
+                                 status=("remote_unknown" if remote_unknown else "failed"),
                                  work_ms=(time.perf_counter() - seg_t0) * 1000.0,
                                  cache_hit=False, calls=1,
                                  input_tokens=tokens["input_tokens"],
@@ -392,7 +395,9 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
             attempts.append({"segment": segment["hash"], "ok": False,
                              "usage": usage,
                              "finish_reason": getattr(exc, "finish_reason", ""),
-                             "output_cap": cap})
+                             "output_cap": cap,
+                             "remote_unknown": bool(
+                                 runtime_state.is_unknown_failure(exc))})
             _write(pending, {"version": VERSION, "signature": plan["signature"],
                              "doc_id": plan["doc_id"], "chapter": plan["chapter"],
                              "parts": parts, "attempts": attempts})
@@ -472,8 +477,28 @@ def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0
     if max_output_tokens < 0 or (est_cap > 0 and max_output_tokens > 0
                                  and est_cap > max_output_tokens):
         return {"ok": False, "error": "输出上限超过确认值，请刷新页面后重新估算"}
+    # P0-B single-flight：同 doc+chapter+signature+配置只允许一个执行者；
+    # force 也不与执行者并行（只允许回收已完成/过期残留锁）。
+    lock = runtime_state.SingleFlight()
+    cfg_fp = runtime_state.config_fingerprint({
+        "model": (ctx.model if ctx is not None else model_name()),
+        "thinking": (ctx.thinking if ctx is not None else thinking_on()),
+        "effort": (ctx.reasoning_effort if ctx is not None else effort()),
+        "max_tokens": (ctx.max_tokens if ctx is not None else max_output_tokens()),
+    })
+    lock_handle = lock.try_acquire(
+        pipeline="textbook_kp",
+        subject=(ctx.subject_id if ctx is not None else "default"),
+        doc_id=doc_id, stage="chapter",
+        object="chapter:%d:signature:%s" % (int(chapter), str(signature)),
+        config_fingerprint=cfg_fp, force=bool(force))
+    if not lock_handle.get("ok"):
+        return {"ok": False, "busy": bool(lock_handle.get("busy")),
+                "error": "同一章正在生成（%s）；请等它完成或稍后重试"
+                         % (lock_handle.get("error") or "已被占用")}
     with _LOCK:
         if _STATE["active"]:
+            lock.release(lock_handle)
             return {"ok": False, "error": "已有教材知识点任务正在进行"}
         _, pending, _ = _paths(doc_id, chapter, log_dir)
         done0 = len(_matching_parts(pending, plan))
@@ -494,18 +519,30 @@ def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0
                 raise ValueError("教材内容已变化，请重新查看预计调用量")
             result = _build(fresh, force=force, db_path=db_path, log_dir=log_dir,
                             max_calls=max_calls, run_context=ctx, plan_ms=plan_ms)
-            with _LOCK:
-                _STATE.update({"active": False, "status": result["status"], "error": "",
-                               "percent": 100.0,
-                               "elapsed": round(time.time() - float(
-                                   _STATE.get("started_at") or time.time()), 1)})
         except Exception as exc:  # keep completed segments for a later retry
+            status = ("remote_unknown" if runtime_state.is_unknown_failure(exc)
+                      else "failed")
+            lock.release(lock_handle)          # 先释放锁，再把 active=False 交回前端
             with _LOCK:
-                _STATE.update({"active": False, "status": "failed", "error": str(exc),
+                _STATE.update({"active": False, "status": status, "error": str(exc),
                                "elapsed": round(time.time() - float(
                                    _STATE.get("started_at") or time.time()), 1)})
+            return
+        lock.release(lock_handle)              # 完成同样先释放
+        with _LOCK:
+            _STATE.update({"active": False, "status": result["status"], "error": "",
+                           "percent": 100.0,
+                           "elapsed": round(time.time() - float(
+                               _STATE.get("started_at") or time.time()), 1)})
 
-    threading.Thread(target=run, name="textbook-kp", daemon=True).start()
+    try:
+        threading.Thread(target=run, name="textbook-kp", daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        lock.release(lock_handle)
+        with _LOCK:
+            _STATE.update({"active": False, "status": "failed",
+                           "error": "启动线程失败：%s" % exc})
+        return {"ok": False, "error": "启动失败：%s" % exc}
     return {"ok": True, "started": True}
 
 

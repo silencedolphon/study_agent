@@ -27,7 +27,9 @@ _ALLOWED = {"ts", "run_id", "pipeline", "subject", "doc_id", "stage", "status",
 
 def _ctx(**kw):
     base = {"run_id": "run-t38", "pipeline": "textbook_kp",
-            "subject_id": "默认", "doc_id": 50, "max_tokens": 0}
+            "subject_id": "默认", "doc_id": 50, "max_tokens": 0,
+            "model": "deepseek-flash", "api_base": "https://api.deepseek.com",
+            "thinking": True, "reasoning_effort": "max"}
     base.update(kw)
     return SimpleNamespace(**base)
 
