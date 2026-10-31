@@ -38,7 +38,7 @@ class TestBrowser(unittest.TestCase):
         """Edge headless dump-dom：标题 + JS 动态渲染的主界面导航。"""
         self.assertFalse(_DOM.startswith("__EDGE_ERROR__"), _DOM[:500])
         self.assertGreater(len(_DOM), 50_000, "渲染后的 DOM 体积异常小")
-        self.assertIn("<title>学习看板 · study_agent</title>", _DOM)
+        self.assertIn("<title>学习看板</title>", _DOM)
         # 静态 HTML 里 nav 是空的；这些标记只有 JS 执行后才会出现
         self.assertIn('data-v="assistant"', _DOM, "导航未渲染：前端 JS 可能报错/未执行")
         for label in ("问答", "总览", "复习", "预习", "资料", "知识点", "错题", "笔记"):

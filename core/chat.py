@@ -631,13 +631,19 @@ def build_messages(query: str, ev: list[Evidence],
 def chat_once(messages: list[dict], model: str = CHAT_MODEL,
               max_tokens: int = 2048, thinking: bool = False,
               timeout: int = 180, temperature: float = 0.3,
-              reasoning_effort: str | None = None) -> dict:
+              reasoning_effort: str | None = None,
+              api_key: str | None = None, api_base: str | None = None,
+              response_format: dict | None = None) -> dict:
     """非流式调用。thinking=False 省 token（实测输出从 188 降到 49）。
 
     卡 C-0052 新增 `reasoning_effort`：**思考强度**，官方取值
     `"none" | "low" | "high" | "max"`（默认 high）。它只会被**原样透传**成
     payload 的 `reasoning_effort` 字段，本函数不做校验、不改写——
     取值错了由服务端报错，不在这里静默降级。
+
+    输出上限（2026-10-31 起）：由**当前管线**的设置项中央控制——cap>0 覆盖
+    `max_tokens`，cap==0（默认，无上限）时请求里**不发送** `max_tokens`。
+    传进来的 `max_tokens` 参数只是历史调用方的值，不再直接决定 HTTP 请求。
 
     两条实测口径（2026-09-27，`deepseek-flash`，官方端点）：
       - 只在 `thinking=True` 时才发这个字段：思考关掉时它没有作用，
@@ -648,11 +654,25 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
       - ⚠ 思考模式下 `temperature` **不生效**（传了不报错、被忽略），
         参数保留只是为了不动既有调用方。
     """
-    key = load_api_key()
+    from . import agent_bridge
+    # ★ 2026-10-31：输出上限统一由「设置 → 各管线 token 上限」中央控制
+    # （config.TOKEN_CAP_KEYS；0 = 无上限 = 请求里不发送 max_tokens）。
+    # 调用方传进来的 max_tokens 只是历史参数，实际生效值以当前管线 cap 为准。
+    pipeline = agent_bridge.current_pipeline()
+    cap = config.token_cap(pipeline)
+    effective_max = cap if cap > 0 else 0
+    request = agent_bridge.AgentRequest(
+        pipeline=pipeline, messages=messages, model=model,
+        max_tokens=int(effective_max), thinking=bool(thinking),
+        reasoning_effort=reasoning_effort,
+        temperature=temperature, timeout=timeout, response_format=response_format)
+    adapted = agent_bridge.complete(request)
+    if adapted is not None:
+        return adapted
+    key = api_key or load_api_key()
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens,
         "stream": False,
         "temperature": temperature,
     }
@@ -660,8 +680,11 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
     if reasoning_effort and thinking:
         payload["reasoning_effort"] = str(reasoning_effort)
+    if response_format is not None:
+        payload["response_format"] = response_format
+    config.apply_token_cap(payload, pipeline)
     req = urllib.request.Request(
-        f"{DEEPSEEK_BASE}/chat/completions",
+        f"{(api_base or DEEPSEEK_BASE).rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {key}"},
@@ -683,6 +706,7 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         "model": body.get("model"),
         "usage": body.get("usage") or {},
         "elapsed": elapsed,
+        "finish_reason": choice.get("finish_reason") or "",
     }
 
 
@@ -702,14 +726,45 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
     课件答疑管线有自己的密钥配置（`config.DECK_CHAT_API_KEY`），要给就把
     key 传进来；不传仍走原来的 `load_api_key()` 凭据链，知识库问答不受影响。
     """
+    from . import agent_bridge
+    # ★ 输出上限中央控制（与 chat_once 同一口径；0 = 无上限、不发送 max_tokens）。
+    pipeline = agent_bridge.current_pipeline()
+    cap = config.token_cap(pipeline)
+    effective_max = cap if cap > 0 else 0
+    request = agent_bridge.AgentRequest(
+        pipeline=pipeline, messages=messages, model=model,
+        max_tokens=int(effective_max), thinking=bool(thinking),
+        reasoning_effort=reasoning_effort,
+        temperature=temperature, timeout=timeout, stream=True)
+    events = agent_bridge.stream(request)
+    if events is not None:
+        saw_usage = saw_done = False
+        for event in events:
+            if not isinstance(event, (tuple, list)) or len(event) != 2 or event[0] not in ("delta", "usage", "done"):
+                raise ChatError("适配器返回了无法识别的流事件")
+            kind, data = event
+            if kind == "usage":
+                saw_usage = True
+            if kind == "done":
+                if not saw_usage:
+                    yield "usage", {}
+                saw_done = True
+            yield kind, data
+            if saw_done:
+                break
+        if not saw_done:
+            if not saw_usage:
+                yield "usage", {}
+            yield "done", None
+        return
     key = api_key or load_api_key()
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens,
         "stream": True,
         "temperature": temperature,
     }
+    config.apply_token_cap(payload, pipeline)
     if thinking is not None:
         payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
     if reasoning_effort and thinking:
@@ -1040,12 +1095,14 @@ def stream_deck_chat(ctx: DeckContext, query: str,
     cfg = cfg or deck_cfg()
     yield "ctx", ctx
     msgs = deck_messages(ctx, query, history)
-    for kind, data in stream_chat(
-            msgs, model=cfg["model"], max_tokens=int(cfg["max_tokens"]),
-            thinking=bool(cfg["thinking"]),
-            reasoning_effort=cfg["reasoning_effort"],
-            api_key=(cfg["api_key"] or None)):
-        yield kind, data
+    from . import agent_bridge
+    with agent_bridge.pipeline_scope("deck_chat"):
+        for kind, data in stream_chat(
+                msgs, model=cfg["model"], max_tokens=int(cfg["max_tokens"]),
+                thinking=bool(cfg["thinking"]),
+                reasoning_effort=cfg["reasoning_effort"],
+                api_key=(cfg["api_key"] or None)):
+            yield kind, data
 
 
 # ---------------- 一站式问答（非流式，供 MCP/CLI 用） ----------------

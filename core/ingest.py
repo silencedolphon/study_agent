@@ -698,6 +698,9 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
             fig_stats = dict(fs or {})
             fig_errors = list(fs.get("errors") or [])
             fig_text = _figure_texts(conn, doc_id, skip_no_info=page_mode)
+            if "usable_pages" in fs:
+                usable_pages = set(fs["usable_pages"])
+                fig_text = {page: text for page, text in fig_text.items() if page in usable_pages}
         except Exception as e:  # noqa: BLE001
             fig_errors = [f"{type(e).__name__}: {e}"]
             # 同上：异常可能落在"写语句之后、commit 之前"，那时写锁还在手里，

@@ -49,12 +49,13 @@ SYSTEM_STYLE_PROMPT = """你在为一个药理学知识库撰写"图示说明"�
 **你的读者**：正在复习这门课的学生。他手上有课件原文，但课件里的图
 （解剖图、通路图、机制图、表格）他看不懂或记不住。
 
-**因此不要逐字转写图上的文字**——课件文字层里已经有了，重复没有价值。
-真正有价值的是下面这些**文字拿不到的东西**：
+请结合本页正文，补充文字层没有提取到的图中文字和下列信息：
 - 图的**结构与方向**：箭头的指向、通路的走向、层级从属关系、流程的先后
 - **空间关系**：某结构在什么位置、与什么相邻、谁覆盖谁
 - **对应关系**：表格里哪一列对应哪一列、颜色/线型代表什么
 - **与文字的关系**：这张图补充了文字未表达的什么信息
+- **化学结构式**：如实记录可辨认的原子、键、环、取代基及连接关系；
+  对看不清的键或立体构型标注不确定，不要根据药名猜测或补全。
 
 **必须遵守**：
 1. 把"图中确实标注的"与"你的推断"分开写。推断必须标明是推断。
@@ -94,17 +95,16 @@ OUTPUT_FORMAT = """
 # （本项目已经踩过一次同类坑：识图描述被静默过滤，整份内容消失。）
 #
 # 所以零文字层走这套：完整转写 + 结构说明 + 表格逐格转写。
-ZERO_TEXT_SYSTEM_PROMPT = """你在为一个药理学知识库**抢救一份没有文字层的课件**。
+ZERO_TEXT_SYSTEM_PROMPT = """你在为一个药理学知识库整理一页没有可提取文字的课件。
 
-**背景（这条决定你该怎么做）**：这份课件的每一页都是**一整张图片**——
-它不是扫描件，而是整页导出成了位图，**全片没有一个字的文字层**。
-也就是说，这份资料将来能不能被检索到，**完全取决于你现在写下的内容**。
+**背景（这条决定你该怎么做）**：本页没有提取到文字，页面内容可能来自图片、
+矢量图或嵌入对象。本页能否被检索到，取决于你现在写下的内容。
 
 **最要紧的一条：这一页上的文字必须全部转写出来**——标题、正文条目、
 列表、表格、公式、图例、坐标轴标签、页脚，一个都不要漏。
 ⚠ **绝对不要**输出"本页无知识性图示""装饰性图片，无知识点"这类判断：
-"这页没有图"在这里**不等于**"这页没有内容"——恰恰相反，
-本课件的每一页，内容**都画在那张图里**；你说一句"没内容"，
+"这页没有图"在这里**不等于**"这页没有内容"——本页内容可能都在图里；
+如果直接说"没内容"，
 这一页就在知识库里彻底消失了。
 （哪怕这页看起来只是"本章要求""目录""小结""谢谢"，那也是必须转写的正文。）
 
@@ -133,8 +133,8 @@ ZERO_TEXT_SYSTEM_PROMPT = """你在为一个药理学知识库**抢救一份没�
 # 提示词只是把重试这一次说清楚。
 # （这里用字面量而不是 `NO_INFO_MARKER`：那个常量定义在本段**之后**，
 #   模块加载时取不到。两处的字面量必须一致，改一处就要改两处。）
-ZERO_TEXT_RETRY_HINT = """**上一轮你回答了"【本页无知识性图示】"，这是错的**：
-这份课件**没有文字层**，页面上的字就是它的全部内容。
+ZERO_TEXT_RETRY_HINT = """**上一轮你回答了"【本页无知识性图示】"，请重新检查**：
+本页没有提取到文字，页面上的内容可能是唯一信源。
 请重新看这一页，**把页面上所有文字逐条转写到【页面文字】里**
 （标题、列表、表格、页脚、小字注释都要），再写其它小节：
 哪怕这页在你看来只是"本章要求""目录"或封面，那些字也必须转写出来、
@@ -376,7 +376,7 @@ class _Inflight:
 # ---------------------------------------------------------------- 提取与渲染
 
 def _blank_page_texts(res) -> list[dict]:
-    """文字层一页都抽不到时，按页数补出"只有页号的空页语境"（卡 C-0122）。
+    """按 PDF 页数或 PPT 页数补出只有页号的空页语境。
 
     页数取 `extract` 层已经读出来的 `meta["pages"]`（`extract_pdf` 里就是
     `doc.page_count`），拿不到就退回 `page_count`；两个都拿不到时返回空列表
@@ -384,7 +384,7 @@ def _blank_page_texts(res) -> list[dict]:
     """
     meta = getattr(res, "meta", None) or {}
     n = 0
-    for k in ("pages", "page_count"):
+    for k in ("pages", "page_count", "slides"):
         try:
             n = int(meta.get(k) or 0)
         except (TypeError, ValueError):
@@ -403,8 +403,7 @@ def extract_pages(src: Path, kind: str = "", *,
 
     kind: "pptx" | "pdf"，留空按扩展名判断。
 
-    `fill_empty_pages`（卡 C-0122）：PDF 的**文字层一页都抽不到**时，
-    用文档页数补出"只有页号的空页语境"。
+    `fill_empty_pages`：对没有提取到文字的 PDF/PPT 页补出仅含页号的语境。
 
     为什么需要：扫描版/图片型 PDF 的正文字是**本地 OCR** 出来的，而 OCR 结果
     只有上层（`core/ingest.py`）手里有，不经过本函数 ⇒ 这里抽出空列表 ⇒
@@ -446,8 +445,10 @@ def extract_pages(src: Path, kind: str = "", *,
         out = [{"page": p, "title": by_page[p]["title"],
                 "body": "\n".join(by_page[p]["body"])}
                for p in sorted(by_page)]
-        if not out and fill_empty_pages:
-            out = _blank_page_texts(res)
+        if fill_empty_pages:
+            existing = {page["page"] for page in out}
+            out.extend(page for page in _blank_page_texts(res) if page["page"] not in existing)
+            out.sort(key=lambda page: page["page"])
         return deck_title, out
 
     res = _ex.extract_pptx(src)
@@ -464,6 +465,10 @@ def extract_pages(src: Path, kind: str = "", *,
     out = [{"page": p, "title": by_page[p]["title"],
             "body": "\n".join(by_page[p]["body"])}
            for p in sorted(by_page)]
+    if fill_empty_pages:
+        existing = {page["page"] for page in out}
+        out.extend(page for page in _blank_page_texts(res) if page["page"] not in existing)
+        out.sort(key=lambda page: page["page"])
     return deck_title, out
 
 
@@ -789,6 +794,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
     table = _figure_table(conn, doc_id)
     now = db.now()
     handled: set[int] = set()
+    usable_pages: set[int] = set()
 
     # ---- 逐页规划（主线程串行读库，不做任何模型调用）----
     #
@@ -810,8 +816,11 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             continue
         # 图片没变、且描述正文还完整 → 直接复用，不重复计费
         row = table.get(p)
-        if (row and row["image_hash"] == ihash
-                and (row.get("description") or "").strip()):
+        textless = not (ctx.title or "").strip() and not (ctx.body or "").strip()
+        cached_body = (row or {}).get("description") or ""
+        cache_ok = len(cached_body.strip()) >= 30 or (not textless and is_no_info(cached_body))
+        if (row and row["image_hash"] == ihash and cache_ok
+                and not (textless and is_no_info(cached_body))):
             plan.append({"page": p, "kind": "reuse", "img": img, "ctx": ctx,
                          "ihash": ihash,
                          "title": row.get("page_title") or ctx.title,
@@ -846,56 +855,35 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             stats["errors"].append(f"p{item['page']}: {r.error[:80]}")
             return ""
         p = item["page"]
-        body = r.text
+        body = r.text or ""
         title = item["ctx"].title
         item["title"] = title
         stats["described"] += 1
         stats["cost_cny"] += r.cost_cny
-        _save_figure_row(conn, doc_id, p, title, item["ihash"], r, now)
-        # ★ 立刻提交（卡 C-0040 复核补做）：下面那个"空输出自动重试"
-        # 还要再调一次视觉模型（长页面实测几十秒）。上面这条 upsert 已经
-        # 拿到写锁，不在这里落盘，写锁就会跨过第二次模型调用——
-        # 并发的另一个 worker 在这段窗口里写库照样会 `database is locked`。
-        # 命中率不高（实测 1%~2% 的页），但 16 份课件累计几百页，
-        # 摊到整批就是"总会有一两份失败"，正是用户看到的现象。
-        # 提前落盘无损：描述正文已在库里，重跑时按 image_hash 命中缓存、
-        # 不重复计费。
+        textless = not (item["ctx"].title or "").strip() and not (item["ctx"].body or "").strip()
+
+        def invalid(text):
+            return len((text or "").strip()) < 30 or (textless and is_no_info(text or ""))
+
+        chosen = r
+        if invalid(body):
+            stats["empty_retried"] = stats.get("empty_retried", 0) + 1
+            if r2 is not None:
+                stats["cost_cny"] += r2.cost_cny
+            if r2 is not None and r2.ok and not invalid(r2.text):
+                chosen = r2
+                body = r2.text
+            else:
+                stats.setdefault("still_empty", []).append(p)
+                stats["errors"].append(f"p{p}: 识图没有返回可用内容，请重试")
+                return ""
+        # Only reusable, validated responses go into the cache.
+        _save_figure_row(conn, doc_id, p, title, item["ihash"], chosen, now)
         conn.commit()
         (outdir / f"slide_{p:02d}.md").write_text(
             f"# p{p} · {title}\n\n{body}", encoding="utf-8")
         if verbose:
-            print(f"      识图 p{p}: {len(body)} 字 "
-                  f"¥{r.cost_cny:.4f} {r.elapsed:.0f}s", flush=True)
-
-        # 输出为空时**自动重试一次**，用更大的上限。
-        # （重试调用本身已经在 `_probe_page` 里发出去，这里只管记账与落库。）
-        #
-        # 空输出的成因是推理 token 与回答 token 共用 max_tokens：
-        # 推理链一超长，回答一个字都写不出来。它**不报错、不抛异常**，
-        # 只产出一个空描述，所以只能靠显式检查。
-        # 实测 16384 下长页面仍会零星命中（约 1%~2% 的页）。
-        #
-        # 重试提高上限而不是关推理：这些页恰恰是最需要推理的长页面。
-        if len(body.strip()) < 30:
-            stats["empty_retried"] = stats.get("empty_retried", 0) + 1
-            if r2 is None:                     # 防御分支：正常不会走到
-                stats.setdefault("still_empty", []).append(p)
-                return body
-            stats["cost_cny"] += r2.cost_cny
-            if r2.ok and len(r2.text.strip()) >= 30:
-                body = r2.text
-                _save_figure_row(conn, doc_id, p, title, item["ihash"], r2, now)
-                (outdir / f"slide_{p:02d}.md").write_text(
-                    f"# p{p} · {title}\n\n{body}", encoding="utf-8")
-                if verbose:
-                    print(f"      ↻ p{p} 空输出已用 "
-                          f"{getattr(config, 'FIGURE_RETRY_MAX_TOKENS', 32768)}"
-                          f" 上限重试成功（{len(body)} 字 ¥{r2.cost_cny:.4f}）",
-                          flush=True)
-            else:
-                stats.setdefault("still_empty", []).append(p)
-                if verbose:
-                    print(f"      ⚠ p{p} 重试后仍为空", flush=True)
+            print(f"      识图 p{p}: {len(body)} 字 ¥{chosen.cost_cny:.4f} {chosen.elapsed:.0f}s", flush=True)
         return body
 
     def _settle(item: dict, body: str) -> None:
@@ -912,6 +900,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             stats["no_info"] += 1
             conn.commit()          # 同上：不留未决事务
             return
+
+        usable_pages.add(p)
 
         if not store_chunks:
             # 整页切块模式（core/ingest.py::ingest_file）：描述正文只留在
@@ -1001,6 +991,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             ex.shutdown(wait=False, cancel_futures=True)
 
     stats["peak_inflight"] = inflight.peak
+    stats["usable_pages"] = sorted(usable_pages)
     # ★ 兜底不静默（卡 C-0122）：有页要处理、却一页都没落地，且没有任何一条
     # 错误 —— 说明它们全在"规划"阶段被判成了 skip（页图或页语境取不到）。
     # 这也是"整页识图没干活"，同样必须留下原因。
@@ -1429,13 +1420,18 @@ def _probe_page(img: Path, ctx: PageContext, thinking: bool
     返回 `(第一次结果, 重试结果或 None)`。重试也在这里做（而不是回主线程），
     这样一次线程池任务里最多两次网络等待，主线程始终只做毫秒级的写库。
     """
-    r = describe_page(img, ctx, thinking=thinking)
-    if not r.ok or len((r.text or "").strip()) >= 30:
+    textless = not (ctx.title or "").strip() and not (ctx.body or "").strip()
+    r = (describe_page(img, ctx, thinking=thinking, zero_text=True) if textless
+         else describe_page(img, ctx, thinking=thinking))
+    if not r.ok or (len((r.text or "").strip()) >= 30 and not (textless and is_no_info(r.text or ""))):
         return r, None
     # 半成品页才重试：判据与改造前逐字相同（`len(body.strip()) < 30`）。
     # 阈值取 `config.FIGURE_RETRY_MAX_TOKENS`，与 `describe_page` 的默认值
     # 同源，不在这里另写一个数。
     caps = getattr(config, "FIGURE_RETRY_MAX_TOKENS", 32768)
+    if textless:
+        return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
+                                zero_text=True, extra_hint=ZERO_TEXT_RETRY_HINT)
     return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps)
 
 
@@ -1739,6 +1735,20 @@ def build_contexts(slides_text: list[dict], deck_title: str = "",
 
 def _http_post(url: str, payload: dict, key: str, timeout: int = 300,
                retries: int = 4, wait: float = 4.0) -> tuple[int, dict | str]:
+    from . import agent_bridge
+    # ★ 2026-10-31：识图/结构式两条路的输出上限也走中央设置
+    # （scope 分别是 ingest_vision / structures；0 = 无上限 = 不发送 max_tokens）。
+    payload = config.apply_token_cap(payload, agent_bridge.current_pipeline())
+    request = agent_bridge.AgentRequest(
+        pipeline=agent_bridge.current_pipeline(), messages=payload.get("messages") or [],
+        model=str(payload.get("model") or ""), max_tokens=int(payload.get("max_tokens") or 0),
+        thinking=(payload.get("thinking") or {}).get("type") != "disabled",
+        reasoning_effort=payload.get("reasoning_effort"),
+        temperature=float(payload.get("temperature", 0.3)), timeout=timeout)
+    adapted = agent_bridge.complete(request)
+    if adapted is not None:
+        return 200, {"model": adapted["model"], "usage": adapted["usage"],
+                     "choices": [{"message": {"content": adapted["content"]}}]}
     last: tuple[int, dict | str] = (0, "未执行")
     for attempt in range(retries + 1):
         req = urllib.request.Request(
@@ -1859,8 +1869,8 @@ def page_has_image(src: Path, kind: str = "") -> dict[int, bool] | None:
 
     返回 `{页号: 有图片}`；**该格式没有可靠判据时返回 None**。
 
-    判据是形状类型里有 PICTURE / CHART / TABLE，或矢量形状（SmartArt、
-    手绘示意图）达到一定数量。
+    图片、图表、表格、嵌入对象、自由曲线、连线和组合矢量图都作为候选。
+    宁可多送少量装饰性图形，也不要在送到识图模型之前丢掉结构式。
 
     ⚠ **PDF 返回 None，不要拿它过滤**：讲课用的导出件里整页内容都是图片
     对象，实测 78 页**无一例外**都有图，这个判据在 PDF 上区分度为 0。
@@ -1876,10 +1886,10 @@ def page_has_image(src: Path, kind: str = "") -> dict[int, bool] | None:
     except ImportError:
         return None
 
-    prs = Presentation(str(src))
-    sw = float(prs.slide_width or 1)
-    sh = float(prs.slide_height or 1)
-    area = sw * sh
+    try:
+        prs = Presentation(str(src))
+    except Exception:
+        return None  # 判不出来就保守地不按页过滤
     out: dict[int, bool] = {}
 
     def walk(shapes, acc: dict) -> None:
@@ -1889,21 +1899,27 @@ def page_has_image(src: Path, kind: str = "") -> dict[int, bool] | None:
             if v == 6:                       # GROUP：递归进去
                 walk(s.shapes, acc)
                 continue
-            if v in (3, 13):                 # CHART / PICTURE
+            # OLE 对象常承载 ChemDraw 化学结构；FREEFORM 常用于绘制键和环。
+            if v in (2, 3, 5, 7, 9, 10, 11, 13, 15, 20, 21, 22, 23, 24):
                 acc["n"] += 1
                 continue
-            if getattr(s, "has_table", False) and s.has_table:
+            if getattr(s, "has_table", False) or getattr(s, "has_chart", False):
                 acc["n"] += 1
                 continue
             if v == 1:                       # AUTO_SHAPE（含手绘示意件）
                 acc["shape"] += 1
+                try:
+                    # 单个多边形、箭头等也可能表示结构；普通矩形多用于排版。
+                    if int(s.auto_shape_type) not in (1, 5):
+                        acc["n"] += 1
+                except (AttributeError, TypeError, ValueError):
+                    pass
 
     for i, slide in enumerate(prs.slides, start=1):
         acc = {"n": 0, "shape": 0}
         walk(slide.shapes, acc)
-        # 矢量形状 ≥8 个也算"有图"：SmartArt 与手绘示意图走的就是这条，
-        # 它们既不是 PICTURE 也不是 CHART，但视觉上就是图。
-        out[i] = acc["n"] >= 1 or acc["shape"] >= 8
+        # 多个基础形状也可能构成结构图；单个矩形通常是版式装饰。
+        out[i] = acc["n"] >= 1 or acc["shape"] >= 2
     return out
 
 
@@ -2087,11 +2103,14 @@ def describe_page(img_path: Path, ctx: PageContext,
     `extra_hint` 追加在提示词末尾（为空时**逐字不变**）。零文字层通道用它
     在重试时补一句"上一轮你说这页没图，但这份课件没有文字层"。
     """
+    from . import agent_bridge
     key = load_deepseek_key()
-    if not key:
+    if not key and not agent_bridge.has_adapter("ingest_vision"):
         return FigureResult(False, error="没有 DEEPSEEK_API_KEY")
     model = model or getattr(config, "DEEPSEEK_VISION_MODEL", "deepseek-flash")
-    max_tokens = max_tokens or getattr(config, "FIGURE_MAX_TOKENS", 3072)
+    # 0 = 无上限：不显式写 max_tokens（真正的 cap 在 _http_post 里按管线统一应用）。
+    max_tokens = int(max_tokens) if max_tokens is not None else \
+        int(config.token_cap("ingest_vision"))
 
     b64 = base64.b64encode(img_path.read_bytes()).decode()
     if zero_text:
@@ -2112,15 +2131,17 @@ def describe_page(img_path: Path, ctx: PageContext,
                  "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ],
         }],
-        "max_tokens": max_tokens,
         "stream": False,
     }
+    if max_tokens > 0:
+        payload["max_tokens"] = max_tokens
     if not thinking:
         payload["thinking"] = {"type": "disabled"}
 
     t0 = time.perf_counter()
-    st, body = _http_post(f"{config.DEEPSEEK_BASE_URL}/chat/completions",
-                          payload, key)
+    with agent_bridge.pipeline_scope("ingest_vision"):
+        st, body = _http_post(f"{config.DEEPSEEK_BASE_URL}/chat/completions",
+                              payload, key or "")
     el = time.perf_counter() - t0
     if st != 200 or not isinstance(body, dict):
         return FigureResult(False, error=f"HTTP {st}: {body}", elapsed=el)

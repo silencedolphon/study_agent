@@ -382,6 +382,8 @@ def _is_core_file(p: Path) -> bool:
         return False
     if p.suffix.lower() in (".pyc", ".pyo"):
         return False
+    if ".bak" in p.name.lower() or p.name.endswith("~"):
+        return False
     return p.is_file()
 
 

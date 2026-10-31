@@ -1279,11 +1279,13 @@ def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = Non
                "tokens_out": 0, "reasoning_tokens": 0, "cost_cny": 0.0,
                "elapsed_s": 0.0, "error": ""}
         try:
-            r = chat.chat_once(
-                [{"role": "system", "content": sys_p},
-                 {"role": "user", "content": user_p}],
-                model=model, max_tokens=mt, thinking=thinking,
-                reasoning_effort=(effort if thinking else None))
+            from . import agent_bridge
+            with agent_bridge.pipeline_scope("textbook_teach"):
+                r = chat.chat_once(
+                    [{"role": "system", "content": sys_p},
+                     {"role": "user", "content": user_p}],
+                    model=model, max_tokens=mt, thinking=thinking,
+                    reasoning_effort=(effort if thinking else None))
         except Exception as e:  # noqa: BLE001
             last = "%s: %s" % (type(e).__name__, e)
             rec["error"] = last

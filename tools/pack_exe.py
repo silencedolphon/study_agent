@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import json
 import os
 import re
 import shutil
@@ -338,7 +339,25 @@ def stage_assets(*, minimal: bool) -> tuple[list[str], list[str]]:
     add_data.append("%s;tools" % tools_dst)
     notes.append("tools/*.ps1：%d 个（%s）" % (len(picked), ", ".join(PS1_FILES)))
 
-    # 2) 提示词真源：5 个文件全带（`core/kp_build.py` 没有内置默认提示词，
+    # 2) 看板页面资源。dashboard.py 在导入时从 core/frontend 读取并拼装首页。
+    frontend_src = ROOT / "core" / "frontend"
+    frontend_dst = STAGE / "core" / "frontend"
+    frontend_dst.mkdir(parents=True, exist_ok=True)
+    manifest = frontend_src / "manifest.json"
+    if not manifest.is_file():
+        raise AuditError("缺少看板页面清单：%s" % manifest)
+    scripts = json.loads(manifest.read_text(encoding="utf-8"))["scripts"]
+    for name in ("index.html", "style.css", "manifest.json", *scripts):
+        src = frontend_src / name
+        if not src.is_file():
+            raise AuditError("缺少看板页面资源：%s" % src)
+        dst = frontend_dst / name
+        shutil.copy2(src, dst)
+        picked.append(dst)
+    add_data.append("%s;core/frontend" % frontend_dst)
+    notes.append("core/frontend：HTML、CSS 与 %d 份 JavaScript 资源" % len(scripts))
+
+    # 3) 提示词真源：5 个文件全带（`core/kp_build.py` 没有内置默认提示词，
     #    缺一份就有一条管线不可用）。走 `_internal/logs/knowledge/`，
     #    首次运行时种到 exe 同级；运行时的解析顺序见 README 的交付说明。
     k_dst = STAGE / "logs" / "knowledge"

@@ -113,7 +113,7 @@ class TestPreviewFrontend(unittest.TestCase):
 
     def test_empty_states_and_settings_jump(self):
         self.assertIn("还没有教材入库", _PAGE)
-        self.assertIn("去资料页入库教材", _PAGE)
+        self.assertIn("导入教材", _PAGE)
         self.assertIn("这一章还没预习", _PAGE)
         self.assertIn("预习功能未开启", _PAGE)
         self.assertIn("去设置开启", _PAGE)

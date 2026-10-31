@@ -619,11 +619,13 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
                "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         try:
             with kp_build.model_slot(kind, timeout=model_slot_wait_timeout()):
-                r = chat.chat_once([{"role": "system", "content": sys_p},
-                                    {"role": "user", "content": user_p}],
-                                   model=mdl, max_tokens=cap, thinking=thinking,
-                                   temperature=temperature, timeout=timeout,
-                                   reasoning_effort=(reasoning_effort if thinking else None))
+                from . import agent_bridge
+                with agent_bridge.pipeline_scope("preview"):
+                    r = chat.chat_once([{"role": "system", "content": sys_p},
+                                        {"role": "user", "content": user_p}],
+                                       model=mdl, max_tokens=cap, thinking=thinking,
+                                       temperature=temperature, timeout=timeout,
+                                       reasoning_effort=(reasoning_effort if thinking else None))
         except kp_build.ModelSlotTimeout as e:
             # 等槽位超时：说明有调用挂起没归还。再重试只会再等一轮，直接放弃。
             last = "%s: %s" % (type(e).__name__, e)

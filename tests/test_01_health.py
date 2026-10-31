@@ -33,7 +33,7 @@ class TestHealth(unittest.TestCase):
         self.assertIn("text/html", r.headers.get("Content-Type", ""))
         text = r.text
         self.assertGreater(len(text), 200_000, "首页体积异常小，可能模板被截断")
-        self.assertIn("<title>学习看板 · study_agent</title>", text)
+        self.assertIn("<title>学习看板</title>", text)
         for marker in ('id="nav"', 'id="chatq"', 'id="firstrun"', 'id="docs-tabs"'):
             self.assertIn(marker, text, f"首页缺少关键骨架 {marker}")
 
@@ -42,7 +42,7 @@ class TestHealth(unittest.TestCase):
         a = _SRV.get("/")
         b = _SRV.get("/index.html")
         self.assertEqual(b.status, 200)
-        self.assertIn("<title>学习看板 · study_agent</title>", b.text)
+        self.assertIn("<title>学习看板</title>", b.text)
         self.assertEqual(a.body, b.body, "/index.html 与 / 内容不一致")
 
     def test_page_self_contained(self):

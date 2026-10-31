@@ -6,7 +6,7 @@
    被测实例的数据全部来自用 sqlite3 backup API 复制到 `_work/verify/data/` 的副本。
 2. **代码根也要隔离**：`core/config.py` 用 `Path(__file__).parent.parent` 算 `ROOT`，
    而 `core/subjects.py` 的注册表固定落在 `ROOT/logs/subjects.json`。所以把
-   `core/*.py` + `tools/dashboard.py` + `tools/study.py` 复制到
+   `core/*.py` + `core/frontend/*` + `tools/dashboard.py` + `tools/study.py` 复制到
    `_work/verify/sandbox/`，让被测进程的 ROOT 指向沙箱——这样连
    `config.local.json`、学科注册表、`share/` 也都落在沙箱里。
 3. 数据副本另行放在 `_work/verify/data/`，通过 `KB_DB/KB_RAW/KB_NOTES/KB_INDEX/KB_LOG`
@@ -71,6 +71,7 @@ SANDBOX_SUBJECTS = {
 
 CODE_FILES = [
     ("core", "*.py"),
+    ("core/frontend", "*"),
     ("tools", "dashboard.py"),
     ("tools", "study.py"),
 ]

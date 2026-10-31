@@ -8,7 +8,7 @@ title study_agent - Study Dashboard
 
 REM ============================================================
 REM  Study Dashboard launcher.  Double-click this file to open.
-REM  Default URL: http://127.0.0.1:8756/
+REM  Default URL: http://127.0.0.1:8757/
 REM  Closing this window stops the dashboard.
 REM
 REM  NOTE 1: keep this file ASCII-only.  cmd.exe parses .cmd files with the
@@ -34,7 +34,7 @@ set "ROOT=%~dp0"
 set "PY=%ROOT%venv\Scripts\python.exe"
 set "APP=%ROOT%tools\dashboard.py"
 REM Optional: set SA_PORT before calling this file to use another port.
-if not defined SA_PORT set "SA_PORT=8756"
+if not defined SA_PORT set "SA_PORT=8757"
 set "PORT=%SA_PORT%"
 
 if not exist "%PY%" (
@@ -72,7 +72,7 @@ if not errorlevel 1 (
     echo   Opening: http://127.0.0.1:%PORT%/
     echo.
     echo   To run a second instance on another port:
-    echo     "%PY%" "%APP%" --port 8757
+    echo     "%PY%" "%APP%" --port 8758
     echo.
     start "" "http://127.0.0.1:%PORT%/"
     echo   Press any key to close this window. The running dashboard is unaffected.

@@ -33,7 +33,7 @@ venv\Scripts\python.exe -X utf8 tests\run_all.py
 
 ## 隔离是怎么做的
 
-1. **代码沙箱**：`core/*.py` + `tools/dashboard.py` + `tools/study.py` 复制到
+1. **代码沙箱**：`core/*.py` + `core/frontend/*` + `tools/dashboard.py` + `tools/study.py` 复制到
    `_work/verify/sandbox/`。`core/config.py` 用 `Path(__file__).parent.parent` 算 ROOT，
    所以被测进程的 `ROOT`/学科注册表/`share/`/`config.local.json` 全部落在沙箱里。
 2. **数据 fixture**：真实库用 sqlite3 backup API 快照到 `_work/verify/fixtures/*.db`

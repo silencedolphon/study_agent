@@ -36,8 +36,16 @@ class _FakeResponse:
 
 class TestPreviewRobustness(unittest.TestCase):
     def test_default_max_tokens_raised(self):
-        """默认 32768；不给用户改配置也能容纳第16章那种思考链。"""
-        self.assertGreaterEqual(preview.max_tokens(), 32768)
+        """task-39 新语义：默认 0 = 无上限（HTTP 由中央 cap 决定不发送 max_tokens）。
+
+        管线内部 `max_tokens()` 只用于估算/加倍重试的 floor，保留 ≥1024 的下限；
+        不要为了让旧断言通过把 `PREVIEW_MAX_TOKENS` 默认改回 32768。
+        """
+        from core import config
+        self.assertEqual(int(config.value_int("PREVIEW_MAX_TOKENS", 0)), 0,
+                         "PREVIEW_MAX_TOKENS 默认应为 0（无上限）")
+        self.assertGreaterEqual(preview.max_tokens(), 1024,
+                                "内部估算 floor 仍在，但不再是 HTTP 上限")
         self.assertGreaterEqual(preview.model_slot_wait_timeout(), 30)
 
     def test_slot_timeout_no_retry(self):

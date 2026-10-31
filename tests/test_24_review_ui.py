@@ -44,11 +44,11 @@ def tearDownModule():
 class TestReviewHome(unittest.TestCase):
     def test_courseware_card_and_month_entry(self):
         for probe in (
-            "课件复习流程", "rv-cw", "rv-cw-act", "rv-badge",
-            "已自测 · 熟悉度", "已掌握", "未自测", "开始自测", "继续复习", "重新自测",
+            "选择课件复习", "rv-cw", "rv-cw-act", "rv-badge",
+            "熟悉度", "已掌握", "未自测", "开始自测", "继续复习", "重新自测",
             "renderReviewHome", "reviewCoursewaresHtml", "bindReviewCoursewares",
             'data-act="review"', "revStartFromMonth", "开始复习",
-            "到期复习队列", "deckCalendarCard", "遗忘曲线复习",
+            "到期复习队列", "deckCalendarCard", "复习日历",
         ):
             self.assertIn(probe, _PAGE, f"复习首页缺少：{probe}")
 
@@ -125,8 +125,8 @@ class TestTermsPreviewEntry(unittest.TestCase):
     def test_terms_entry_ui(self):
         for probe in (
             'id="term-preview"', "refreshTermsPreview", "buildTermsPreview",
-            "按预习重点名词重新整理（0 AI）", "预习第", "候选",
-            "该教材章节还没有预习总结", "当前来源：", "0 AI",
+            "更新名词解释", "教材第", "候选名词",
+            "还没有预习重点名词", "不产生 AI 费用",
             "/api/terms/preview/options", "/api/terms/build-preview",
             "TERMS.preview",
         ):

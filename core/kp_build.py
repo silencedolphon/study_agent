@@ -264,11 +264,13 @@ def _call_with_hard_timeout(fn, *, timeout: float, kind: str = ""):
     """
     if not timeout or timeout <= 0:
         return fn()
+    from contextvars import copy_context
+    context = copy_context()
     box: dict = {}
 
     def _run() -> None:
         try:
-            box["r"] = fn()
+            box["r"] = context.run(fn)
         except BaseException as e:  # noqa: BLE001 - 原样带回调用方
             box["e"] = e
 
@@ -2146,17 +2148,19 @@ def _gen_one(page, win, materials, inv, user, prompt, pages, ch, est, log, own_p
     for attempt in range(RETRY + 1):
         t0 = time.perf_counter()
         try:
-            r = chat.chat_once(
-                [
-                    {'role': 'system', 'content': prompt['sys']},
-                    {'role': 'user', 'content': user},
-                ],
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                thinking=THINKING,
-                temperature=TEMPERATURE,
-                timeout=TIMEOUT,
-            )
+            from . import agent_bridge
+            with agent_bridge.pipeline_scope("courseware_kp"):
+                r = chat.chat_once(
+                    [
+                        {'role': 'system', 'content': prompt['sys']},
+                        {'role': 'user', 'content': user},
+                    ],
+                    model=MODEL,
+                    max_tokens=MAX_TOKENS,
+                    thinking=THINKING,
+                    temperature=TEMPERATURE,
+                    timeout=TIMEOUT,
+                )
         except Exception as e:
             last_err = '第 %d 次调用仍失败：%s' % (attempt, e)
             if attempt < RETRY:
@@ -2919,14 +2923,17 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                 # 虚增）；正常返回时在下面的 finally 里销账。判停时主线程按账回收。
                 _abandoned_enter()
                 try:
-                    r = _call_with_hard_timeout(
-                        lambda: chat.chat_once(
-                            [{"role": "system", "content": sys_p},
-                             {"role": "user", "content": user_p}],
-                            model=MODEL, max_tokens=max_tokens, thinking=thinking,
-                            temperature=temperature, timeout=TIMEOUT,
-                            reasoning_effort=(reasoning_effort if thinking else None)),
-                        timeout=call_hard_timeout(), kind=kind)
+                    from . import agent_bridge
+                    pipeline = "terms" if kind.startswith("terms.") else "courseware_kp"
+                    with agent_bridge.pipeline_scope(pipeline):
+                        r = _call_with_hard_timeout(
+                            lambda: chat.chat_once(
+                                [{"role": "system", "content": sys_p},
+                                 {"role": "user", "content": user_p}],
+                                model=MODEL, max_tokens=max_tokens, thinking=thinking,
+                                temperature=temperature, timeout=TIMEOUT,
+                                reasoning_effort=(reasoning_effort if thinking else None)),
+                            timeout=call_hard_timeout(), kind=kind)
                 finally:
                     _abandoned_done()
         except Exception as e:  # noqa: BLE001

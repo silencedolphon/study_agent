@@ -4,9 +4,8 @@
 导入看板入口 M0-6b）已回退；**M0-6a 的文案/排版/空态 CTA/摘要截断保留**。
 覆盖：
   · 用户可见的开发者术语被清掉（旧文案断言消失 + 首页真实渲染文本零命中）；
-  · 空态仍有真实可点主按钮（图谱/笔记/复习/总览/名词/导图；错题/知识点页的
-    功能型按钮已随回退移除）；
-  · 需要保留的高级说明收进 `<details>` 折叠区；知识点列表摘要 `.kpsum` 2 行截断；
+  · 空态保留必要入口，重复引导不额外堆按钮；
+  · 高级设置和低频导入方式收进 `<details>`；知识点列表摘要 `.kpsum` 2 行截断；
   · 回退负向断言：已撤销的入口/场景/导入按钮不再出现在页面里。
 
 隔离：用 `tests/env.py` 的沙箱服务 + 数据副本；关掉 AI 的两条长链路不触发（不调模型）。
@@ -88,34 +87,31 @@ class TestCopyCleanup(unittest.TestCase):
         """曾经在页面上的开发者术语/死链文案，一个都不许回来（忽略 JS 注释）。"""
         for old in OLD_DEV_SENTENCES:
             self.assertNotIn(old, _PAGE_CODE, f"页面里仍有旧文案：{old!r}")
-        # 高级说明必须是折叠的（保留信息但默认收起），不能又平铺回页面
-        self.assertIn('<details class="adv">', _PAGE_CODE,
-                      "高级说明应放进 <details class=\"adv\"> 折叠区")
+        # 高级设置和低频导入方式默认收起，避免占满页面。
+        self.assertIn('<details class="settings-extra">', _PAGE_CODE)
+        self.assertIn('<details class="docs-extra">', _PAGE_CODE)
         # 设置项的说明文字要经过 humanize 过滤（后端元数据里带模块名/文件名）
         self.assertIn("function humanize(", _PAGE_CODE, "缺少设置说明的术语过滤函数")
         for anchor in ("setFieldHtml", "setPaneHtml"):
             fn = _PAGE_CODE[_PAGE_CODE.index("function " + anchor):
                             _PAGE_CODE.index("function ", _PAGE_CODE.index("function " + anchor) + 10)]
             self.assertIn("humanize(", fn, f"{anchor} 未过滤开发者术语")
-        # 设置窗口本体：密钥说明是固定人话（不再渲染后端元数据），面板走过滤后的 setPaneHtml
-        self.assertIn("API 密钥只保存在本机", _PAGE_CODE)
+        # 设置窗口本体：密钥说明是固定人话，面板走过滤后的 setPaneHtml。
+        self.assertIn("密钥留空会保留原值", _PAGE_CODE)
         self.assertIn("setPaneHtml(cur)", _PAGE_CODE)
 
     def test_empty_state_cta_buttons(self):
-        """空态仍有真实可点主按钮（id 存在且绑了真实动作）。"""
+        """空态保留必要入口，重复引导不额外堆按钮。"""
         ctas = {
             "nt-go-kps": "去「知识点」页（笔记空态）",
-            "rv-go-kps": "去「知识点」页（复习空态）",
-            "ov-go-review": "去「复习」开始（总览空态）",
-            "term-go-build": "去整理这份课件（名词解释空态）",
-            "mm-go-build": "去整理（思维导图未整理）",
+            "kp-build-open": "从知识点页选择课件整理",
         }
         for cid, why in ctas.items():
             self.assertIn(f'id="{cid}"', _PAGE, f"缺少按钮：{why}")
-        for action in ("go('kps')", "go('review')", "openKpBuild("):
-            self.assertIn(action, _PAGE, f"空态按钮没有绑定真实动作：{action}")
-        # 知识点页的空态主按钮是「选择课件批量整理」（新建入口已回退）
-        self.assertIn('id="kp-build-open"', _PAGE)
+        for cid in ("rv-go-kps", "ov-go-review", "term-go-build", "mm-go-build"):
+            self.assertNotIn(f'id="{cid}"', _PAGE, f"冗余空态按钮又出现：{cid}")
+        for action in ("go('kps')", "openKpBuild(", 'onclick="go(\'docs\')"'):
+            self.assertIn(action, _PAGE, f"主入口没有绑定真实动作：{action}")
 
     def test_removed_m0_entries_gone(self):
         """回退负向断言：场景 / 新建知识点 / 记错题 / 导入按钮都不再出现。"""

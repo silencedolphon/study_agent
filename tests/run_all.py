@@ -128,8 +128,11 @@ def _git_head() -> str:
 
 def _file_hashes() -> dict:
     out = {}
+    frontend_files = tuple(p.relative_to(env.PROJECT).as_posix()
+                           for p in sorted((env.PROJECT / "core" / "frontend").glob("*"))
+                           if p.is_file())
     for rel in ("core/config.py", "core/study.py", "core/search.py", "core/subjects.py",
-                "tools/dashboard.py", "tools/study.py"):
+                *frontend_files, "tools/dashboard.py", "tools/study.py"):
         p = env.PROJECT / rel
         try:
             out[rel] = {"size": p.stat().st_size, "sha256": env.sha256(p)}

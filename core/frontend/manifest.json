@@ -1,0 +1,19 @@
+{
+  "scripts": [
+    "00_boot.js",
+    "10_assistant.js",
+    "20_overview.js",
+    "30_review.js",
+    "40_docs.js",
+    "41_docs_manage.js",
+    "50_knowledge.js",
+    "51_knowledge_popup.js",
+    "52_textbook_knowledge.js",
+    "60_mistakes.js",
+    "70_preview.js",
+    "80_notes_search_ingest.js",
+    "90_subjects.js",
+    "95_settings.js",
+    "99_share.js"
+  ]
+}

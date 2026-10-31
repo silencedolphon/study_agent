@@ -538,11 +538,13 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
         tokens = budget * (attempt + 1)
         t0 = time.perf_counter()
         try:
-            res = _chat.chat_once(
-                [{"role": "user", "content": prompt}],
-                model=_chat.CHAT_MODEL, max_tokens=tokens,
-                thinking=thinking, temperature=0,
-            )
+            from . import agent_bridge
+            with agent_bridge.pipeline_scope("ingest_outline"):
+                res = _chat.chat_once(
+                    [{"role": "user", "content": prompt}],
+                    model=_chat.CHAT_MODEL, max_tokens=tokens,
+                    thinking=thinking, temperature=0,
+                )
         except Exception as e:  # noqa: BLE001
             out.warnings.append(f"全局分析调用失败: {type(e).__name__}: {e}")
             return out

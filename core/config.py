@@ -380,7 +380,7 @@ SETTINGS_FILE = _path(
 #   真实配置的前提下测"改一个值 → 真管线用新值"。正常运行时它永远是
 #   `config.local.json`（已被 .gitignore 忽略）。
 
-# 四条管线（界面的四个分区，顺序即界面顺序）
+# 六条管线（界面的分区，顺序即界面顺序）
 _PIPELINES: list[dict] = [
     {
         "id": "chat", "label": "AI 问答", "icon": "💬",
@@ -416,6 +416,14 @@ _PIPELINES: list[dict] = [
                 "节级细目缺产物时用本地正则自动生成（0 次模型调用）。"
                 "知识点那条管线的提示词与产物**一个字都没动**。",
     },
+    {
+        "id": "textbook_kp", "label": "AI 教材知识点", "icon": "📘",
+        "sub": "按教材章节整理知识点 · core/textbook_kp.py",
+        "desc": "选教材 + 章 → 按页把整章切成段 → 逐段整理可主动回忆的知识点"
+                "（标题/解释/要点/记忆提示/易错点/自测问答）→ 存本机产物，"
+                "可续跑、可回忆复习。**输出上限 0 = 无上限**；模型/端点/密钥/"
+                "推理档位都是这条管线自己一份，与看板其它管线互不影响。",
+    },
 ]
 
 # 字段表：界面上每一行一个字段。type 取 str / secret / int / bool / enum / note
@@ -441,9 +449,11 @@ _FIELDS: list[dict] = [
      "type": "enum", "choices": ["none", "low", "high", "max"], "default": "high",
      "hint": "官方取值 none/low/high/max。**只有开启推理时才会发给服务端**"
              "（core/chat.py::chat_once 的既定口径）。"},
-    {"pipeline": "chat", "key": "CHAT_MAX_TOKENS", "label": "回答上限（输出 token）",
-     "type": "int", "default": 2048, "advanced": True,
-     "hint": "开推理时思考 token 也算在这里面，太小会把正文挤空。"},
+    {"pipeline": "chat", "key": "CHAT_MAX_TOKENS",
+     "label": "回答上限（输出 token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（请求里不发送 max_tokens）。开推理时思考 token 也算在"
+             "输出里，设得太小会把正文挤空。"},
 
     # ---------------- 管线 2：AI 知识点总结 ----------------
     {"pipeline": "kp", "key": "KP_BUILD_MODEL", "label": "模型名", "type": "str",
@@ -466,9 +476,21 @@ _FIELDS: list[dict] = [
     {"pipeline": "kp", "key": "KP_BUILD_REASONING_EFFORT", "label": "推理强度",
      "type": "enum", "choices": ["none", "low", "high", "max"], "default": "max",
      "hint": "卡 C-0052 起默认 max。会写进产物 meta.calls[].reasoning_effort，可回查。"},
-    {"pipeline": "kp", "key": "KP_BUILD_MAX_TOKENS", "label": "单条知识点上限（token）",
-     "type": "int", "default": 65536, "advanced": True,
-     "hint": "思考链与正文共用这个配额。实测一条知识点的思考链可占 1 万 token。"},
+    {"pipeline": "kp", "key": "KP_BUILD_MAX_TOKENS",
+     "label": "单条知识点上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（不发送 max_tokens）。思考链与正文共用输出配额，"
+             "实测一条知识点的思考链可占 1 万 token。"},
+    {"pipeline": "kp", "key": "TERMS_MAX_TOKENS",
+     "label": "名词整理上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "名词解释功能（core/kp_build.py::build_terms）的输出上限。"
+             "★ 0 = 无上限；与知识点总结共用本管线模型。"},
+    {"pipeline": "kp", "key": "TEACH_MAX_TOKENS",
+     "label": "教材补充答疑上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "教材补充里「按需 AI 分析」那条路（core/teach.py，textbook_teach 管线）"
+             "的输出上限。★ 0 = 无上限。"},
 
     # ---------------- 管线 3：入库 ----------------
     {"pipeline": "ingest", "key": "INGEST_MODEL", "label": "结构分析模型", "type": "str",
@@ -516,6 +538,18 @@ _FIELDS: list[dict] = [
     {"pipeline": "ingest", "key": "FIGURE_MAX_CALLS_PER_DOC",
      "label": "单份最多识图页数", "type": "int", "default": 200, "advanced": True,
      "hint": "每份资料最多为多少页花钱调视觉模型。"},
+    {"pipeline": "ingest", "key": "FIGURE_MAX_TOKENS",
+     "label": "识图输出上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（请求里不发送 max_tokens）。识图与结构式视觉识别都走这一项。"},
+    {"pipeline": "ingest", "key": "OUTLINE_MAX_TOKENS",
+     "label": "结构分析输出上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "AI 结构分析（core/outline.py）的输出上限。★ 0 = 无上限。"},
+    {"pipeline": "ingest", "key": "STRUCTURE_MAX_TOKENS",
+     "label": "结构式识别输出上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "化学结构式识别（core/structures.py）的输出上限。★ 0 = 无上限。"},
 
     # ---------------- 管线 4：课件答疑 ----------------
     {"pipeline": "deck", "key": "DECK_CHAT_MODEL", "label": "模型名", "type": "str",
@@ -539,9 +573,11 @@ _FIELDS: list[dict] = [
     {"pipeline": "deck", "key": "DECK_CHAT_REASONING_EFFORT", "label": "推理强度",
      "type": "enum", "choices": ["none", "low", "high", "max"], "default": "max",
      "hint": "会随 scope 事件报到界面上（hover 范围行可核对）。"},
-    {"pipeline": "deck", "key": "DECK_CHAT_MAX_TOKENS", "label": "回答上限（token）",
-     "type": "int", "default": 12288, "advanced": True,
-     "hint": "思考 token 也算在里面；被思考吃光时正文会空且不报错。"},
+    {"pipeline": "deck", "key": "DECK_CHAT_MAX_TOKENS",
+     "label": "回答上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（不发送 max_tokens）。思考 token 也算在输出里；"
+             "设得太小、被思考吃光时正文会空且不报错。"},
     {"pipeline": "deck", "key": "DECK_CHAT_MAX_CONTEXT_TOKENS",
      "label": "课件上下文预算（token）", "type": "int", "default": 60000,
      "advanced": True,
@@ -577,10 +613,37 @@ _FIELDS: list[dict] = [
      "type": "enum", "choices": ["none", "low", "high", "max"], "default": "high",
      "hint": "★ 人明确要求 **high**（**不是**知识点那条管线的 max）。"
              "会逐次写进产物 meta.calls[].reasoning_effort，可回查。"},
-    {"pipeline": "preview", "key": "PREVIEW_MAX_TOKENS", "label": "整章总结上限（token）",
-     "type": "int", "default": 32768, "advanced": True,
-     "hint": "思考链与正文共用这个额度；被打满时管线会自动加倍重试（上限 65536）。"
-             "2026-10-27 从 16384 提到 32768：第16章实测 16384 被思考链打满、正文 JSON 截断。"},
+    {"pipeline": "preview", "key": "PREVIEW_MAX_TOKENS",
+     "label": "整章总结上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（不发送 max_tokens）。设成正数时思考链与正文共用这个额度；"
+             "被截断时管线仍会按原有逻辑提示/重试。历史上曾用 16384/32768，"
+             "第16章实测 16384 被思考链打满、正文 JSON 截断。"},
+
+    # ---------------- 管线 6：AI 教材知识点（2026-10-31 接入设置） ----------------
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_MODEL",
+     "label": "模型名", "type": "str", "default": "deepseek-flash",
+     "hint": "落位 core/textbook_kp.py::model_name()（按章整理教材知识点）。"},
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_BASE_URL",
+     "label": "API Base", "type": "str", "default": "https://api.deepseek.com",
+     "hint": "这条管线自己读的端点根地址（不带 /chat/completions）；"
+             "填错时本管线失败并显示原因。"},
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_API_KEY",
+     "label": "API 密钥", "type": "secret", "default": "",
+     "env": "DEEPSEEK_API_KEY",
+     "hint": "留空 = 跟随本机凭据链（与其它管线同一把）。只存本机，不会上传。"},
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_THINKING",
+     "label": "开启推理", "type": "bool", "default": 1,
+     "hint": "教材知识点要归纳因果链与易错点，默认开着。"},
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_REASONING_EFFORT",
+     "label": "推理强度", "type": "enum",
+     "choices": ["none", "low", "high", "max"], "default": "max",
+     "hint": "默认 max（与知识点总结管线一致）；会写进产物 meta 可回查。"},
+    {"pipeline": "textbook_kp", "key": "TEXTBOOK_KP_MAX_TOKENS",
+     "label": "单段输出上限（token；0 = 无上限）",
+     "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（请求里不发送 max_tokens）。设成正数时思考链与正文共用；"
+             "被截断时本段会停下并报错，不会自动重试。"},
 ]
 
 _FIELDS_BY_KEY: dict[str, dict] = {f["key"]: f for f in _FIELDS}
@@ -591,13 +654,59 @@ _PIPELINE_IDS = tuple(p["id"] for p in _PIPELINES)
 #   否则 `activate()`（本文件 `:782` 起）会返回"未知管线"或直接 KeyError。
 _PIPE_BASE_KEY = {"chat": "CHAT_BASE_URL", "kp": "KP_BUILD_BASE_URL",
                   "ingest": "DEEPSEEK_BASE_URL", "deck": "DECK_CHAT_BASE_URL",
-                  "preview": "PREVIEW_BASE_URL"}
+                  "preview": "PREVIEW_BASE_URL",
+                  "textbook_kp": "TEXTBOOK_KP_BASE_URL"}
 _PIPE_MODEL_KEY = {"chat": "CHAT_MODEL", "kp": "KP_BUILD_MODEL",
                    "ingest": "INGEST_MODEL", "deck": "DECK_CHAT_MODEL",
-                   "preview": "PREVIEW_MODEL"}
+                   "preview": "PREVIEW_MODEL",
+                   "textbook_kp": "TEXTBOOK_KP_MODEL"}
 _PIPE_KEY_KEY = {"chat": "CHAT_API_KEY", "kp": "KP_BUILD_API_KEY",
                  "ingest": "INGEST_API_KEY", "deck": "DECK_CHAT_API_KEY",
-                 "preview": "PREVIEW_API_KEY"}
+                 "preview": "PREVIEW_API_KEY",
+                 "textbook_kp": "TEXTBOOK_KP_API_KEY"}
+
+# 各管线的输出 token 上限键（**统一语义：0 = 无上限**）。
+# 这里同时认 agent_bridge 的细粒度管线名（courseware_kp / ingest_vision 等），
+# 因为 chat.chat_once 是按 agent_bridge.current_pipeline() 取 cap 的。
+TOKEN_CAP_KEYS: dict[str, str] = {
+    "chat": "CHAT_MAX_TOKENS",
+    "courseware_kp": "KP_BUILD_MAX_TOKENS",
+    "kp": "KP_BUILD_MAX_TOKENS",
+    "terms": "TERMS_MAX_TOKENS",
+    "ingest_vision": "FIGURE_MAX_TOKENS",
+    "ingest_outline": "OUTLINE_MAX_TOKENS",
+    "structures": "STRUCTURE_MAX_TOKENS",
+    "deck_chat": "DECK_CHAT_MAX_TOKENS",
+    "deck": "DECK_CHAT_MAX_TOKENS",
+    "preview": "PREVIEW_MAX_TOKENS",
+    "textbook_kp": "TEXTBOOK_KP_MAX_TOKENS",
+    "textbook_teach": "TEACH_MAX_TOKENS",
+}
+
+
+def token_cap(pipeline: str) -> int:
+    """某条管线当前的输出 token 上限；**0 = 无上限**（未知管线也返回 0）。"""
+    key = TOKEN_CAP_KEYS.get(str(pipeline or "").strip(), "")
+    if not key:
+        return 0
+    cap = value_int(key, 0)
+    return cap if cap > 0 else 0
+
+
+def apply_token_cap(payload: dict, pipeline: str) -> dict:
+    """按管线上限改请求 payload：cap>0 写入 `max_tokens`；cap==0 **删除**字段。
+
+    删除而不是发 0：OpenAI 兼容端点的 `max_tokens=0` 属于非法/未定义，不发送
+    才是"无显式上限"的通用做法。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    cap = token_cap(pipeline)
+    if cap > 0:
+        payload["max_tokens"] = cap
+    else:
+        payload.pop("max_tokens", None)
+    return payload
 
 _SETTINGS_LOCK = threading.RLock()
 _SETTINGS: dict[str, str] = {}

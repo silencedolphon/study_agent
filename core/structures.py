@@ -858,8 +858,9 @@ def _vision_call(img_path: Path, prompt: str, *, model: str,
     复用 `core/figures.py::_http_post`（带重试/超时），不复制网络代码。
     返回 {ok, text, usage, elapsed, model, error}；网络/HTTP 错误收在 error 里，不抛。
     """
+    from . import agent_bridge
     key = _api_key()
-    if not key:
+    if not key and not agent_bridge.has_adapter("structures"):
         return {"ok": False, "error": "没有 DEEPSEEK_API_KEY", "usage": {},
                 "elapsed": 0.0, "model": model, "text": ""}
     try:
@@ -883,10 +884,11 @@ def _vision_call(img_path: Path, prompt: str, *, model: str,
     if not thinking:
         payload["thinking"] = {"type": "disabled"}
     t0 = time.perf_counter()
-    st, body = figures._http_post(
-        "%s/chat/completions" % str(getattr(config, "DEEPSEEK_BASE_URL",
-                                            "https://api.deepseek.com")).rstrip("/"),
-        payload, key)
+    with agent_bridge.pipeline_scope("structures"):
+        st, body = figures._http_post(
+            "%s/chat/completions" % str(getattr(config, "DEEPSEEK_BASE_URL",
+                                                "https://api.deepseek.com")).rstrip("/"),
+            payload, key or "")
     el = time.perf_counter() - t0
     if st != 200 or not isinstance(body, dict):
         return {"ok": False, "error": "HTTP %s: %s" % (st, str(body)[:300]),
