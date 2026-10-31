@@ -299,6 +299,15 @@ MATRIX = [
          entry="core/textbook_kp.py::_call(partial/invalid_points); _build(status=partial,parts)",
          kind="read", priority="P2",
          tests=["test_42_textbook_signature_partial"], evidence="json"),
+    dict(id="F140", feature="版本化 stage cache（runs/steps，指纹/计数/状态，不存正文密钥；WAL/原子切换）",
+         entry="core/pipeline_runtime/cache.py::begin_run/put_step/get_step/mark_stale_runs/"
+               "staged_output; STAGE_CACHE=0 回退",
+         kind="read", priority="P2",
+         tests=["test_43_stage_cache"], evidence="json"),
+    dict(id="F141", feature="崩溃恢复基础：running stale 标记/done 保留/unknown 不自动重发；textbook plan 阶段接入",
+         entry="core/pipeline_runtime/cache.py::finish_run/retry_allowed; textbook_kp._build plan step",
+         kind="read", priority="P2",
+         tests=["test_43_stage_cache"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from . import agent_bridge, chat, config, kp_build
+from .pipeline_runtime import cache as stage_cache
 from .pipeline_runtime import context as runtime_context
 from .pipeline_runtime import state as runtime_state
 from .pipeline_runtime import telemetry
@@ -422,6 +423,33 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
             if h in valid_hashes and isinstance(val, dict) and val.get("points"):
                 parts.setdefault(h, val)
     cap = (int(ctx.max_tokens or 0) if ctx is not None else max_output_tokens())
+    # P2-A：安全的 plan 阶段 cache（只存指纹/计数/状态，不存正文）。
+    stage = None
+    plan_cache_hit = False
+    stage_cfg = str(plan.get("config_fingerprint") or settings_fingerprint())
+    if ctx is not None and stage_cache.enabled():
+        try:
+            stage = stage_cache.begin_run(
+                pipeline="textbook_kp", subject=str(ctx.subject_id or ""),
+                doc_id=int(plan["doc_id"]), config_fingerprint=stage_cfg)
+            if stage.get("run_id"):
+                hit = stage_cache.get_step(
+                    stage["run_id"], "plan", plan["signature"],
+                    config_fingerprint=stage_cfg,
+                    input_fingerprint=plan["signature"])
+                if hit is not None:
+                    plan_cache_hit = True
+                else:
+                    stage_cache.put_step(
+                        stage["run_id"], "plan", plan["signature"],
+                        config_fingerprint=stage_cfg,
+                        input_fingerprint=plan["signature"],
+                        counts={"segments": len(plan["segments"] or []),
+                                "blocks": int(plan.get("n_blocks") or 0),
+                                "chars": int(plan.get("chars") or 0)})
+        except Exception:  # noqa: BLE001 —— cache 不能拖垮主流程
+            stage = None
+            plan_cache_hit = False
     total = len(plan["segments"]) or 1
     calls = 0
     for segment in plan["segments"]:
@@ -525,9 +553,18 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                          reasoning_tokens=None)
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "status": status, "n_points": len(points),
-            "partial_segments": len(partial_segments),
-            "invalid_points": invalid_points}
+    if stage is not None and stage.get("run_id"):
+        try:
+            stage_cache.finish_run(stage["run_id"], status)
+        except Exception:  # noqa: BLE001
+            pass
+    result = {"ok": True, "status": status, "n_points": len(points),
+              "partial_segments": len(partial_segments),
+              "invalid_points": invalid_points,
+              "plan_cache_hit": bool(plan_cache_hit)}
+    if stage is not None and stage.get("run_id"):
+        result["run_id"] = stage["run_id"]
+    return result
 
 
 def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0,
