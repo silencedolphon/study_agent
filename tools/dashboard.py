@@ -5545,6 +5545,25 @@ def api_chat_stream(handler, payload):
     effort = str(config.CHAT_REASONING_EFFORT or '').strip() or None
     use_figures = bool(config.value_int('CHAT_FIGURES', 1))
 
+    # P0-G：问答请求也走入口快照；PIPELINE_RUNTIME=0 时保持旧全局路径。
+    # 问答的 2048 是“端点缺省上限”，不是设置中心 token cap：当 cap=0 时把该
+    # 缺省值写进 context，避免 RunContext 把“无上限”误解成“不发送”。
+    run_ctx = None
+    try:
+        from core.pipeline_runtime import context as runtime_context
+        if runtime_context.runtime_enabled():
+            import dataclasses
+            run_ctx = runtime_context.make_context("chat")
+            model = run_ctx.model
+            thinking = bool(run_ctx.thinking)
+            effort = run_ctx.reasoning_effort or None
+            if int(run_ctx.max_tokens or 0) > 0:
+                max_tokens = int(run_ctx.max_tokens)
+            elif int(max_tokens or 0) > 0:
+                run_ctx = dataclasses.replace(run_ctx, max_tokens=int(max_tokens))
+    except Exception:  # noqa: BLE001 —— 快照失败不阻断问答，回旧路径
+        run_ctx = None
+
     query = (payload.get('query') or '').strip()
     history = payload.get('history') or []
     doc_ids = payload.get('doc_ids') or None
@@ -5590,7 +5609,8 @@ def api_chat_stream(handler, payload):
         msgs = chat_mod.build_messages(query, ev, history)
         t0 = time.perf_counter()
         for kind, data in chat_mod.stream_chat(msgs, model=model, max_tokens=max_tokens,
-                                               thinking=thinking, reasoning_effort=effort):
+                                               thinking=thinking, reasoning_effort=effort,
+                                               run_context=run_ctx):
             if kind == 'delta':
                 emit({'type': 'delta', 'text': data})
             elif kind == 'usage':

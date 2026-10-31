@@ -379,6 +379,10 @@ MATRIX = [
                "core/structures.py::_vision_call/build_structures",
          kind="read", priority="P0",
          tests=["test_55_vision_run_context"], evidence="json"),
+    dict(id="F157", feature="问答 SSE 端点 RunContext：入口快照、cap=0 保留 2048 缺省、runtime0 旧路径",
+         entry="tools/dashboard.py::api_chat_stream make_context(chat); chat.stream_chat(run_context=)",
+         kind="read", priority="P0",
+         tests=["test_56_dashboard_chat_context"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
