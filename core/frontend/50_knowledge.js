@@ -101,6 +101,8 @@ const KPB_ST = {
   waiting:   ['等待',   ''],
   running:   ['进行中', 'warn'],
   done:      ['完成',   'ok'],
+  partial:   ['部分完成', 'warn'],
+  remote_unknown: ['结果未知', 'warn'],
   failed:    ['失败',   'bad'],
   cancelled: ['已取消', 'warn'],
   skipped:   ['跳过',   ''],
@@ -157,7 +159,11 @@ function renderKpBatch(p){
         ? `<span class="badge ok">完成</span><span class="muted">用时 ${_fmtDur(p.elapsed)}</span>`
         : (p.status === 'cancelled'
             ? `<span class="badge warn">已取消</span>`
-            : `<span class="badge bad">有失败</span><span class="muted">${esc(p.error||'')}</span>`));
+            : (p.status === 'partial'
+                ? `<span class="badge warn">部分完成</span><span class="muted">有效结果已保留，未完成部分可续跑${p.error ? '：' + esc(p.error) : ''}</span>`
+                : (p.status === 'remote_unknown'
+                    ? `<span class="badge warn">结果未知</span><span class="muted">请求可能已发出，本次不会自动重发；请人工核对后再操作${p.error ? '：' + esc(p.error) : ''}</span>`
+                    : `<span class="badge bad">有失败</span><span class="muted">${esc(p.error||'')}</span>`))));
   const rows = (p.tasks||[]).map(kpbTaskRow).join('');
   const stBtn = p.active
     ? `<button class="ghost" id="kpb-cancel" style="margin-left:8px">取消未开始的份</button>` : '';

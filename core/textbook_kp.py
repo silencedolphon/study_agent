@@ -161,6 +161,32 @@ def _write(path: Path, value: dict) -> None:
             tmp.unlink()
 
 
+def _backup_before_overwrite(path: Path) -> "Path | None":
+    """done 覆盖旧 final 前先备份旧文件（版本化、不删；GPT-B 修复）。
+
+    命名 `<stem>.json.bak-YYYYmmdd-HHMMSS`，同一秒多次覆盖时追加 `-2/-3`。
+    备份失败**不阻断**写入（新成果比备份更重要），返回 None。
+    """
+    try:
+        if not Path(path).exists():
+            return None
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        bak = Path(path).with_name(Path(path).name + ".bak-" + stamp)
+        n = 1
+        while bak.exists():
+            bak = Path(path).with_name(Path(path).name + ".bak-" + stamp + "-" + str(n))
+            n += 1
+        shutil.copy2(str(path), str(bak))
+        return bak
+    except OSError:
+        return None
+
+
+def _is_partial_part(value) -> bool:
+    """一个分段结果是否"部分有效"（`_call` 在有点无效时置 partial=True）。"""
+    return isinstance(value, dict) and bool(value.get("partial"))
+
+
 def _segments_v1(selected: list[dict]) -> list[dict]:
     """v1（默认/旧行为）：纯 16,000 字符硬切，逐字保持旧 hash/结构。"""
     pieces = []
@@ -259,6 +285,13 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
     path = Path(db_path if db_path is not None else config.DB_PATH)
     conn = sqlite3.connect("file:" + path.as_posix() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    # GPT-G：章候选"元数据 → 正文"两次查询必须在**同一个读事务快照**里。
+    # 只读事务（`BEGIN`）在 WAL 下固定读快照：两次查询之间即使别的连接重入库提交，
+    # 这里也不会读到"元数据是旧的、正文是新的"的半章；读完 close 即自动回滚。
+    try:
+        conn.execute("BEGIN")
+    except sqlite3.Error:
+        pass
     try:
         doc = conn.execute("SELECT title, role FROM documents WHERE id=?", (doc_id,)).fetchone()
         if not doc or doc["role"] != "textbook":
@@ -366,26 +399,98 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
 
 
 def _matching_parts(path: Path, plan: dict) -> dict:
+    """本签名的**已完成**分段（GPT-B：partial=True 的段不算完成，续跑要重调）。
+
+    旧产物兼容：旧 `partial` final（历史版本写在最终 JSON 里的 parts）中
+    `partial` 缺失/False 的条目仍算完成；带 `partial=True` 的一律排除。
+    """
     data = _read(path)
     if data.get("signature") != plan["signature"]:
         return {}
     valid = {s["hash"] for s in plan["segments"]}
     parts = data.get("parts") if isinstance(data.get("parts"), dict) else {}
     return {k: v for k, v in parts.items()
-            if k in valid and isinstance(v, dict) and v.get("points")}
+            if k in valid and isinstance(v, dict) and v.get("points")
+            and not _is_partial_part(v)}
+
+
+def _partial_parts(data: dict, plan: dict) -> dict:
+    """某份数据里属于本签名、且 `partial=True` 的分段（只用于"还需重调"计数）。"""
+    if not isinstance(data, dict) or data.get("signature") != plan["signature"]:
+        return {}
+    valid = {s["hash"] for s in plan["segments"]}
+    parts = data.get("parts") if isinstance(data.get("parts"), dict) else {}
+    return {k: v for k, v in parts.items()
+            if k in valid and isinstance(v, dict) and v.get("points")
+            and _is_partial_part(v)}
+
+
+def _collect_parts(pending_data: dict, previous: dict, plan: dict) -> tuple[dict, set]:
+    """汇总"可跳过/需重跑"的分段（GPT-B）。
+
+    返回 `(done, partial_hashes)`：
+      - `done`：可跳过、不打电话的完整段（含旧版 partial final 里的完整段，用于升级兼容）；
+      - `partial_hashes`：上次只拿到部分有效点的段 —— **不算完成，续跑要重新调用**。
+
+    来源两处：`.pending.json`（新版 partial 只写这里）与旧版直接写在最终 JSON 的
+    `status=partial` 产物（本轮修复前的历史文件；只有同签名才采用，旧 done 无 parts 不受影响）。
+    """
+    done: dict = {}
+    partial: set = set()
+    valid = {s["hash"] for s in plan["segments"]}
+
+    def _take(src: dict) -> None:
+        data = src if isinstance(src, dict) else {}
+        if data.get("signature") != plan["signature"]:
+            return
+        parts = data.get("parts") if isinstance(data.get("parts"), dict) else {}
+        for h, val in parts.items():
+            if h not in valid or not isinstance(val, dict) or not val.get("points"):
+                continue
+            if _is_partial_part(val):
+                partial.add(h)
+                done.pop(h, None)
+            else:
+                partial.discard(h)
+                done.setdefault(h, val)
+
+    # 旧版 partial final 先看，再用 pending 覆盖（pending 更新）
+    if isinstance(previous, dict) and previous.get("status") == "partial":
+        _take(previous)
+    _take(pending_data)
+    return done, partial
+
+
+def _resume_state(plan: dict, previous: dict, pending_data: dict) -> dict:
+    """estimate / read_summary / _build 共用的"续跑状态"（保证估算与实际调用一致）。"""
+    done, partial = _collect_parts(pending_data, previous, plan)
+    todo = [s for s in plan["segments"]
+            if s["hash"] not in done or s["hash"] in partial]
+    attempts = (pending_data.get("attempts")
+                if isinstance(pending_data, dict)
+                and pending_data.get("signature") == plan["signature"]
+                and isinstance(pending_data.get("attempts"), list) else [])
+    resumable = bool(done or partial or attempts)
+    current = (isinstance(previous, dict)
+               and previous.get("status") == "done"
+               and previous.get("signature") == plan["signature"])
+    return {"done": done, "partial": partial, "todo": todo,
+            "attempts": attempts, "resumable": resumable, "current": current}
 
 
 def estimate(doc_id: int, chapter: int, *, force=False, db_path=None, log_dir=None) -> dict:
     plan = _plan(doc_id, chapter, db_path=db_path)
     final, pending, _ = _paths(doc_id, chapter, log_dir)
-    completed = _matching_parts(pending, plan)
-    pending_data = _read(pending)
-    resumable = (pending_data.get("signature") == plan["signature"] and
-                 bool(completed or pending_data.get("attempts")))
     existing = _read(final)
-    current = existing.get("signature") == plan["signature"] and existing.get("status") == "done"
-    todo = [s for s in plan["segments"] if s["hash"] not in completed]
-    if current and not force and not resumable:
+    pending_data = _read(pending)
+    state = _resume_state(plan, existing, pending_data)
+    todo = list(state["todo"])
+    completed = state["done"]
+    if force:
+        # "重新整理"会忽略所有已完成段（_build(force=True) 同样全量重调）：
+        # 估算必须按全部段算，不能少报。
+        todo = list(plan["segments"])
+    elif state["current"] and not state["resumable"]:
         todo = []
     input_tokens = sum(int((len(_SYSTEM) + len(s["material"]) + 200) / kp_build.CHARS_PER_TOKEN)
                        for s in todo)
@@ -394,9 +499,14 @@ def estimate(doc_id: int, chapter: int, *, force=False, db_path=None, log_dir=No
     return {"ok": True, "doc_id": plan["doc_id"], "chapter": plan["chapter"],
             "title": plan["title"], "chapter_name": plan["chapter_name"],
             "signature": plan["signature"], "segments": len(plan["segments"]),
-            "completed_segments": len(completed), "calls": len(todo),
+            "completed_segments": len(completed),
+            "partial_segments": len(state["partial"]),
+            "calls": len(todo),
+            "resumable": bool(state["resumable"]),
+            "pending": bool(state["resumable"]),
+            "current": bool(state["current"]),
             "chars": plan["chars"], "n_blocks": plan["n_blocks"], "exists": bool(existing),
-            "current": current, "model": model_name(), "thinking": thinking_on(),
+            "model": model_name(), "thinking": thinking_on(),
             "reasoning_effort": effort(), "max_tokens": cap,
             "estimated_input_tokens": input_tokens,
             "estimated_output_cap": output_tokens,
@@ -548,24 +658,23 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
     except Exception:  # noqa: BLE001  —— telemetry 不能拖垮主流程
         pass
     final, pending, _ = _paths(plan["doc_id"], plan["chapter"], log_dir)
-    parts = _matching_parts(pending, plan)
     pending_data = _read(pending)
-    raw_attempts = pending_data.get("attempts")
-    attempts = ([x for x in raw_attempts if isinstance(x, dict)]
-                if pending_data.get("signature") == plan["signature"] and isinstance(raw_attempts, list) else [])
     previous = _read(final)
     previous_artifact = dict(previous) if isinstance(previous, dict) else {}
-    if previous.get("status") == "done" and previous.get("signature") == plan["signature"] and not force and not parts and not attempts:
+    # GPT-B：续跑状态与 estimate/read_summary 共用同一套判定。
+    #   · `done`：可跳过、不打电话的完整段；`partial_hashes`：上次只拿到部分有效点，
+    #     不算完成、续跑必须重新调用；
+    #   · 旧版（修复前）把 partial 直接写在最终 JSON 里，这里一并兼容读取；
+    #   · `force=True`（"重新整理"）忽略所有已完成段，与 estimate(force=True) 一致。
+    state = _resume_state(plan, previous_artifact, pending_data)
+    parts = dict(state["done"])
+    partial_hashes = set(state["partial"])
+    attempts = list(state["attempts"])
+    if force:
+        parts, partial_hashes, attempts = {}, set(), []
+    if (previous.get("status") == "done" and previous.get("signature") == plan["signature"]
+            and not force and not parts and not partial_hashes and not attempts):
         return {"ok": True, "status": "done", "reused": True}
-    # partial 续跑：只有本版本 partial 产物才带 per-segment parts；旧产物无此字段，
-    # 维持旧行为（不会误把旧点当成分段缓存）。
-    if (previous.get("status") == "partial"
-            and previous.get("signature") == plan["signature"]
-            and isinstance(previous.get("parts"), dict) and not force):
-        valid_hashes = {s["hash"] for s in plan["segments"]}
-        for h, val in previous["parts"].items():
-            if h in valid_hashes and isinstance(val, dict) and val.get("points"):
-                parts.setdefault(h, val)
     cap = (int(ctx.max_tokens or 0) if ctx is not None else max_output_tokens())
     # P2-A：安全的 plan 阶段 cache（只存指纹/计数/状态，不存正文）。
     stage = None
@@ -662,7 +771,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                 time.time() - float(_STATE.get("started_at") or time.time()), 1)
     points = [point for segment in plan["segments"] for point in parts[segment["hash"]]["points"]]
     partial_segments = [s["hash"] for s in plan["segments"]
-                        if parts[s["hash"]].get("partial")]
+                        if _is_partial_part(parts[s["hash"]])]
     invalid_points = sum(int(parts[s["hash"]].get("invalid_points") or 0)
                          for s in plan["segments"])
     status = "partial" if partial_segments else "done"
@@ -684,15 +793,36 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                 "n_segments": len(plan["segments"]), "points": points,
                 "attempts": attempts,
                 "usage_unreported": sum(1 for x in attempts if x.get("usage") is None)}
-    if status == "partial":
-        # 仅 partial 产物记 per-segment parts，用于"续跑只补缺段"；done 产物保持旧结构。
-        artifact["parts"] = parts
     write_t0 = time.perf_counter()
-    _write(final, artifact)
-    if pending.exists():
-        pending.unlink()
-    # P3-B：v2 构建完成且存在旧产物/review → 先备份再迁移（失败不影响新产物）。
-    if (plan.get("segment_version") == "v2"
+    backup_path = None
+    final_written = False
+    if status == "partial":
+        # GPT-B：**只有 status=done 才写最终 JSON**。partial 只写 pending（可恢复）：
+        #   · 旧 done/partial final 保持原样可读，绝不覆盖；
+        #   · parts 里带每段结果（partial=True 的段在续跑时会被重调，不算完成）；
+        #   · 不删旧 final、不做 review 迁移（迁移只在 done 且 v2 时做）。
+        pending_payload = {
+            "version": VERSION, "status": "partial", "signature": plan["signature"],
+            "doc_id": plan["doc_id"], "chapter": plan["chapter"],
+            "title": plan["title"], "chapter_name": plan["chapter_name"],
+            "generated_at": time.time(), "model": model_name(),
+            "config_fingerprint": (plan.get("config_fingerprint")
+                                   or settings_fingerprint()),
+            "partial_segments": partial_segments, "invalid_points": invalid_points,
+            "n_segments": len(plan["segments"]), "parts": parts, "attempts": attempts,
+            "note": ("partial 只写 pending；旧完成产物保持可读；续跑会重新调用 "
+                     "partial 段，其余完整段复用"),
+        }
+        _write(pending, pending_payload)
+    else:
+        # done 覆盖旧 final 前先备份（版本化、不删；失败不阻断写入）
+        backup_path = _backup_before_overwrite(final)
+        _write(final, artifact)
+        if pending.exists():
+            pending.unlink()
+        final_written = True
+    # P3-B：v2 **done** 构建完成且存在旧产物/review → 先备份再迁移（失败不影响新产物）。
+    if (final_written and plan.get("segment_version") == "v2"
             and previous_artifact.get("points")
             and previous_artifact.get("signature") != plan["signature"]):
         try:
@@ -719,6 +849,10 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
     result = {"ok": True, "status": status, "n_points": len(points),
               "partial_segments": len(partial_segments),
               "invalid_points": invalid_points,
+              "final_written": final_written,
+              "pending_path": ("" if final_written
+                               else str(pending)),
+              "backup_path": (str(backup_path) if backup_path else ""),
               "plan_cache_hit": bool(plan_cache_hit)}
     if stage is not None and stage.get("run_id"):
         result["run_id"] = stage["run_id"]
@@ -771,8 +905,9 @@ def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0
         if _STATE["active"]:
             lock.release(lock_handle)
             return {"ok": False, "error": "已有教材知识点任务正在进行"}
-        _, pending, _ = _paths(doc_id, chapter, log_dir)
-        done0 = len(_matching_parts(pending, plan))
+        final0, pending, _ = _paths(doc_id, chapter, log_dir)
+        # GPT-B：进度里的"已完成段"只算完整段（partial 段续跑要重调，不能显示成完成）。
+        done0 = len(_resume_state(plan, _read(final0), _read(pending))["done"])
         total0 = len(plan["segments"]) or 1
         _STATE.update({"active": True, "status": "running", "doc_id": int(doc_id),
                        "chapter": int(chapter), "done": done0, "total": total0,
@@ -1095,16 +1230,26 @@ def read_summary(doc_id: int, chapter: int, *, log_dir=None, db_path=None) -> di
     result = _read(final)
     plan = _plan(doc_id, chapter, db_path=db_path)
     pending_data = _read(pending)
-    resumable = (pending_data.get("signature") == plan["signature"] and
-                 bool(_matching_parts(pending, plan) or pending_data.get("attempts")))
+    # GPT-B：pending/resumable/calls_needed 与 estimate/_build 共用同一套续跑状态，
+    # 保证"估算说还要 N 次、build 就调 N 次"（partial 段不算完成，必须重调）。
+    state = _resume_state(plan, result, pending_data)
+    resumable = bool(state["resumable"])
+    todo_n = len(state["todo"])
+    if state["current"] and not resumable:
+        todo_n = 0
+    base = {"ok": True, "pending": resumable, "resumable": resumable,
+            "calls_needed": todo_n,
+            "calls_needed_force": len(plan["segments"]),
+            "complete_segments": len(state["done"]),
+            "partial_segments": len(state["partial"])}
     if not result:
-        return {"ok": True, "exists": False, "pending": resumable}
+        return {**base, "exists": False}
     stored_fp = str(result.get("config_fingerprint") or "")
     try:
         current_fp = settings_fingerprint()
     except Exception:  # noqa: BLE001
         current_fp = ""
-    result.update({"ok": True, "exists": True, "pending": resumable,
+    result.update({**base, "exists": True,
                    "stale": result.get("signature") != plan["signature"],
                    # P2-B：只提示，不自动重跑、不改旧字段。
                    "settings_unknown": not bool(stored_fp),

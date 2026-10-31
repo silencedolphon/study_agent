@@ -1068,6 +1068,7 @@ def _rewrite_figure_chunks(conn, doc_id: int, deck: str,
             # 下次重跑本函数会按同一个 `source_ref` 再删一遍再写。
             conn.executemany("DELETE FROM chunks WHERE id=?",
                              [(int(old["id"]),) for old in deletable])
+            db.bump_data_revision(conn)   # GPT-F：删识图块与 bump 同一事务
             conn.commit()
         head = outline.breadcrumb(pno) if outline is not None else ""
         topic = outline.topic(pno) if outline is not None else ""
@@ -1308,9 +1309,17 @@ def _page_pre_from_res(res, path: Path) -> dict:
     """S05：把 ingest 已提取的页文本（含 OCR 追加）整理成 figures.extract_pages 口径。
 
     纯数据副本，不共享可变 extract 对象；未传/开关关闭时 figures 侧回退旧路径。
+
+    ⚠ **混合课件的纯图片页必须补出上下文**：只按 blocks 分组会漏掉"第 1 页文字+
+    图片、第 2 页只有图片、第 3 页文字"里的第 2 页（extract 对无文字页不产 block）。
+    figures 的旧路径用 `fill_empty_pages=True` 补页；本函数按 `res.meta` 的
+    `page_count/slides/pages` 同样补出 1..N，所有页都进视觉上下文（空 title/body）。
+    这不会改变 OCR 口径：body 仍来自实际入库 blocks（含 OCR 追加文本）。
     """
-    title = str((getattr(res, "meta", {}) or {}).get("title") or path.stem).strip() or path.stem
+    meta = getattr(res, "meta", {}) or {}
+    title = str(meta.get("title") or path.stem).strip() or path.stem
     by_page: dict = {}
+    max_page = 0
     for b in getattr(res, "blocks", []) or []:
         try:
             page = int(getattr(b, "page", 0) or 0)
@@ -1318,12 +1327,29 @@ def _page_pre_from_res(res, path: Path) -> dict:
             continue
         if page <= 0:
             continue
+        max_page = max(max_page, page)
         rec = by_page.setdefault(page, {"page": page, "title": "", "body": []})
         text = str(getattr(b, "text", "") or "")
         if getattr(b, "kind", "") == "heading" and not rec["title"]:
             rec["title"] = text
         else:
             rec["body"].append(text)
-    pages = [{"page": p, "title": by_page[p]["title"],
-              "body": "\n".join(by_page[p]["body"])} for p in sorted(by_page)]
-    return {"deck_title": title, "pages": pages}
+    total = max_page
+    for key in ("page_count", "slides", "pages"):
+        raw = meta.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple, dict)):
+            n = len(raw)
+        else:
+            try:
+                n = int(raw or 0)
+            except (TypeError, ValueError):
+                n = 0
+        total = max(total, n)
+    pages = []
+    for p in range(1, total + 1):
+        rec = by_page.get(p) or {"page": p, "title": "", "body": []}
+        pages.append({"page": p, "title": rec["title"],
+                      "body": "\n".join(rec["body"])})
+    return {"deck_title": title, "page_count": total, "pages": pages}

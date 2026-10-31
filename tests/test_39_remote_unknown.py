@@ -230,6 +230,10 @@ class TestSingleFlight(unittest.TestCase):
         path = Path(a["path"])
         info = json.loads(path.read_text(encoding="utf-8"))
         info["created_at"] = time.time() - 999
+        info["heartbeat_at"] = time.time() - 999
+        # D3（task-60）：新语义要求"TTL 超期 **且** 持有者已死"才回收；
+        # 这里模拟进程已退出（改 pid 为不存在的值），而不是让当前进程假装死亡。
+        info["pid"] = 999999999
         path.write_text(json.dumps(info), encoding="utf-8")
         b = self._acquire()
         self.assertTrue(b["ok"])
@@ -242,6 +246,8 @@ class TestSingleFlight(unittest.TestCase):
         path = Path(a["path"])
         info = json.loads(path.read_text(encoding="utf-8"))
         info["created_at"] = time.time() - 999
+        info["heartbeat_at"] = time.time() - 999
+        info["pid"] = 999999999            # 模拟持有者进程已退出（D3 活性判断）
         path.write_text(json.dumps(info), encoding="utf-8")
         c = self._acquire(force=True)
         self.assertTrue(c["ok"])

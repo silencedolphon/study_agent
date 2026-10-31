@@ -84,6 +84,36 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
 
 
+# 细粒度管线名 → 设置中心管线名（**凭据引用**专用）。
+#
+# 背景（GPT 独立验收 3C）：`RunContext` 原来直接把细粒度 pipeline 名写进
+# `credential_ref`（如 courseware_kp），而 `config.pipeline_key()` 只认设置中心
+# 的管线名（chat/kp/ingest/deck/preview/textbook_kp）；找不到就回退
+# `chat.load_api_key()`，后者可能拿到"最近激活管线"的密钥 —— 不同管线配了
+# 不同 key 时会用错钥匙。这里显式给出映射；**只在 context/凭据引用层用**，
+# 不改设置中心 API、不影响 `pipeline` 字段本身（审计仍看得到细粒度管线名）。
+CREDENTIAL_ALIASES: dict[str, str] = {
+    "courseware_kp": "kp",
+    "textbook_teach": "kp",
+    "terms": "kp",
+    "ingest_vision": "ingest",
+    "structures": "ingest",
+    "ingest_outline": "ingest",
+    "deck_chat": "deck",
+}
+
+
+def canonical_credential_ref(pipeline: str) -> str:
+    """把细粒度管线名映射成 `config.pipeline_key()` 认识的设置中心管线名。
+
+    - 已是设置中心管线名（chat/kp/ingest/deck/preview/textbook_kp）→ 原样返回；
+    - 未知名字 → 原样返回（保留旧行为，后续仍可回退凭据链）；
+    - 只做字符串映射，**不读密钥、不读最近管线**。
+    """
+    name = str(pipeline or "").strip()
+    return CREDENTIAL_ALIASES.get(name, name)
+
+
 def runtime_enabled() -> bool:
     """`PIPELINE_RUNTIME=0/false/off/no` 关闭；其它（含未设置）默认开。"""
     return str(os.environ.get("PIPELINE_RUNTIME", "1")).strip().lower() not in (
@@ -159,7 +189,8 @@ def make_context(pipeline: str, subject=None, doc_id: int = 0) -> RunContext:
     - 模型/端点：按管线自己的设置键（没有则 deepseek-flash / 官方端点）。
     - thinking/effort：按管线自己的设置键（没有就 false / ""）。
     - max_tokens：`config.token_cap(pipeline)`（0 = 不发送）。
-    - 密钥：只存 `credential_ref = pipeline`，不存正文。
+    - 密钥：只存 `credential_ref = canonical_credential_ref(pipeline)`（设置中心管线名），
+      不存正文；不在此读/写"最近激活管线"。
     """
     pipeline = str(pipeline or "chat").strip() or "chat"
     model_key = _PIPELINE_MODEL_KEYS.get(pipeline, "")
@@ -201,6 +232,6 @@ def make_context(pipeline: str, subject=None, doc_id: int = 0) -> RunContext:
         max_tokens=max_tokens,
         prompt_version=str(os.environ.get("PIPELINE_PROMPT_VERSION", "") or ""),
         schema_version=str(os.environ.get("PIPELINE_SCHEMA_VERSION", "") or ""),
-        credential_ref=pipeline,
+        credential_ref=canonical_credential_ref(pipeline),
         doc_id=int(doc_id or 0),
     )

@@ -240,20 +240,29 @@ def _norm_chapter_arg(chapter) -> dict:
     return {"no": 0, "name": s}
 
 
-def _list_chapters_uncached(doc_id: int, *, db_path: str | os.PathLike | None = None) -> dict:
+def _list_chapters_uncached(doc_id: int, *, db_path: str | os.PathLike | None = None,
+                            _conn=None) -> dict:
     """列这份教材的章（**零模型成本**）：`chunks.heading_path` 里的 `> 第N章 …` 归章。
 
     返回 `{"ok", "doc_id", "title", "chapters":[{no,name,heading_path,n_blocks,
     page_start,page_end,pages,n_sections}], "sections_artifact": {...}}`。
     `n_sections` 来自卡 C-0092 的《章节细目》（读不到就为 0 并如实标注）。
+
+    `_conn`：内部参数（公共 API 兼容）。给定时复用同一条只读连接/事务快照，
+    不再自开连接、也不关闭它（GPT-G 的章级一致读）。
     """
-    db = Path(db_path) if db_path else Path(config.DB_PATH)
-    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    own = _conn is None
+    if own:
+        db = Path(db_path) if db_path else Path(config.DB_PATH)
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    else:
+        conn = _conn
     try:
         rows = conn.execute("SELECT id, ord, source_ref, heading_path FROM chunks "
                             "WHERE doc_id=? ORDER BY ord, id", (int(doc_id),)).fetchall()
     finally:
-        conn.close()
+        if own:
+            conn.close()
     if not rows:
         return {"ok": False, "doc_id": int(doc_id),
                 "error": "这份资料在库里没有任何块（chunks 为空），列不出章节"}
@@ -309,8 +318,19 @@ def _list_chapters_uncached(doc_id: int, *, db_path: str | os.PathLike | None = 
                                if isinstance(s, dict)]),
             "sections_fallback": bool(art.get("fallback")),
         })
+    if _conn is not None:
+        # 快照连接读标题（不另开连接，避免"标题来自新库、章节来自旧快照"的混搭）
+        try:
+            tr = _conn.execute("SELECT title FROM documents WHERE id=?",
+                               (int(doc_id),)).fetchone()
+            title = str((tr[0] if tr else "") or "").strip()
+        except sqlite3.Error:
+            title = ""
+        title = title or ("文档 %d" % int(doc_id))
+    else:
+        title = kp_build.doc_title_v2(doc_id, db_path)
     return {
-        "ok": True, "doc_id": int(doc_id), "title": kp_build.doc_title_v2(doc_id, db_path),
+        "ok": True, "doc_id": int(doc_id), "title": title,
         "book": book, "n_chapters": len(chapters), "chapters": chapters,
         "invalid_refs": bad_refs,
         "chapter_source": "chunks.heading_path",
@@ -345,14 +365,18 @@ def _load_sections_artifact(doc_id: int) -> dict:
 
 
 def locate_chapter(doc_id: int, chapter, *,
-                   db_path: str | os.PathLike | None = None) -> dict:
+                   db_path: str | os.PathLike | None = None,
+                   _conn=None) -> dict:
     """定位一章：先按 `heading_path`（入库结构），找不到再退到《章节细目》的页范围。
 
     返回 `{"ok", "no", "name", "heading_path", "block_ids", "pages", "page_start",
     "page_end", "source"}`。两种来路都找不到就 `ok=False` + 可操作提示。
+
+    `_conn`：内部参数（GPT-G）。给定时，章节目录与兜底页范围扫描都在这条
+    只读连接的事务快照里做，函数不关闭它；公共调用方不需要传。
     """
     want = _norm_chapter_arg(chapter)
-    listed = list_chapters(doc_id, db_path=db_path)
+    listed = list_chapters(doc_id, db_path=db_path, _conn=_conn)
     if not listed.get("ok"):
         return {"ok": False, "error": listed.get("error") or "列不出章节",
                 "doc_id": int(doc_id)}
@@ -373,7 +397,8 @@ def locate_chapter(doc_id: int, chapter, *,
         # 全表。旧接口/旧调用若没有该字段，保留 agg_block_ids 兜底。
         ids = hit.get("block_ids")
         if not isinstance(ids, list):
-            ids = agg_block_ids(doc_id, int(hit["no"]), db_path=db_path)
+            ids = agg_block_ids(doc_id, int(hit["no"]), db_path=db_path,
+                                _conn=_conn)
         return {"ok": True, "doc_id": int(doc_id), "no": int(hit["no"]),
                 "name": hit["name"], "heading_path": hit["heading_path"],
                 "block_ids": list(ids),
@@ -403,8 +428,12 @@ def locate_chapter(doc_id: int, chapter, *,
                                                 for c in listed["chapters"][:8]) or "（没有）"))}
     a = int(art.get("page_start") or 0)
     b = int(art.get("page_end") or 0)
-    db = Path(db_path) if db_path else Path(config.DB_PATH)
-    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    own = _conn is None
+    if own:
+        db = Path(db_path) if db_path else Path(config.DB_PATH)
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    else:
+        conn = _conn
     try:
         ids = []
         for cid, ref in conn.execute("SELECT id, source_ref FROM chunks WHERE doc_id=?",
@@ -413,7 +442,8 @@ def locate_chapter(doc_id: int, chapter, *,
             if parsed and parsed[0] <= b and parsed[1] >= a:
                 ids.append(int(cid))
     finally:
-        conn.close()
+        if own:
+            conn.close()
     return {"ok": True, "doc_id": int(doc_id), "no": int(art.get("no") or want["no"] or 0),
             "name": str(art.get("name") or want["name"] or ""),
             "heading_path": "%s > 第%s章 %s" % (listed.get("book") or "",
@@ -426,10 +456,18 @@ def locate_chapter(doc_id: int, chapter, *,
 
 
 def agg_block_ids(doc_id: int, chapter_no: int, *,
-                  db_path: str | os.PathLike | None = None) -> list:
-    """该章的块 id（`heading_path` 章级筛选，**零模型成本**）。"""
-    db = Path(db_path) if db_path else Path(config.DB_PATH)
-    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+                  db_path: str | os.PathLike | None = None,
+                  _conn=None) -> list:
+    """该章的块 id（`heading_path` 章级筛选，**零模型成本**）。
+
+    `_conn`：内部参数（GPT-G）——给定时复用同一条只读连接/快照，不自开、不关闭。
+    """
+    own = _conn is None
+    if own:
+        db = Path(db_path) if db_path else Path(config.DB_PATH)
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    else:
+        conn = _conn
     try:
         out = []
         for cid, hp in conn.execute("SELECT id, heading_path FROM chunks "
@@ -439,7 +477,8 @@ def agg_block_ids(doc_id: int, chapter_no: int, *,
                 out.append(int(cid))
         return out
     finally:
-        conn.close()
+        if own:
+            conn.close()
 
 
 # ---------------------------------------------------------------- 章级 ch
@@ -483,17 +522,29 @@ def _assemble_chapter(full: dict, info: dict) -> tuple:
 
 
 def _read_chapter_ch_slow(doc_id: int, chapter, *,
-                          db_path: str | os.PathLike | None = None) -> tuple:
-    """旧路径（整本读取后筛章）：保留作回滚/对照用。"""
-    full = kp_build.read_text_pages(doc_id, db_path)
-    info = locate_chapter(doc_id, chapter, db_path=db_path)
+                          db_path: str | os.PathLike | None = None,
+                          _conn=None) -> tuple:
+    """旧路径（整本读取后筛章）：保留作回滚/对照用。
+
+    `_conn`：内部参数（GPT-G）。给定时用**同一条快照连接**枚举全量块 id 再读正文
+    （等价于整本读取，但不会在定位与正文之间读到另一个快照），不关闭它。
+    """
+    if _conn is not None:
+        ids = [int(r[0]) for r in _conn.execute(
+            "SELECT id FROM chunks WHERE doc_id=? ORDER BY ord, id", (int(doc_id),))]
+        full = kp_build.read_text_pages_by_ids(doc_id, ids, db_path, _conn=_conn)
+        info = locate_chapter(doc_id, chapter, db_path=db_path, _conn=_conn)
+    else:
+        full = kp_build.read_text_pages(doc_id, db_path)
+        info = locate_chapter(doc_id, chapter, db_path=db_path)
     if not info.get("ok"):
         return {}, info, "", [], {"ok": False}
     return _assemble_chapter(full, info)
 
 
 def _read_chapter_ch_uncached(doc_id: int, chapter, *,
-                              db_path: str | os.PathLike | None = None) -> tuple:
+                              db_path: str | os.PathLike | None = None,
+                              _conn=None) -> tuple:
     """构造**章级 ch**并渲染整章材料。
 
     返回 `(ch, info, material, inv, render_stats)`：
@@ -510,17 +561,17 @@ def _read_chapter_ch_uncached(doc_id: int, chapter, *,
     可回退到旧的整本读取路径（用于对照/回滚）。
     """
     if (os.environ.get("PREVIEW_CHAPTER_FAST") or "1").strip() == "0":
-        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path)
-    info = locate_chapter(doc_id, chapter, db_path=db_path)
+        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path, _conn=_conn)
+    info = locate_chapter(doc_id, chapter, db_path=db_path, _conn=_conn)
     if not info.get("ok"):
         return {}, info, "", [], {"ok": False}
     # 旧路径 read_text_pages 遇到任何坏 source_ref 会明确报错；快速路径若只
     # 用 list_chapters 的 block_ids，会静默绕过这些块。存在坏页码时回退旧路径，
     # 保留“拒绝静默丢块”的安全语义（S00A-2）。
     if info.get("invalid_refs"):
-        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path)
+        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path, _conn=_conn)
     full = kp_build.read_text_pages_by_ids(
-        doc_id, list(info.get("block_ids") or []), db_path)
+        doc_id, list(info.get("block_ids") or []), db_path, _conn=_conn)
     return _assemble_chapter(full, info)
 
 
@@ -2047,29 +2098,49 @@ def _db_revision(db_path: Path) -> int:
         return 0
 
 
-def _chapter_block_sig(db_path: Path, block_ids) -> str:
+def _db_revision_conn(conn) -> int:
+    """从**已打开的快照连接**读 data_revision（GPT-G：不要另开连接读版本）。"""
+    try:
+        return int(db_mod.data_revision(conn))
+    except (sqlite3.Error, AttributeError, TypeError, ValueError):
+        return 0
+
+
+def _chapter_block_sig(db_path: Path, block_ids, _conn=None) -> str:
     ids = sorted({int(x) for x in (block_ids or [])})
     if not ids:
         return ""
-    try:
-        conn = sqlite3.connect("file:" + db_path.as_posix() + "?mode=ro", uri=True)
+    own = _conn is None
+    if own:
         try:
-            marks = ",".join("?" for _ in ids)
-            rows = conn.execute(
-                "SELECT id, COALESCE(content_hash, '') FROM chunks WHERE id IN (%s)"
-                % marks, ids).fetchall()
-        finally:
-            conn.close()
+            conn = sqlite3.connect("file:" + db_path.as_posix() + "?mode=ro", uri=True)
+        except (sqlite3.Error, OSError):
+            return ""
+    else:
+        conn = _conn
+    try:
+        marks = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            "SELECT id, COALESCE(content_hash, '') FROM chunks WHERE id IN (%s)"
+            % marks, ids).fetchall()
     except (sqlite3.Error, OSError):
         return ""
+    finally:
+        if own:
+            conn.close()
     rows = sorted((int(a), str(b or "")) for a, b in rows)
     return hashlib.sha256(json.dumps(rows).encode("utf-8")).hexdigest()[:24]
 
 
-def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> dict:
-    """带进程内缓存的章节目录；键含 db_path+doc+data_revision+sections 产物签名。"""
+def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None,
+                  _conn=None) -> dict:
+    """带进程内缓存的章节目录；键含 db_path+doc+data_revision+sections 产物签名。
+
+    `_conn`：内部参数（公共 API 兼容）。给定时，revision 与章节行都从**同一条只读
+    连接/事务快照**读取（GPT-G：不另开连接读版本），函数不关闭它。
+    """
     db = Path(db_path) if db_path else Path(config.DB_PATH)
-    rev = _db_revision(db)
+    rev = _db_revision_conn(_conn) if _conn is not None else _db_revision(db)
     key = None
     if rev > 0:
         key = (str(db.resolve()), int(doc_id), int(rev),
@@ -2077,7 +2148,7 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
         hit = _cache_get(_CHAPTER_LIST_CACHE, key)
         if hit is not None:
             return hit
-    result = _list_chapters_uncached(doc_id, db_path=db_path)
+    result = _list_chapters_uncached(doc_id, db_path=db_path, _conn=_conn)
     if key is not None and result.get("ok"):
         _cache_put(_CHAPTER_LIST_CACHE, key, result)
     return result
@@ -2087,19 +2158,38 @@ def read_chapter_ch(doc_id: int, chapter, *,
                     db_path: str | os.PathLike | None = None) -> tuple:
     """带章节材料缓存；键含 doc/chapter/data_revision/本章 block ids+content hash。
 
+    GPT-G（2026-11-01）：**定位（locate/list）与正文读取共享同一个只读事务快照**。
+    以前 `locate_chapter` 与 `read_text_pages_by_ids` 各开一条连接：若两步之间别的
+    进程重入库提交，会读到"章节目录是旧的、正文是新的"的半章（甚至静默缺块）。
+    现在先开一条只读连接并 `BEGIN`（WAL 下固定读快照），在该快照里读 revision、
+    定位、算 block 指纹、读正文；读完关闭（隐式回滚）。因此不会出现 ok=True 的半章，
+    也不需要"读到一半发现变了再重试"（重试可能追加付费，本项目不做）。
+
     返回 deepcopy，调用方改返回值不会污染缓存；rev=0/无块时不缓存（安全回退）。
     """
     db = Path(db_path) if db_path else Path(config.DB_PATH)
-    rev = _db_revision(db)
-    info = locate_chapter(doc_id, chapter, db_path=db_path)
-    key = None
-    if rev > 0 and info.get("ok") and info.get("block_ids"):
-        key = (str(db.resolve()), int(doc_id), int(info.get("no") or 0),
-               int(rev), _chapter_block_sig(db, info.get("block_ids")))
-        hit = _cache_get(_CHAPTER_MATERIAL_CACHE, key)
-        if hit is not None:
-            return hit
-    result = _read_chapter_ch_uncached(doc_id, chapter, db_path=db_path)
-    if key is not None and result and isinstance(result, tuple) and result[2]:
-        _cache_put(_CHAPTER_MATERIAL_CACHE, key, result)
-    return result
+    conn = None
+    try:
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("BEGIN")
+        except sqlite3.Error:
+            pass
+        rev = _db_revision_conn(conn)
+        info = locate_chapter(doc_id, chapter, db_path=db_path, _conn=conn)
+        key = None
+        if rev > 0 and info.get("ok") and info.get("block_ids"):
+            key = (str(db.resolve()), int(doc_id), int(info.get("no") or 0),
+                   int(rev), _chapter_block_sig(db, info.get("block_ids"), _conn=conn))
+            hit = _cache_get(_CHAPTER_MATERIAL_CACHE, key)
+            if hit is not None:
+                return hit
+        result = _read_chapter_ch_uncached(doc_id, chapter, db_path=db_path,
+                                           _conn=conn)
+        if key is not None and result and isinstance(result, tuple) and result[2]:
+            _cache_put(_CHAPTER_MATERIAL_CACHE, key, result)
+        return result
+    finally:
+        if conn is not None:
+            conn.close()

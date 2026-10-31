@@ -391,6 +391,21 @@ MATRIX = [
          entry="core/kp_text.py::figure_rows/read_text_pages_by_ids; kp_build 旧名字同一对象",
          kind="read", priority="P4",
          tests=["test_58_kp_text_split"], evidence="json"),
+    dict(id="F160", feature="GPT验收修复A：混合课件空页补齐/页图缓存完整性/data_revision写路径/视觉key cap/502-504 unknown",
+         entry="core/ingest.py::_page_pre_from_res; core/figures.py::render_pages_cached/visual_cache_key/"
+               "_http_post; dashboard.api_delete_doc",
+         kind="read", priority="P0",
+         tests=["test_59_gptfix_assets"], evidence="json"),
+    dict(id="F161", feature="GPT验收修复B/G/H：教材partial不覆盖旧done/一致章节快照/outline token不翻倍",
+         entry="core/textbook_kp.py::_build/_plan/_resume_state; core/preview.py::read_chapter_ch; "
+               "core/outline.py::analyze_deck",
+         kind="read", priority="P0",
+         tests=["test_60_gptfix_textbook"], evidence="json"),
+    dict(id="F162", feature="GPT验收修复C/D：凭据canonical别名/硬超时unknown/锁PID+heartbeat活性/状态字段",
+         entry="core/pipeline_runtime/context.py::canonical_credential_ref; "
+               "core/pipeline_runtime/state.py::SingleFlight; core/kp_build.py ModelCallHang",
+         kind="read", priority="P0",
+         tests=["test_61_gptfix_keys_unknown"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

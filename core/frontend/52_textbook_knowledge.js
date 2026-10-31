@@ -56,6 +56,17 @@ function bookProgressHtml(p){
       ${label}
     </div>`;
   }
+  if (p.status === 'partial' || p.status === 'remote_unknown'){
+    const title = p.status === 'partial' ? '部分完成' : '结果未知';
+    const hint = p.status === 'partial'
+      ? '有效点已保留，未完成部分可续跑；旧完成产物不会被覆盖。'
+      : '请求可能已发出，本次不会自动重发；请人工核对后再操作。';
+    return `<div class="book-kp-progress" data-book-progress="${esc(p.status)}">
+      <div class="book-kp-progress-text"><b>${title}</b>${done ? ` · ${done}/${total || 0} 段` : ''}${p.error ? ' · ' + esc(p.error) : ''}</div>
+      ${label}
+      <div class="small muted">${hint}</div>
+    </div>`;
+  }
   if (p.status === 'failed'){
     return `<div class="book-kp-progress failed" data-book-progress="failed">
       <div class="book-kp-error">上次未完成：${esc(p.error || '请重试')}${

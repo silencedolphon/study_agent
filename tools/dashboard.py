@@ -4192,6 +4192,7 @@ def api_delete_doc(conn, doc_id, delete_file, purge_orphans, dry_run):
         "DELETE FROM kp_sources WHERE chunk_id IN\n           (SELECT id FROM chunks WHERE doc_id=?)",
         (doc_id,))
     conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+    db.bump_data_revision(conn)      # GPT-F：删除资料与 bump 同一事务
     conn.commit()
 
     purge = {}

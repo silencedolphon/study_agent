@@ -30,21 +30,30 @@ def figure_rows(conn, doc_id, cols):
 
 
 def read_text_pages_by_ids(doc_id: int, chunk_ids,
-                           db_path: str | os.PathLike | None = None) -> dict:
+                           db_path: str | os.PathLike | None = None,
+                           *, _conn=None) -> dict:
     """只读取指定 chunk 集合的文本页结构（章级读取的快速路径）。
 
     返回结构与 `read_text_pages()` 相同，但只包含给定块：
       - `blocks`/`cover`/`figrows`/`max_page`/`n_blocks`/`pages_all`；
       - 块解析规则、跨页覆盖、图片理解标记与整本读取完全一致；
       - 任何给定块解析不出页码仍会报错，绝不静默丢块。
+
+    `_conn` 是**内部参数**（公共 API 兼容，调用方不需要传）：给定时复用同一条
+    只读连接（GPT-G：章级定位与正文读取必须共享同一个事务快照），不关闭它；
+    不给时保持旧行为（自己开只读连接、用完关闭）。
     """
     wanted = sorted({int(x) for x in (chunk_ids or []) if int(x) > 0})
     if not wanted:
         return {"blocks": {}, "cover": {}, "figrows": {}, "max_page": 0,
                 "n_blocks": 0, "pages_all": []}
-    db = Path(db_path) if db_path else Path(config.DB_PATH)
-    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    own = _conn is None
+    if own:
+        db = Path(db_path) if db_path else Path(config.DB_PATH)
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    else:
+        conn = _conn
     try:
         blocks: dict = {}
         cover: dict = {}
@@ -80,7 +89,8 @@ def read_text_pages_by_ids(doc_id: int, chunk_ids,
             if page in cover:
                 figrows[page] = {"no_info": int(r["no_info"] or 0)}
     finally:
-        conn.close()
+        if own:
+            conn.close()
     if bad:
         raise RuntimeError("有 %d 个块的 source_ref 解析不出页码（拒绝静默丢块）：%s"
                            % (len(bad), bad[:5]))

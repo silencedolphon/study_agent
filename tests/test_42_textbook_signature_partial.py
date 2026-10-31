@@ -239,12 +239,14 @@ class TestPartial(_Base):
                                      log_dir=self.logs, max_calls=10)
         self.assertEqual(res["status"], "partial", "partial 不能冒充 done")
         self.assertEqual(res["invalid_points"], 2)
+        self.assertFalse(res["final_written"], "GPT-B：partial 不写最终 JSON")
         final, pending, _ = textbook_kp._paths(50, 1, self.logs)
-        art = json.loads(final.read_text(encoding="utf-8"))
+        self.assertFalse(final.exists(), "partial 不得创建/覆盖最终 JSON")
+        self.assertTrue(pending.exists(), "partial 写入 pending 供续跑")
+        art = json.loads(pending.read_text(encoding="utf-8"))
         self.assertEqual(art["status"], "partial")
-        self.assertEqual(len(art["points"]), len(plan["segments"]))
-        self.assertFalse(pending.exists())
         self.assertIn("parts", art, "partial 产物带分段缓存用于续跑")
+        self.assertEqual(len(art["parts"]), len(plan["segments"]))
         self.assertEqual(len(calls), len(plan["segments"]))
 
     def test_partial_resume_only_missing_segment(self):
@@ -253,14 +255,15 @@ class TestPartial(_Base):
         final, pending, _ = textbook_kp._paths(50, 1, self.logs)
         first_hash = plan["segments"][0]["hash"]
         final.parent.mkdir(parents=True, exist_ok=True)
+        # 旧版（修复前）partial 直接写在 final：第一个段是**完整**段（partial=False）
         final.write_text(json.dumps({
             "version": textbook_kp.VERSION, "status": "partial",
             "signature": plan["signature"], "doc_id": 50, "chapter": 1,
             "title": plan["title"], "chapter_name": plan["chapter_name"],
             "config_fingerprint": plan["config_fingerprint"],
             "points": [self._point(1)],
-            "parts": {first_hash: {"points": [self._point(1)], "partial": True,
-                                   "invalid_points": 1, "usage": {},
+            "parts": {first_hash: {"points": [self._point(1)], "partial": False,
+                                   "invalid_points": 0, "usage": {},
                                    "finish_reason": "stop"}}}), encoding="utf-8")
         calls = []
         def fake_call(seg, pl, run_context=None):
@@ -272,7 +275,12 @@ class TestPartial(_Base):
                                      log_dir=self.logs, max_calls=10)
         self.assertEqual(len(calls), len(plan["segments"]) - 1,
                          "续跑只补缺段（已成功段不重调）")
-        self.assertIn(res["status"], ("done", "partial"))
+        self.assertEqual(res["status"], "done")
+        self.assertTrue(res["final_written"])
+        # GPT-B：done 覆盖旧 final 前已版本化备份
+        self.assertTrue(res.get("backup_path"))
+        from pathlib import Path as _P
+        self.assertTrue(_P(res["backup_path"]).exists(), "旧 final 必须有备份")
 
     def test_build_failure_keeps_pending_and_no_retry(self):
         plan = self._plan(16000)

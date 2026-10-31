@@ -693,7 +693,8 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
     if ctx is not None:
         # 凭据只按引用取；取不到再走原凭据链；key 不写日志/异常。
         key = (api_key
-               or config.pipeline_key(str(ctx.credential_ref or ctx.pipeline))
+               or config.pipeline_key(pipeline_context.canonical_credential_ref(
+                   str(ctx.credential_ref or ctx.pipeline)))
                or load_api_key())
     else:
         key = api_key or load_api_key()
@@ -808,7 +809,8 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
         return
     if ctx is not None:
         key = (api_key
-               or config.pipeline_key(str(ctx.credential_ref or ctx.pipeline))
+               or config.pipeline_key(pipeline_context.canonical_credential_ref(
+                   str(ctx.credential_ref or ctx.pipeline)))
                or load_api_key())
     else:
         key = api_key or load_api_key()

@@ -40,14 +40,63 @@ class RemoteUnknownError(RuntimeError):
     """发送后结果未知：**禁止自动重发**（调用方只能把错误交回给用户决定）。"""
 
     remote_unknown = True
+    indeterminate = True
 
     def __init__(self, message: str, *, cause: BaseException | None = None):
         super().__init__(message)
         self.remote_unknown = True
+        self.indeterminate = True
         self.cause = cause
         self.original_class = type(cause).__name__ if cause is not None else ""
         self.finish_reason = str(getattr(cause, "finish_reason", "") or "")
         self.usage = getattr(cause, "usage", None)
+
+
+def _pid_alive(pid) -> bool:
+    """持有者进程是否仍存活（跨平台；**权限异常保守视为活跃**）。
+
+    - 当前进程 → True（单进程测试里最常见：持有者还活着）；
+    - Windows：OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) + GetExitCodeProcess；
+      打不开且 errno=5（拒绝访问）→ 保守 True；打不开其它原因 → False（进程不存在）；
+    - POSIX：`os.kill(pid, 0)`；PermissionError → 保守 True。
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = k32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+            if not handle:
+                err = int(ctypes.get_last_error() or 0)
+                return err == 5                              # 权限异常：保守视为活着
+            try:
+                code = ctypes.c_ulong(0)
+                ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+                return bool(ok) and int(code.value) == 259    # STILL_ACTIVE
+            finally:
+                try:
+                    k32.CloseHandle(handle)
+                except OSError:
+                    pass
+        except Exception:  # noqa: BLE001 - 活性判断失败时保守视为活着
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+
 
 
 class SingleFlightBusy(RuntimeError):
@@ -143,8 +192,11 @@ class SingleFlight:
 
     键：`pipeline + subject + doc_id + stage + object + config_fingerprint`；
     锁文件放在 `PIPELINE_LOCK_DIR`（默认 `config.LOG_DIR/runtime/locks`），
-    原子 `O_CREAT|O_EXCL` 创建；过期锁可回收；只释放自己 token 的锁。
-    `force` 不抢正在执行者的锁（不得并行），只允许回收已完成/过期锁。
+    原子 `O_CREAT|O_EXCL` 创建；锁文件含 token/pid/created_at/heartbeat_at/键信息
+    （**不含密钥/正文**）。过期回收前检查持有者 PID 是否存活与 heartbeat 是否超期：
+    活着/心跳未超时的 running 锁**不会被 TTL 或 force 抢**；只有确认持有者死亡
+    且心跳超期才回收。`heartbeat(handle)` 可给长任务续租。
+    `force=True` 不抢活跃持有者，只允许回收已完成/确认死亡的锁。
     """
 
     def __init__(self, lock_dir=None, stale_after: float | None = None):
@@ -179,24 +231,88 @@ class SingleFlight:
             return {}
 
     def _is_stale(self, info: dict, now: float | None = None) -> bool:
+        """是否**心跳/创建时间**超过 TTL（D3：不再只看 created_at）。
+
+        有 `heartbeat_at` 用较新的那个；旧锁文件没有 heartbeat → 退回 created_at。
+        注意：**stale ≠ 可回收**；running 还要求持有者 PID 已死（见 `_try_reclaim`）。
+        """
         if not info:
             return False                        # 读不出来先不抢（保守）
-        try:
-            created = float(info.get("created_at") or 0.0)
-        except (TypeError, ValueError):
+        beats = []
+        for key in ("heartbeat_at", "created_at"):
+            try:
+                v = float(info.get(key) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                beats.append(v)
+        if not beats:
             return False
-        return (time.time() if now is None else now) - created > self.stale_after
+        last = max(beats)
+        return (time.time() if now is None else now) - last > self.stale_after
+
+    def _write_lock(self, path: Path, payload: dict) -> bool:
+        """原子重写锁文件（续租用：临时文件 + os.replace，避免读到半截 JSON）。"""
+        tmp = path.with_name(path.name + ".tmp-" + uuid.uuid4().hex[:8])
+        try:
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(str(tmp), str(path))
+            return True
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return False
+
+    def heartbeat(self, handle) -> bool:
+        """给仍活着的执行者续租（更新 `heartbeat_at`）；只续自己 token 的锁。
+
+        返回 False：handle 无效 / 锁已被接管/删除 / 写盘失败。
+        """
+        if not isinstance(handle, dict):
+            return False
+        path = Path(str(handle.get("path") or ""))
+        token = str(handle.get("token") or "")
+        if not path.name or not token:
+            return False
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(info, dict) or str(info.get("token") or "") != token:
+            return False
+        info["heartbeat_at"] = time.time()
+        info["pid"] = int(info.get("pid") or os.getpid())
+        return self._write_lock(path, info)
 
     def _try_reclaim(self, path: Path, info: dict, *, force: bool,
                      now: float) -> bool:
-        """只有过期/已完成/失败（残留）的锁可回收；**执行中的锁绝不抢**。"""
+        """回收**确认已死/已完成**的锁；**活着的 running 持有者绝不抢**（含 force）。
+
+        规则（D3）：
+        - status 已完成/失败/取消/部分 → 旧的"过期或 force"回收逻辑保留；
+        - status=running：必须 **TTL/心跳已超期** 且 **持有者 PID 已死亡** 才回收；
+          持有者 PID 仍活着（或权限异常无法判断）→ 保守视为活跃，force 也不抢；
+        - 旧锁没有 pid 字段：视为持有者不可考，过期后可回收。
+        """
         status = str((info or {}).get("status") or RUNNING)
         stale = self._is_stale(info, now)
-        reclaimable = stale or status in (DONE, FAILED, CANCELLED, PARTIAL)
-        if not reclaimable:
-            return False
-        if not force and not stale:
-            return False                        # 非 force 不动"已完成"残留？允许回收旧残留更安全
+        if status in (DONE, FAILED, CANCELLED, PARTIAL):
+            if not (force or stale):
+                return False                    # 非 force 不动"刚完成"的残留
+            try:
+                path.unlink()
+                return True
+            except OSError:
+                return False
+        if status != RUNNING:
+            return False                        # 未知状态保守不抢
+        if not stale:
+            return False                        # 心跳/创建都还新鲜：活跃
+        holder_pid = (info or {}).get("pid")
+        if holder_pid not in (None, "", 0, "0") and _pid_alive(holder_pid):
+            return False                        # 持有者还活着：即使超 TTL 也不抢
         try:
             path.unlink()
             return True
@@ -223,6 +339,7 @@ class SingleFlight:
                 "token": uuid.uuid4().hex,
                 "pid": os.getpid(),
                 "created_at": now,
+                "heartbeat_at": now,
                 "status": status,
                 "key": key,
                 "pipeline": str(pipeline), "subject": str(subject),

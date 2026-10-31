@@ -427,6 +427,35 @@ def _normalize_pre_pages(pre_extracted) -> tuple[str, list[dict]]:
     return title, out
 
 
+def _pre_page_total(pre_extracted, pages) -> int:
+    total = max((int(p.get("page") or 0) for p in (pages or [])), default=0)
+    raw = pre_extracted.get("pages") if isinstance(pre_extracted, dict) else None
+    if isinstance(raw, (list, tuple, dict)):
+        total = max(total, len(raw))
+    if isinstance(pre_extracted, dict):
+        for key in ("page_count", "slides"):
+            try:
+                total = max(total, int(pre_extracted.get(key) or 0))
+            except (TypeError, ValueError):
+                continue
+        try:
+            total = max(total, int(pre_extracted.get("pages") or 0))
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def _fill_pre_pages(pre_extracted, pages) -> list[dict]:
+    total = _pre_page_total(pre_extracted, pages)
+    have = {int(p.get("page") or 0) for p in (pages or [])}
+    out = [dict(p) for p in (pages or [])]
+    for page in range(1, total + 1):
+        if page not in have:
+            out.append({"page": page, "title": "", "body": ""})
+    out.sort(key=lambda x: int(x.get("page") or 0))
+    return out
+
+
 def extract_pages(src: Path, kind: str = "",
                   fill_empty_pages: bool = False, *,
                   pre_extracted=None) -> tuple[str, list[dict]]:
@@ -460,6 +489,8 @@ def extract_pages(src: Path, kind: str = "",
     """
     if pre_extracted is not None and reuse_extract_enabled():
         title, pages = _normalize_pre_pages(pre_extracted)
+        if fill_empty_pages:
+            pages = _fill_pre_pages(pre_extracted, pages)
         return (title or src.stem), pages
 
     from . import extract as _ex
@@ -682,8 +713,12 @@ def render_pages(src: Path, outdir: Path, kind: str = "",
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if "OK" not in out:
         raise RuntimeError(f"COM 渲染失败: {out[:300]}")
-    return {int(p.stem.split("_")[1]): p
-            for p in sorted(outdir.glob("slide_*.png"))}
+    out = {int(p.stem.split("_")[1]): p
+           for p in sorted(outdir.glob("slide_*.png"))}
+    if pages is not None:
+        want = {int(x) for x in pages}
+        out = {p: path for p, path in out.items() if p in want}
+    return out
 
 
 FIGURE_CACHE_V2_ENV = "FIGURE_CACHE_V2"
@@ -725,6 +760,28 @@ def _write_render_meta(outdir: Path, meta: dict) -> None:
         pass
 
 
+def _expected_page_numbers(src: Path, kind: str) -> list[int] | None:
+    """只读拿全量预期页集合：PDF 用 pymupdf 页数；PPTX 数 zip 里的 slide*.xml。"""
+    try:
+        if kind == "pdf":
+            import pymupdf
+            doc = pymupdf.open(str(src))
+            try:
+                return list(range(1, int(doc.page_count) + 1))
+            finally:
+                doc.close()
+        if kind == "pptx":
+            import re as _re
+            import zipfile
+            with zipfile.ZipFile(str(src)) as zf:
+                names = [n for n in zf.namelist()
+                         if _re.match(r"ppt/slides/slide\d+\.xml$", n)]
+            return list(range(1, len(names) + 1)) if names else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def render_pages_cached(src: Path, outdir: Path, kind: str = "",
                         width: int = 1600, dpi: int | None = None,
                         pages: list[int] | None = None) -> tuple[dict, dict]:
@@ -758,29 +815,37 @@ def render_pages_cached(src: Path, outdir: Path, kind: str = "",
             path = Path(outdir) / str(rel)
             if path.is_file():
                 cached[page] = path
-    want = pages
-    need = (sorted(cached) if want is None else [p for p in want
-                                                 if int(p) > 0 and int(p) not in cached])
-    if want is None and same and cached:
-        need = []
+    expected = ([int(p) for p in pages if int(p) > 0]
+                if pages is not None else _expected_page_numbers(src, kind))
+    if expected is not None:
+        cached = {p: path for p, path in cached.items() if p in set(expected)}
+        need = [p for p in expected if p not in cached]
+    else:
+        need = ([] if cached else
+                ([int(p) for p in pages if int(p) > 0] if pages is not None else []))
     slides = dict(cached)
     rendered: list[int] = []
-    if need or not cached:
+    if need or (expected is None and not cached):
         fresh = render_pages(src, outdir, kind=kind, width=width, dpi=dpi,
-                             pages=(want if want is not None else None)
-                             if not cached else need)
+                             pages=(need if expected is not None else None))
         slides.update(fresh)
         rendered = sorted(fresh)
-    pages_map = {str(p): Path(path).name for p, path in sorted(slides.items())}
+    manifest = dict(cached)
+    manifest.update(slides)
+    pages_map = {str(p): Path(path).name for p, path in sorted(manifest.items())}
     _write_render_meta(outdir, {
         "src_fingerprint": fp, "backend": RENDER_BACKEND_VERSION, "kind": kind,
         "width": int(width), "dpi": int(dpi_eff), "pages": pages_map,
+        "expected_pages": expected,
         "adopted_legacy": bool(meta and not same)})
+    cache_hit = (bool(expected is not None and not rendered and not need)
+                 if expected is not None else bool(cached and not rendered))
+    result_slides = dict(slides)
     if pages is not None:
-        slides = {p: slides[p] for p in pages if p in slides}
-    return slides, {"cache_hit": bool(cached and not rendered),
-                    "rendered": rendered, "reused": len(cached),
-                    "mode": "v2"}
+        result_slides = {p: slides[p] for p in pages if p in slides}
+    return result_slides, {"cache_hit": cache_hit, "rendered": rendered,
+                           "reused": sum(1 for p in result_slides if p in cached),
+                           "mode": "v2", "expected_pages": expected}
 
 
 VISUAL_CACHE_VERSION = "visual-v2"
@@ -789,7 +854,8 @@ VISUAL_CACHE_VERSION = "visual-v2"
 def visual_cache_key(ctx, image_hash: str, *, thinking: bool = True,
                      model: str = "", api_base: str = "",
                      reasoning_effort: str = "", response_format: str = "json_object",
-                     prompt_version: str = VISUAL_CACHE_VERSION) -> str:
+                     prompt_version: str = VISUAL_CACHE_VERSION,
+                     max_tokens: int | None = None, mode: str = "") -> str:
     """视觉缓存扩展键：页图 hash + 实际页上下文(含 OCR 文本) + 提示词/模型/推理设置/输出格式。"""
     import hashlib as _h
     try:
@@ -802,6 +868,8 @@ def visual_cache_key(ctx, image_hash: str, *, thinking: bool = True,
         "model=%s" % str(model), "base=%s" % str(api_base),
         "effort=%s" % str(reasoning_effort),
         "format=%s" % str(response_format),
+        "max_tokens=%s" % str(int(max_tokens or 0)),
+        "mode=%s" % str(mode),
     ])
     return _h.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -1027,7 +1095,9 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
             ctx, ihash, thinking=(bool(run_ctx.thinking) if run_ctx is not None else thinking),
             model=(str(run_ctx.model) if run_ctx is not None else ""),
             api_base=(str(run_ctx.api_base) if run_ctx is not None else ""),
-            reasoning_effort=(str(run_ctx.reasoning_effort) if run_ctx is not None else ""))
+            reasoning_effort=(str(run_ctx.reasoning_effort) if run_ctx is not None else ""),
+            max_tokens=(int(run_ctx.max_tokens or 0) if run_ctx is not None
+                        else int(config.token_cap("ingest_vision"))))
         vstate = visual_cache_state(outdir, p, vkey)
         if (row and row["image_hash"] == ihash and cache_ok
                 and not (textless and is_no_info(cached_body))
@@ -1746,6 +1816,7 @@ def _save_figure_row(conn, doc_id: int, page: int, title: str, ihash: str,
         (doc_id, page, title, ihash, r.model, 1,
          int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)),
          float(r.cost_cny), 0, now, r.text, 0))
+    db.bump_data_revision(conn)
 
 
 def _set_figure_chunks(conn, doc_id: int, page: int, ihash: str,
@@ -1753,12 +1824,14 @@ def _set_figure_chunks(conn, doc_id: int, page: int, ihash: str,
     conn.execute(
         "UPDATE figure_desc SET n_chunks=? WHERE doc_id=? AND page=?",
         (n, doc_id, page))
+    db.bump_data_revision(conn)
 
 
 def _mark_no_info(conn, doc_id: int, page: int) -> None:
     conn.execute(
         "UPDATE figure_desc SET n_chunks=0, no_info=1 "
         "WHERE doc_id=? AND page=?", (doc_id, page))
+    db.bump_data_revision(conn)
 
 
 def _store_figure_chunks(conn, doc_id: int, deck_title: str, page: int,
@@ -1849,6 +1922,8 @@ def _store_figure_chunks(conn, doc_id: int, deck_title: str, page: int,
                 "VALUES(?,?,?,?)",
                 (cid, config.EMBED_MODEL_REPO, int(vec.shape[0]), to_blob(vec)))
         n += 1
+    if n:
+        db.bump_data_revision(conn)
     return n
 
 
@@ -1884,6 +1959,8 @@ def clear_document_figures(conn, doc_id: int) -> int:
             "DELETE FROM chunks WHERE doc_id=? AND source_ref LIKE ?",
             (doc_id, "p.% 图"))
         n = int(cur.rowcount or 0)
+        if n:
+            db.bump_data_revision(conn)
         conn.commit()
     except Exception:  # noqa: BLE001
         pass
@@ -1914,6 +1991,11 @@ def _drop_stale_figure_chunks(conn, doc_id: int,
                 n += 1
     except Exception:  # noqa: BLE001
         pass
+    if n:
+        try:
+            db.bump_data_revision(conn)
+        except Exception:  # noqa: BLE001
+            pass
     return n
 
 
@@ -2014,7 +2096,10 @@ def _http_post(url: str, payload: dict, key: str, timeout: int = 300,
             # 服务端有响应 = 已知失败；429/5xx 仍按旧策略重试（P0-B 允许）。
             body = e.read().decode("utf-8", "replace")
             last = (e.code, body[:400])
-            if e.code not in (429, 503, 502, 504):
+            if e.code in (502, 504):
+                return (e.code, "remote_unknown: HTTP %d: %s（结果未知，禁止自动重试）"
+                        % (e.code, body[:300]))
+            if e.code not in (429, 503):
                 return last
         except Exception as e:
             # P0-B：发送后网络超时/断连/没回包 → 结果未知，**不再 range(retries) 重发**；

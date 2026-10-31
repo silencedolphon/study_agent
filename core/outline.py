@@ -525,13 +525,14 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
     prompt = build_prompt(deck, pages)
     t0 = time.perf_counter()
 
-    # 开推理时，思考 token 会吃掉 max_tokens，正文可能被截断成空。
-    # 所以第一次给足预算；若空输出，翻倍重试一次。
+    # 输出上限语义（GPT-H，2026-11-01）：
+    #   · cap>0：用用户设置的值；**第一次与重试都不得翻倍**（不能未经确认多花）；
+    #   · cap==0：0 = 客户端不发送 max_tokens（`chat_once` 的 ctx 路径对 0 就是
+    #     不写该字段）；**绝不把内部默认 32768 塞进快照**；
+    #   · 无 RunContext（PIPELINE_RUNTIME=0）也按同一语义：cap 取当前管线中央设置
+    #     （与 `chat.chat_once` 旧路径同源），不再用 OUTLINE_MAX_TOKENS 冒充。
     thinking = bool(int(getattr(config, "OUTLINE_THINKING", 1)))
-    budget = int(getattr(config, "OUTLINE_MAX_TOKENS", 32768))
-
-    # P0-H：全局分析也走入口快照；PIPELINE_RUNTIME=0 时保持旧全局路径。
-    # cap=0 时把旧端点缺省预算写进 context，避免“无上限”被误解成“不发送”。
+    cap = 0
     run_ctx = None
     ctx_base = None
     try:
@@ -540,19 +541,26 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
             import dataclasses
             run_ctx = runtime_context.make_context("ingest_outline", doc_id=doc_id)
             thinking = bool(run_ctx.thinking)
-            if int(run_ctx.max_tokens or 0) > 0:
-                budget = int(run_ctx.max_tokens)
-            ctx_base = dataclasses.replace(run_ctx, max_tokens=int(budget))
+            cap = max(0, int(run_ctx.max_tokens or 0))
+            ctx_base = dataclasses.replace(run_ctx, max_tokens=int(cap))
     except Exception:  # noqa: BLE001 —— 快照失败不阻断主流程，回旧路径
         run_ctx = None
         ctx_base = None
+    if ctx_base is None:
+        try:
+            cap = max(0, int(config.token_cap("ingest_outline") or 0))
+        except Exception:  # noqa: BLE001
+            cap = 0
+    # 只代表本次请求真正发送的上限（0=不发送），不再是"可翻倍的内部预算"
+    budget = cap
 
     el = 0.0
     parsed = {}
     pwarn = []
     res = {}
     for attempt in range(2):
-        tokens = budget * (attempt + 1)
+        # GPT-H：重试保持同一 cap，绝不 `budget * (attempt + 1)` 翻倍。
+        tokens = budget
         ctx_try = None
         if ctx_base is not None:
             import dataclasses
@@ -588,7 +596,8 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
             u0 = res.get("usage") or {}
             out.warnings.append(
                 f"{why}（推理占满 {u0.get('completion_tokens', 0)} token）"
-                f"，放大到 {budget * 2} 重试"
+                + ("，按相同上限 %d 重试一次（不放大）" % budget if budget > 0
+                   else "，重试一次（cap=0：不发送 max_tokens）")
             )
             continue
         out.warnings.append(f"全局分析{why}")

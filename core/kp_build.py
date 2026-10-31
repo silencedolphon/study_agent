@@ -54,6 +54,7 @@ from pathlib import Path
 
 from . import config, outline as outline_mod, progress
 from .pipeline_runtime import context as runtime_context
+from .pipeline_runtime import state as runtime_state
 # S16 第一步：页面预约/释放抽到 kp_owners；旧名字继续可访问。
 from .kp_owners import claim_pages, release_pages  # noqa: F401
 # S16 第二步：纯页码/页列表工具抽到 kp_pages；旧下划线名字继续可访问。
@@ -261,7 +262,14 @@ class ModelCallHang(RuntimeError):
 
     与普通调用失败的区别很重要：**这是"挂起"不是"报错"，重试只会再挂一个线程**，
     所以 `_v2_call` 收到它就直接放弃重试。
+
+    GPT 独立验收 D1：硬超时可能发生在网络请求仍在陪跑线程里 —— 远端是否收到、
+    是否计费**无法确定**，因此这里显式标记为 `remote_unknown / indeterminate`
+    （与 `RuntimeError` 的"已知失败"区分；上层禁止自动重发、telemetry 如实标注）。
     """
+
+    remote_unknown = True
+    indeterminate = True
 
 
 def _call_with_hard_timeout(fn, *, timeout: float, kind: str = ""):
@@ -1493,6 +1501,15 @@ def progress_snapshot() -> dict:
     s["eta_note"] = ("单次调用已耗时 %s；同类调用中位 %s（模型网关高峰期会更久）"
                      % (_fmt_secs(s["since_last_call_s"]), _fmt_secs(s["eta_call_s"]))
                      if s["since_last_call_s"] > 0 else "")
+    # D4（GPT 验收）：现有 progress/error 字段能表达 remote_unknown/partial，
+    # **不新增页面/按钮**；前端仍按 status/error 渲染，只是语义不再等于"已知失败"。
+    _err = str(s.get("error") or "")
+    _err_low = _err.lower()
+    s["remote_unknown"] = bool(
+        ("结果未知" in _err) or ("remote_unknown" in _err_low) or ("indeterminate" in _err_low))
+    s["indeterminate"] = s["remote_unknown"]
+    s["status_detail"] = "remote_unknown" if s["remote_unknown"] else str(s.get("status") or "")
+    s["partial"] = bool(str(s.get("status") or "") == "partial")
     return s
 
 
@@ -2841,11 +2858,20 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
             # 不自动重试（可能已扣费/已产生副作用）；把 unknown 标记交回上层。
             from .pipeline_runtime import state as runtime_state
             if runtime_state.is_unknown_failure(e):
-                log("  ★remote_unknown：结果未知，禁止自动重试（P0-B）")
-                return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
-                        "model": call_model, "error": last,
-                        "call_index": last_idx,
-                        "call": rec, "remote_unknown": True}
+                # D1：硬超时（ModelCallHang）也走这里 —— 远端结果未知，不重发；
+                # rec/attempts/telemetry 显式标 indeterminate，不冒充"已知失败"。
+                rec.update({"remote_unknown": True, "indeterminate": True,
+                            "status": runtime_state.REMOTE_UNKNOWN})
+                log("  ★remote_unknown/indeterminate：结果未知，禁止自动重试（P0-B）")
+                out = {"ok": False, "parsed": {}, "usage": {}, "raw": "",
+                       "model": call_model, "error": last,
+                       "call_index": last_idx,
+                       "call": rec, "remote_unknown": True,
+                       "indeterminate": True,
+                       "status": runtime_state.REMOTE_UNKNOWN}
+                if isinstance(e, ModelCallHang):
+                    out["hang"] = True           # 兼容旧调用方：挂起语义也保留
+                return out
             # 卡 C-0123：**挂起类错误不重试**——重试只会再挂一个陪跑线程、
             # 再白等一个硬上限；而且它通常意味着整条网络路径不通，立即把错误
             # 交回上层记账（上层据此把这一条判失败、让整轮能收尾）。
@@ -4927,6 +4953,20 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
         'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'stages': list(KP_STAGES),
     })
+    # D1/D4（GPT 验收）：把"远端结果未知"从"已知失败"里区分出来，写进现有
+    # status/error/attempts 通道；**不新增页面/按钮**，前端仍按 status 渲染。
+    unknown_calls = [c for c in (calls or [])
+                     if isinstance(c, dict)
+                     and (c.get("remote_unknown") or c.get("indeterminate"))]
+    unknown = bool(unknown_calls) or ("结果未知" in str(err or ""))
+    meta["remote_unknown"] = unknown
+    meta["indeterminate"] = unknown
+    meta["status_detail"] = (runtime_state.REMOTE_UNKNOWN if unknown
+                             else str(status))
+    meta["partial"] = bool(str(status) == "partial")
+    if unknown_calls:
+        meta["remote_unknown_calls"] = [
+            int(c.get("kp_no") or c.get("attempt") or 0) for c in unknown_calls]
     return meta
 
 
