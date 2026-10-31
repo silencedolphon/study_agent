@@ -242,6 +242,10 @@ MATRIX = [
          entry="point.sources/pages/page_start/page_end + /api/teach-page + 52 窗口 evPop",
          kind="ui", priority="P1",
          tests=["test_35_textbook_sources", "test_35_textbook_popup_ui"], evidence="json+shot"),
+    dict(id="F128", feature="章级材料快速路径：章节定向读取 + 章节目录复用 block_ids + 可回滚 A/B",
+         entry="kp_build.read_text_pages_by_ids / preview.read_chapter_ch / textbook_kp._plan",
+         kind="read", priority="P1",
+         tests=["test_36_opt_chapter_fastpath"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

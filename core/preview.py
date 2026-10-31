@@ -293,6 +293,9 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
             "n_blocks": int(d["n_blocks"]),
             "page_start": (ps[0] if ps else 0), "page_end": (ps[-1] if ps else 0),
             "pages": ps,
+            # 章级定位的快速路径：`locate_chapter` 直接复用，避免第二次整表扫描。
+            # 这是后端内部/兼容字段；前端忽略未知字段即可。
+            "block_ids": list(d["block_ids"]),
             "n_sections": len([s for s in (art.get("sections") or [])
                                if isinstance(s, dict)]),
             "sections_fallback": bool(art.get("fallback")),
@@ -356,9 +359,14 @@ def locate_chapter(doc_id: int, chapter, *,
                 hit = c
                 break
     if hit is not None:
+        # 快速路径：list_chapters 已经把本章 block_ids 聚合好了；不要再扫一遍
+        # 全表。旧接口/旧调用若没有该字段，保留 agg_block_ids 兜底。
+        ids = hit.get("block_ids")
+        if not isinstance(ids, list):
+            ids = agg_block_ids(doc_id, int(hit["no"]), db_path=db_path)
         return {"ok": True, "doc_id": int(doc_id), "no": int(hit["no"]),
                 "name": hit["name"], "heading_path": hit["heading_path"],
-                "block_ids": list(agg_block_ids(doc_id, int(hit["no"]), db_path=db_path)),
+                "block_ids": list(ids),
                 "pages": list(hit["pages"]), "page_start": hit["page_start"],
                 "page_end": hit["page_end"], "source": "chunks.heading_path"}
 
@@ -423,23 +431,12 @@ def agg_block_ids(doc_id: int, chapter_no: int, *,
 
 
 # ---------------------------------------------------------------- 章级 ch
-def read_chapter_ch(doc_id: int, chapter, *,
-                    db_path: str | os.PathLike | None = None) -> tuple:
-    """构造**章级 ch**并渲染整章材料。
+def _assemble_chapter(full: dict, info: dict) -> tuple:
+    """把整本/指定块的页结构组装成章级 ch 并渲染材料。
 
-    返回 `(ch, info, material, inv, render_stats)`：
-
-    - `ch` 的键与 `kp_build.read_text_pages()` **完全一致**
-      （`blocks`/`cover`/`figrows`/`pages_all`/`max_page`/`n_blocks`），只是页集合换成该章
-      ——于是 `kp_build.render_kp_material()` 可以直接吃它（材料口径与知识点管线同源）；
-    - `info` 是 `locate_chapter()` 的结果；
-    - `material` 是送进模型的整章材料；`inv` 是材料清单（→ 产物 `sources`）；
-    - `render_stats` 如实记材料降级（丢图注 / 截断页）。
+    这是 `read_chapter_ch` 的纯内存后半段：整本慢路径与章级快速路径共用，
+    保证两条路径的 ch/material/inv/stats 口径逐字一致。
     """
-    full = kp_build.read_text_pages(doc_id, db_path)
-    info = locate_chapter(doc_id, chapter, db_path=db_path)
-    if not info.get("ok"):
-        return {}, info, "", [], {"ok": False}
     ids = set(int(x) for x in (info.get("block_ids") or []))
     by_id: dict = {}
     for _page, bs in full["blocks"].items():
@@ -471,6 +468,43 @@ def read_chapter_ch(doc_id: int, chapter, *,
 
     material, inv, stats = render_material(ch, info)
     return ch, info, material, inv, stats
+
+
+def _read_chapter_ch_slow(doc_id: int, chapter, *,
+                          db_path: str | os.PathLike | None = None) -> tuple:
+    """旧路径（整本读取后筛章）：保留作回滚/对照用。"""
+    full = kp_build.read_text_pages(doc_id, db_path)
+    info = locate_chapter(doc_id, chapter, db_path=db_path)
+    if not info.get("ok"):
+        return {}, info, "", [], {"ok": False}
+    return _assemble_chapter(full, info)
+
+
+def read_chapter_ch(doc_id: int, chapter, *,
+                    db_path: str | os.PathLike | None = None) -> tuple:
+    """构造**章级 ch**并渲染整章材料。
+
+    返回 `(ch, info, material, inv, render_stats)`：
+
+    - `ch` 的键与 `kp_build.read_text_pages()` **完全一致**
+      （`blocks`/`cover`/`figrows`/`pages_all`/`max_page`/`n_blocks`），只是页集合换成该章
+      ——于是 `kp_build.render_kp_material()` 可以直接吃它（材料口径与知识点管线同源）；
+    - `info` 是 `locate_chapter()` 的结果；
+    - `material` 是送进模型的整章材料；`inv` 是材料清单（→ 产物 `sources`）；
+    - `render_stats` 如实记材料降级（丢图注 / 截断页）。
+
+    默认走**章级快速路径**：`locate_chapter` 先给出本章 block_ids，只查这些块，
+    不再把整本书（doc#50 约 900 块）读进内存。设置 `PREVIEW_CHAPTER_FAST=0`
+    可回退到旧的整本读取路径（用于对照/回滚）。
+    """
+    if (os.environ.get("PREVIEW_CHAPTER_FAST") or "1").strip() == "0":
+        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path)
+    info = locate_chapter(doc_id, chapter, db_path=db_path)
+    if not info.get("ok"):
+        return {}, info, "", [], {"ok": False}
+    full = kp_build.read_text_pages_by_ids(
+        doc_id, list(info.get("block_ids") or []), db_path)
+    return _assemble_chapter(full, info)
 
 
 def render_material(ch: dict, info: dict) -> tuple:

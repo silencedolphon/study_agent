@@ -109,9 +109,22 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
         doc = conn.execute("SELECT title, role FROM documents WHERE id=?", (doc_id,)).fetchone()
         if not doc or doc["role"] != "textbook":
             raise ValueError("教材不存在或尚未按教材方式入库")
-        rows = conn.execute(
-            "SELECT id, ord, source_ref, heading_path, text FROM chunks WHERE doc_id=? ORDER BY ord, id",
-            (doc_id,)).fetchall()
+        # 章级定向查询：教材的 heading_path 形如「书名 > 第6章 …」；先只取本章行，
+        # 不再把整本 900+ 块读进 Python 再过滤。找不到（旧数据/章号格式不同）时
+        # 退回整表扫描，保证旧资料仍可用。
+        # `TEXTBOOK_KP_FAST_PLAN=0` 可回退旧的整表路径，供 A/B 对照/回滚。
+        fast_plan = (os.environ.get("TEXTBOOK_KP_FAST_PLAN") or "1").strip() != "0"
+        if fast_plan:
+            rows = conn.execute(
+                "SELECT id, ord, source_ref, heading_path, text FROM chunks "
+                "WHERE doc_id=? AND heading_path LIKE ? ORDER BY ord, id",
+                (doc_id, f"%第{chapter}章%")).fetchall()
+        else:
+            rows = []
+        if not fast_plan or not rows:
+            rows = conn.execute(
+                "SELECT id, ord, source_ref, heading_path, text FROM chunks "
+                "WHERE doc_id=? ORDER BY ord, id", (doc_id,)).fetchall()
     finally:
         conn.close()
     selected = []

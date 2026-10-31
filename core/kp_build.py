@@ -2441,6 +2441,71 @@ def read_text_pages(doc_id: int, db_path: str | os.PathLike | None = None) -> di
             "pages_all": list(range(1, max_page + 1))}
 
 
+def read_text_pages_by_ids(doc_id: int, chunk_ids,
+                           db_path: str | os.PathLike | None = None) -> dict:
+    """只读取指定 chunk 集合的文本页结构（章级读取的快速路径）。
+
+    返回结构与 `read_text_pages()` 相同，但只包含给定块：
+      - `blocks`/`cover`/`figrows`/`max_page`/`n_blocks`/`pages_all`；
+      - 块解析规则、跨页覆盖、图片理解标记与整本读取完全一致；
+      - 任何给定块解析不出页码仍会报错，绝不静默丢块。
+
+    只用于**只读章级材料**；调用方仍需自己把 `pages_all` 限定到章的页范围
+    （教材章可能包含无块空页，快速路径只按实际块覆盖页计算）。
+    """
+    wanted = sorted({int(x) for x in (chunk_ids or []) if int(x) > 0})
+    if not wanted:
+        return {"blocks": {}, "cover": {}, "figrows": {}, "max_page": 0,
+                "n_blocks": 0, "pages_all": []}
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        blocks: dict = {}
+        cover: dict = {}
+        bad = []
+        n_blocks = 0
+        # 章级块数通常几十个；分片查询避免 SQLite 变量上限。
+        for start in range(0, len(wanted), 500):
+            part = wanted[start:start + 500]
+            marks = ",".join("?" for _ in part)
+            sql = ("SELECT id, ord, source_ref, text FROM chunks "
+                   "WHERE doc_id=? AND id IN (%s) ORDER BY ord, id" % marks)
+            for r in conn.execute(sql, (int(doc_id), *part)):
+                cid = int(r["id"])
+                ref = (r["source_ref"] or "").strip()
+                parsed = _parse_ref(ref)
+                if parsed is None:
+                    bad.append((cid, ref))
+                    continue
+                a, b, is_fig = parsed
+                t = r["text"] or ""
+                blocks.setdefault(a, []).append({
+                    "chunk_id": cid, "ord": int(r["ord"] or 0),
+                    "kind": "图片理解" if is_fig else "正文块",
+                    "ref": ("p.%d" % a if a == b else "p.%d-%d" % (a, b))
+                           + (" 图" if is_fig else ""),
+                    "page": a, "pages": list(range(a, b + 1)),
+                    "chars": len(t), "text": t})
+                for p in range(a, b + 1):
+                    cover.setdefault(p, []).append(cid)
+                n_blocks += 1
+        figrows: dict = {}
+        for r in _figure_rows(conn, doc_id, "page, no_info"):
+            page = int(r["page"])
+            if page in cover:
+                figrows[page] = {"no_info": int(r["no_info"] or 0)}
+    finally:
+        conn.close()
+    if bad:
+        raise RuntimeError("有 %d 个块的 source_ref 解析不出页码（拒绝静默丢块）：%s"
+                           % (len(bad), bad[:5]))
+    max_page = max(cover) if cover else 0
+    return {"blocks": blocks, "cover": cover, "figrows": figrows,
+            "max_page": max_page, "n_blocks": n_blocks,
+            "pages_all": list(range(1, max_page + 1))}
+
+
 def page_text_for_structure(p: int, ch: dict, cap: int = STRUCT_PAGE_CHARS) -> str:
     """该页喂给**结构模型**的文本（截断到 `cap` 字符，截断处标 `……`）。"""
     bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
