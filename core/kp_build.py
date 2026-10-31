@@ -2894,7 +2894,7 @@ def claim_pages(claimed, claimed_lock, kp_id, pages):
             _cur = claimed.get(_n)
             if _cur and str(_cur) != str(kp_id):
                 continue
-            claimed[str(kp_id), _n] = None  # TODO(反编译存疑)
+            claimed[_n] = str(kp_id)
             got.append(_n)
     return got
 
@@ -5287,7 +5287,7 @@ def build_v2(
     for _r in recs:
         for _p in (_r.get("pages") or []):
             try:
-                claimed[str(_r.get("id") or "")] = int(_p)
+                claimed[int(_p)] = str(_r.get("id") or "")
             except (TypeError, ValueError):
                 continue
     extra_fail = []
@@ -5377,7 +5377,7 @@ def build_v2(
                 continue
             keep.add(_n)
             with claimed_lock:
-                claimed[str(rec.get("id") or kp_id)] = _n
+                claimed[_n] = str(rec.get("id") or kp_id)
         _release_pages(kp_id, [p for p in mine if p not in keep])
         made += 1
         spent = spent_now()

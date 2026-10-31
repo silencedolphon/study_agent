@@ -246,6 +246,10 @@ MATRIX = [
          entry="kp_build.read_text_pages_by_ids / preview.read_chapter_ch / textbook_kp._plan",
          kind="read", priority="P1",
          tests=["test_36_opt_chapter_fastpath"], evidence="json"),
+    dict(id="F129", feature="S00A 已知缺陷修复：教材章号格式混用/预习坏页码/页面预约键",
+         entry="textbook_kp._plan 元数据统一解析 + preview.invalid_refs 安全回退 + kp_build.claim_pages page→owner",
+         kind="read", priority="P0",
+         tests=["test_00a_known_defects"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

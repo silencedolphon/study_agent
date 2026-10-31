@@ -256,6 +256,7 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
                 "error": "这份资料在库里没有任何块（chunks 为空），列不出章节"}
 
     agg: dict = {}
+    bad_refs: list[dict] = []
     book = ""
     for cid, _od, ref, hp in rows:
         hp = str(hp or "")
@@ -264,6 +265,11 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
             book = hp.split(">")[0].strip()
         parsed = kp_build._parse_ref(str(ref or ""))
         if parsed is None:
+            # 不能把坏 source_ref 当成“这章没有块”：旧 read_text_pages 会明确
+            # 报错“拒绝静默丢块”。记录给 locate/read_chapter_ch，快速路径据此
+            # 回退旧路径并保留同样的错误语义。
+            bad_refs.append({"id": int(cid), "ref": str(ref or ""),
+                             "heading_path": hp})
             continue
         a, b, _fig = parsed
         if not m:
@@ -303,6 +309,7 @@ def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> d
     return {
         "ok": True, "doc_id": int(doc_id), "title": kp_build.doc_title_v2(doc_id, db_path),
         "book": book, "n_chapters": len(chapters), "chapters": chapters,
+        "invalid_refs": bad_refs,
         "chapter_source": "chunks.heading_path",
         "sections_artifact": {
             "read": bool(detail.get("ok")), "path": str(sections_out_file(doc_id)),
@@ -368,7 +375,8 @@ def locate_chapter(doc_id: int, chapter, *,
                 "name": hit["name"], "heading_path": hit["heading_path"],
                 "block_ids": list(ids),
                 "pages": list(hit["pages"]), "page_start": hit["page_start"],
-                "page_end": hit["page_end"], "source": "chunks.heading_path"}
+                "page_end": hit["page_end"], "source": "chunks.heading_path",
+                "invalid_refs": list(listed.get("invalid_refs") or [])}
 
     # 降级：用《章节细目》的页范围按页筛块（heading_path 认不出章时才走这条）
     detail = _load_sections_artifact(doc_id)
@@ -410,6 +418,7 @@ def locate_chapter(doc_id: int, chapter, *,
             "block_ids": ids, "pages": list(range(a, b + 1)),
             "page_start": a, "page_end": b,
             "source": "章节细目.page_range",
+            "invalid_refs": list(listed.get("invalid_refs") or []),
             "fallback_note": "heading_path 里认不出这一章，退用《章节细目》的页范围筛块"}
 
 
@@ -502,6 +511,11 @@ def read_chapter_ch(doc_id: int, chapter, *,
     info = locate_chapter(doc_id, chapter, db_path=db_path)
     if not info.get("ok"):
         return {}, info, "", [], {"ok": False}
+    # 旧路径 read_text_pages 遇到任何坏 source_ref 会明确报错；快速路径若只
+    # 用 list_chapters 的 block_ids，会静默绕过这些块。存在坏页码时回退旧路径，
+    # 保留“拒绝静默丢块”的安全语义（S00A-2）。
+    if info.get("invalid_refs"):
+        return _read_chapter_ch_slow(doc_id, chapter, db_path=db_path)
     full = kp_build.read_text_pages_by_ids(
         doc_id, list(info.get("block_ids") or []), db_path)
     return _assemble_chapter(full, info)
