@@ -62,6 +62,9 @@ from .kp_pages import page_list as _page_list  # noqa: F401
 from .kp_pages import page_text_for_structure, plan_structure_segments  # noqa: F401
 from .kp_pages import pages_label as _pages_label  # noqa: F401
 from .kp_pages import parse_ref as _parse_ref  # noqa: F401
+# S16 第四步：只读识图/页结构读取抽到 kp_text；旧名字继续可访问。
+from .kp_text import figure_rows as _figure_rows  # noqa: F401
+from .kp_text import read_text_pages_by_ids  # noqa: F401
 
 # ---------------------------------------------------------------- 常量
 # 【卡 C-0049：整理管线不再读入库结构，两代管线的版本号如下】
@@ -597,33 +600,6 @@ def handoff_map(pages, leaf, parent):
     for k in handoff:
         handoff[k] = sorted(set(handoff[k]))
     return handoff, owner, unplaced
-
-
-def _figure_rows(conn, doc_id, cols):
-    """读该文档的识图行；**表不存在时返回空**（卡 C-0077 兜底）。
-
-    为什么要有这道守卫：`figure_desc` 原来**只由识图路径建表**（`figures.ensure_schema`），
-    空库（建完库、还没做过识图入库）里没有它，而本模块直接 `FROM figure_desc`
-    就抛 `OperationalError: no such table: figure_desc` —— 看板「AI 知识点总结」
-    第一次点就是 500。卡 C-0077 已把建表搬进 `db.init_db()`（新库、旧库、
-    新建学科库、exe 首启动都有表），这里再加一道兜底，即使表被删也不会崩。
-
-    为什么这里**不**顺手建表：本模块的硬约束是"只读真库（`mode=ro`）、
-    不写任何表"（见模块 docstring），而且这两条连接的 DSN 就是 `mode=ro`，
-    **物理上建不了表**。表缺失在语义上等价于"这份课件没有任何识图数据"
-    ——`no_info` 只用来给材料加一句提示，少它不影响任何结论。所以降级为空。
-
-    `cols` 只由本模块内部传常量字符串，不含外部输入。
-    """
-    try:
-        return conn.execute(
-            'SELECT %s FROM figure_desc WHERE doc_id=?' % cols,
-            (int(doc_id),),
-        ).fetchall()
-    except sqlite3.OperationalError as e:
-        if 'no such table' not in str(e):
-            raise
-        return []
 
 
 def read_chunks(doc_id: int, db_path: str | os.PathLike | None = None) -> dict:
@@ -2429,71 +2405,6 @@ def read_text_pages(doc_id: int, db_path: str | os.PathLike | None = None) -> di
         figrows: dict = {}
         for r in _figure_rows(conn, doc_id, "page, no_info"):
             figrows[int(r["page"])] = {"no_info": int(r["no_info"] or 0)}
-    finally:
-        conn.close()
-    if bad:
-        raise RuntimeError("有 %d 个块的 source_ref 解析不出页码（拒绝静默丢块）：%s"
-                           % (len(bad), bad[:5]))
-    max_page = max(cover) if cover else 0
-    return {"blocks": blocks, "cover": cover, "figrows": figrows,
-            "max_page": max_page, "n_blocks": n_blocks,
-            "pages_all": list(range(1, max_page + 1))}
-
-
-def read_text_pages_by_ids(doc_id: int, chunk_ids,
-                           db_path: str | os.PathLike | None = None) -> dict:
-    """只读取指定 chunk 集合的文本页结构（章级读取的快速路径）。
-
-    返回结构与 `read_text_pages()` 相同，但只包含给定块：
-      - `blocks`/`cover`/`figrows`/`max_page`/`n_blocks`/`pages_all`；
-      - 块解析规则、跨页覆盖、图片理解标记与整本读取完全一致；
-      - 任何给定块解析不出页码仍会报错，绝不静默丢块。
-
-    只用于**只读章级材料**；调用方仍需自己把 `pages_all` 限定到章的页范围
-    （教材章可能包含无块空页，快速路径只按实际块覆盖页计算）。
-    """
-    wanted = sorted({int(x) for x in (chunk_ids or []) if int(x) > 0})
-    if not wanted:
-        return {"blocks": {}, "cover": {}, "figrows": {}, "max_page": 0,
-                "n_blocks": 0, "pages_all": []}
-    db = Path(db_path) if db_path else Path(config.DB_PATH)
-    conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    try:
-        blocks: dict = {}
-        cover: dict = {}
-        bad = []
-        n_blocks = 0
-        # 章级块数通常几十个；分片查询避免 SQLite 变量上限。
-        for start in range(0, len(wanted), 500):
-            part = wanted[start:start + 500]
-            marks = ",".join("?" for _ in part)
-            sql = ("SELECT id, ord, source_ref, text FROM chunks "
-                   "WHERE doc_id=? AND id IN (%s) ORDER BY ord, id" % marks)
-            for r in conn.execute(sql, (int(doc_id), *part)):
-                cid = int(r["id"])
-                ref = (r["source_ref"] or "").strip()
-                parsed = _parse_ref(ref)
-                if parsed is None:
-                    bad.append((cid, ref))
-                    continue
-                a, b, is_fig = parsed
-                t = r["text"] or ""
-                blocks.setdefault(a, []).append({
-                    "chunk_id": cid, "ord": int(r["ord"] or 0),
-                    "kind": "图片理解" if is_fig else "正文块",
-                    "ref": ("p.%d" % a if a == b else "p.%d-%d" % (a, b))
-                           + (" 图" if is_fig else ""),
-                    "page": a, "pages": list(range(a, b + 1)),
-                    "chars": len(t), "text": t})
-                for p in range(a, b + 1):
-                    cover.setdefault(p, []).append(cid)
-                n_blocks += 1
-        figrows: dict = {}
-        for r in _figure_rows(conn, doc_id, "page, no_info"):
-            page = int(r["page"])
-            if page in cover:
-                figrows[page] = {"no_info": int(r["no_info"] or 0)}
     finally:
         conn.close()
     if bad:

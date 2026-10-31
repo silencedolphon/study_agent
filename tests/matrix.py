@@ -387,6 +387,10 @@ MATRIX = [
          entry="core/outline.py::analyze_deck make_context(ingest_outline); chat_once(run_context=)",
          kind="read", priority="P0",
          tests=["test_57_outline_run_context"], evidence="json"),
+    dict(id="F159", feature="S16 第四步：只读识图/页结构读取抽到 kp_text（figure_rows/read_text_pages_by_ids）",
+         entry="core/kp_text.py::figure_rows/read_text_pages_by_ids; kp_build 旧名字同一对象",
+         kind="read", priority="P4",
+         tests=["test_58_kp_text_split"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
