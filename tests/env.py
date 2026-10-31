@@ -72,6 +72,9 @@ SANDBOX_SUBJECTS = {
 CODE_FILES = [
     ("core", "*.py"),
     ("core/frontend", "*"),
+    # P0-A：新包 core/pipeline_runtime（RunContext/telemetry）必须同步进代码沙箱，
+    # 否则被测 dashboard 进程 import core.chat → pipeline_runtime 会 ModuleNotFoundError。
+    ("core/pipeline_runtime", "*.py"),
     ("tools", "dashboard.py"),
     ("tools", "study.py"),
 ]

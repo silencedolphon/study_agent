@@ -44,6 +44,11 @@ if __package__ in (None, ""):
 else:
     from . import config, db, search as search_mod
 
+try:
+    from .pipeline_runtime import context as pipeline_context
+except Exception:  # noqa: BLE001  （单文件自测模式）
+    from core.pipeline_runtime import context as pipeline_context
+
 # DeepSeek 官方端点与模型
 DEEPSEEK_BASE = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-flash"
@@ -633,7 +638,8 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
               timeout: int = 180, temperature: float = 0.3,
               reasoning_effort: str | None = None,
               api_key: str | None = None, api_base: str | None = None,
-              response_format: dict | None = None) -> dict:
+              response_format: dict | None = None,
+              run_context=None) -> dict:
     """非流式调用。thinking=False 省 token（实测输出从 188 降到 49）。
 
     卡 C-0052 新增 `reasoning_effort`：**思考强度**，官方取值
@@ -655,12 +661,25 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         参数保留只是为了不动既有调用方。
     """
     from . import agent_bridge
-    # ★ 2026-10-31：输出上限统一由「设置 → 各管线 token 上限」中央控制
-    # （config.TOKEN_CAP_KEYS；0 = 无上限 = 请求里不发送 max_tokens）。
-    # 调用方传进来的 max_tokens 只是历史参数，实际生效值以当前管线 cap 为准。
-    pipeline = agent_bridge.current_pipeline()
-    cap = config.token_cap(pipeline)
-    effective_max = cap if cap > 0 else 0
+    # P0-A（2026-10-31）：有 run_context 时**全部用冻结快照**（model/base/thinking/
+    # effort/max_tokens），不再读取 config.token_cap() 或当前管线；
+    # PIPELINE_RUNTIME=0 时忽略 context，走旧全局路径（旧行为逐字不变）。
+    ctx = run_context if (run_context is not None
+                          and pipeline_context.runtime_enabled()) else None
+    if ctx is not None:
+        pipeline = str(ctx.pipeline)
+        model = str(ctx.model)
+        thinking = bool(ctx.thinking)
+        reasoning_effort = ctx.reasoning_effort if thinking else None
+        effective_max = int(ctx.max_tokens or 0)
+        api_base = str(ctx.api_base or "")
+    else:
+        # ★ 输出上限统一由「设置 → 各管线 token 上限」中央控制
+        # （config.TOKEN_CAP_KEYS；0 = 无上限 = 请求里不发送 max_tokens）。
+        # 调用方传进来的 max_tokens 只是历史参数，实际生效值以当前管线 cap 为准。
+        pipeline = agent_bridge.current_pipeline()
+        cap = config.token_cap(pipeline)
+        effective_max = cap if cap > 0 else 0
     request = agent_bridge.AgentRequest(
         pipeline=pipeline, messages=messages, model=model,
         max_tokens=int(effective_max), thinking=bool(thinking),
@@ -669,7 +688,13 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
     adapted = agent_bridge.complete(request)
     if adapted is not None:
         return adapted
-    key = api_key or load_api_key()
+    if ctx is not None:
+        # 凭据只按引用取；取不到再走原凭据链；key 不写日志/异常。
+        key = (api_key
+               or config.pipeline_key(str(ctx.credential_ref or ctx.pipeline))
+               or load_api_key())
+    else:
+        key = api_key or load_api_key()
     payload = {
         "model": model,
         "messages": messages,
@@ -682,7 +707,11 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         payload["reasoning_effort"] = str(reasoning_effort)
     if response_format is not None:
         payload["response_format"] = response_format
-    config.apply_token_cap(payload, pipeline)
+    if ctx is not None:
+        if effective_max > 0:
+            payload["max_tokens"] = int(effective_max)
+    else:
+        config.apply_token_cap(payload, pipeline)
     req = urllib.request.Request(
         f"{(api_base or DEEPSEEK_BASE).rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode(),
@@ -714,7 +743,7 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
                 max_tokens: int = 2048, thinking: bool = False,
                 timeout: int = 300, temperature: float = 0.3,
                 reasoning_effort: str | None = None,
-                api_key: str | None = None):
+                api_key: str | None = None, run_context=None):
     """流式调用，逐段 yield (kind, data)。
 
     kind: "delta" 文本增量 | "usage" 用量 | "done" 结束
@@ -727,10 +756,22 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
     key 传进来；不传仍走原来的 `load_api_key()` 凭据链，知识库问答不受影响。
     """
     from . import agent_bridge
-    # ★ 输出上限中央控制（与 chat_once 同一口径；0 = 无上限、不发送 max_tokens）。
-    pipeline = agent_bridge.current_pipeline()
-    cap = config.token_cap(pipeline)
-    effective_max = cap if cap > 0 else 0
+    # P0-A：有 run_context 时用冻结快照（与 chat_once 同一口径；stream 也覆盖），
+    # 不再读 config.token_cap()/当前管线；PIPELINE_RUNTIME=0 走旧全局路径。
+    ctx = run_context if (run_context is not None
+                          and pipeline_context.runtime_enabled()) else None
+    if ctx is not None:
+        pipeline = str(ctx.pipeline)
+        model = str(ctx.model)
+        thinking = bool(ctx.thinking)
+        reasoning_effort = ctx.reasoning_effort if thinking else None
+        effective_max = int(ctx.max_tokens or 0)
+        stream_base = str(ctx.api_base or DEEPSEEK_BASE)
+    else:
+        pipeline = agent_bridge.current_pipeline()
+        cap = config.token_cap(pipeline)
+        effective_max = cap if cap > 0 else 0
+        stream_base = DEEPSEEK_BASE
     request = agent_bridge.AgentRequest(
         pipeline=pipeline, messages=messages, model=model,
         max_tokens=int(effective_max), thinking=bool(thinking),
@@ -757,20 +798,29 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
                 yield "usage", {}
             yield "done", None
         return
-    key = api_key or load_api_key()
+    if ctx is not None:
+        key = (api_key
+               or config.pipeline_key(str(ctx.credential_ref or ctx.pipeline))
+               or load_api_key())
+    else:
+        key = api_key or load_api_key()
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
         "temperature": temperature,
     }
-    config.apply_token_cap(payload, pipeline)
+    if ctx is not None:
+        if effective_max > 0:
+            payload["max_tokens"] = int(effective_max)
+    else:
+        config.apply_token_cap(payload, pipeline)
     if thinking is not None:
         payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
     if reasoning_effort and thinking:
         payload["reasoning_effort"] = str(reasoning_effort)
     req = urllib.request.Request(
-        f"{DEEPSEEK_BASE}/chat/completions",
+        f"{stream_base.rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {key}"},

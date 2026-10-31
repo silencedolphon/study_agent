@@ -12,6 +12,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from . import agent_bridge, chat, config, kp_build
+from .pipeline_runtime import context as runtime_context
+from .pipeline_runtime import telemetry
 
 # 模块常量只作**回退/兼容**：真正生效的值每次从设置中心读（2026-10-31 接入）。
 MODEL = "deepseek-flash"
@@ -58,7 +60,8 @@ _SYSTEM = """你是严谨的教材学习助手。只根据提供的教材内容�
 "questions":[{"question":"问题","answer":"答案"}],"source_ids":[123]}]}。"""
 _LOCK = threading.RLock()
 _STATE = {"active": False, "status": "", "doc_id": 0, "chapter": 0,
-          "done": 0, "total": 0, "error": "", "started_at": 0.0}
+          "done": 0, "total": 0, "error": "", "started_at": 0.0,
+          "run_id": ""}
 _REVIEW_INTERVALS = (1, 3, 7, 14, 30, 60)
 # 窗口式阅读用的教材原文出处（task-41）：摘录长度与页码列表上限
 _SOURCE_TEXT_CHARS = 400
@@ -259,23 +262,34 @@ def _clean_points(raw, allowed_ids: list[int], segment_hash: str) -> list[dict]:
     return out
 
 
-def _call(segment: dict, plan: dict) -> dict:
+def _call(segment: dict, plan: dict, run_context=None) -> dict:
     prompt = (f"教材：{plan['title']}\n第 {plan['chapter']} 章 {plan['chapter_name']}\n"
               f"以下是本章的一段，可能与其他段相邻；只整理这段的内容。\n\n{segment['material']}")
-    # ★ 2026-10-31：模型/端点/密钥/推理档位/输出上限全部来自设置中心
-    # （设置 → AI 教材知识点），不再硬编码；输出上限 0 = 无上限（chat_once 不发 max_tokens）。
-    pipeline = "textbook_kp"
-    key = (config.pipeline_key(pipeline) or config.pipeline_key("kp"))
-    if not key and not agent_bridge.has_adapter(pipeline):
-        key_loader = config._HOOKS.get("orig_load_api_key") or chat.load_api_key
-        key = key_loader()
-    base = str(config.value_of("TEXTBOOK_KP_BASE_URL")
-               or config.value_of("KP_BUILD_BASE_URL")
-               or "https://api.deepseek.com")
-    mdl = model_name()
-    think = thinking_on()
-    eff = effort()
-    cap = max_output_tokens()
+    # P0-A（2026-10-31）：有 run_context 时**只用快照**（model/base/thinking/or effort/
+    # max_tokens），不再临时读当前设置；PIPELINE_RUNTIME=0 时调用方不传 context，走旧路径。
+    if run_context is not None and runtime_context.runtime_enabled():
+        pipeline = str(run_context.pipeline or "textbook_kp")
+        mdl = str(run_context.model)
+        think = bool(run_context.thinking)
+        eff = str(run_context.reasoning_effort or "")
+        cap = int(run_context.max_tokens or 0)
+        base = str(run_context.api_base or "")
+        key = None  # 交给 chat 按 context.credential_ref 解析（key 不进 context/日志）
+    else:
+        # ★ 2026-10-31：模型/端点/密钥/推理档位/输出上限全部来自设置中心
+        # （设置 → AI 教材知识点），不再硬编码；输出上限 0 = 无上限（chat_once 不发 max_tokens）。
+        pipeline = "textbook_kp"
+        key = (config.pipeline_key(pipeline) or config.pipeline_key("kp"))
+        if not key and not agent_bridge.has_adapter(pipeline):
+            key_loader = config._HOOKS.get("orig_load_api_key") or chat.load_api_key
+            key = key_loader()
+        base = str(config.value_of("TEXTBOOK_KP_BASE_URL")
+                   or config.value_of("KP_BUILD_BASE_URL")
+                   or "https://api.deepseek.com")
+        mdl = model_name()
+        think = thinking_on()
+        eff = effort()
+        cap = max_output_tokens()
 
     def invoke():
         return chat.chat_once([{"role": "system", "content": _SYSTEM},
@@ -284,7 +298,11 @@ def _call(segment: dict, plan: dict) -> dict:
                               thinking=think,
                               reasoning_effort=(eff if think else None), timeout=300,
                               api_key=key or None, api_base=base,
-                              response_format={"type": "json_object"})
+                              response_format={"type": "json_object"},
+                              run_context=(run_context
+                                           if run_context is not None
+                                           and runtime_context.runtime_enabled()
+                                           else None))
 
     with agent_bridge.pipeline_scope("textbook_kp"):
         with kp_build.model_slot("textbook_kp", timeout=kp_build.slot_wait_timeout()):
@@ -323,7 +341,19 @@ def _call(segment: dict, plan: dict) -> dict:
             "finish_reason": finish_reason}
 
 
-def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: int) -> dict:
+def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: int,
+           run_context=None, plan_ms: float = 0.0) -> dict:
+    ctx = (run_context if (run_context is not None
+                           and runtime_context.runtime_enabled()) else None)
+    # S02 telemetry：plan 阶段（work_ms 由 start 传入真实耗时；直接调用时为 0）。
+    try:
+        telemetry.record("plan", run_context=ctx, status="ok",
+                         work_ms=float(plan_ms or 0.0),
+                         calls=int(len(plan.get("segments") or [])),
+                         input_tokens=None, output_tokens=None,
+                         reasoning_tokens=None)
+    except Exception:  # noqa: BLE001  —— telemetry 不能拖垮主流程
+        pass
     final, pending, _ = _paths(plan["doc_id"], plan["chapter"], log_dir)
     parts = _matching_parts(pending, plan)
     pending_data = _read(pending)
@@ -333,7 +363,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
     previous = _read(final)
     if previous.get("status") == "done" and previous.get("signature") == plan["signature"] and not force and not parts and not attempts:
         return {"ok": True, "status": "done", "reused": True}
-    cap = max_output_tokens()
+    cap = (int(ctx.max_tokens or 0) if ctx is not None else max_output_tokens())
     total = len(plan["segments"]) or 1
     calls = 0
     for segment in plan["segments"]:
@@ -342,17 +372,42 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
         if calls >= max_calls:
             raise ValueError("需要的调用次数超过确认值，请重新估算")
         calls += 1
+        seg_t0 = time.perf_counter()
         try:
-            part = _call(segment, plan)
+            part = _call(segment, plan, run_context=ctx)
         except Exception as exc:
+            usage = getattr(exc, "usage", None)
+            try:
+                tokens = telemetry.usage_tokens(usage)
+                telemetry.record("segment_call", run_context=ctx, status="failed",
+                                 work_ms=(time.perf_counter() - seg_t0) * 1000.0,
+                                 cache_hit=False, calls=1,
+                                 input_tokens=tokens["input_tokens"],
+                                 output_tokens=tokens["output_tokens"],
+                                 reasoning_tokens=tokens["reasoning_tokens"],
+                                 finish_reason=str(getattr(exc, "finish_reason", "") or ""),
+                                 error_class=type(exc).__name__)
+            except Exception:  # noqa: BLE001
+                pass
             attempts.append({"segment": segment["hash"], "ok": False,
-                             "usage": getattr(exc, "usage", None),
+                             "usage": usage,
                              "finish_reason": getattr(exc, "finish_reason", ""),
                              "output_cap": cap})
             _write(pending, {"version": VERSION, "signature": plan["signature"],
                              "doc_id": plan["doc_id"], "chapter": plan["chapter"],
                              "parts": parts, "attempts": attempts})
             raise
+        try:
+            tokens = telemetry.usage_tokens(part.get("usage"))
+            telemetry.record("segment_call", run_context=ctx, status="ok",
+                             work_ms=(time.perf_counter() - seg_t0) * 1000.0,
+                             cache_hit=False, calls=1,
+                             input_tokens=tokens["input_tokens"],
+                             output_tokens=tokens["output_tokens"],
+                             reasoning_tokens=tokens["reasoning_tokens"],
+                             finish_reason=str(part.get("finish_reason") or ""))
+        except Exception:  # noqa: BLE001
+            pass
         parts[segment["hash"]] = part
         attempts.append({"segment": segment["hash"], "ok": True, "usage": part.get("usage"),
                          "finish_reason": part.get("finish_reason") or "",
@@ -379,16 +434,30 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                 "n_segments": len(plan["segments"]), "points": points,
                 "attempts": attempts,
                 "usage_unreported": sum(1 for x in attempts if x.get("usage") is None)}
+    write_t0 = time.perf_counter()
     _write(final, artifact)
     if pending.exists():
         pending.unlink()
+    try:
+        telemetry.record("write", run_context=ctx, status="ok",
+                         work_ms=(time.perf_counter() - write_t0) * 1000.0,
+                         cache_hit=False, calls=0,
+                         input_tokens=None, output_tokens=None,
+                         reasoning_tokens=None)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "status": "done", "n_points": len(points)}
 
 
 def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0,
           max_output_tokens=0) -> dict:
     db_path, log_dir = Path(config.DB_PATH), Path(config.LOG_DIR)
+    # P0-A：任务入口读一次设置做冻结快照；PIPELINE_RUNTIME=0 不建 context（旧路径）。
+    ctx = (runtime_context.make_context("textbook_kp", doc_id=doc_id)
+           if runtime_context.runtime_enabled() else None)
+    plan_t0 = time.perf_counter()
     plan = _plan(doc_id, chapter, db_path=db_path)
+    plan_ms = (time.perf_counter() - plan_t0) * 1000.0
     if not signature or signature != plan["signature"]:
         return {"ok": False, "error": "教材内容已变化，请重新查看预计调用量"}
     max_calls = int(max_calls)
@@ -414,7 +483,8 @@ def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0
                        "percent": round(min(done0 / total0, 1.0) * 100.0, 1),
                        "elapsed": 0.0,
                        "label": "第%d章 %s" % (int(chapter), plan["chapter_name"]),
-                       "error": "", "started_at": time.time()})
+                       "error": "", "started_at": time.time(),
+                       "run_id": (ctx.run_id if ctx is not None else "")})
 
     def run():
         try:
@@ -423,7 +493,7 @@ def start(doc_id: int, chapter: int, signature: str, *, force=False, max_calls=0
             if fresh["signature"] != signature:
                 raise ValueError("教材内容已变化，请重新查看预计调用量")
             result = _build(fresh, force=force, db_path=db_path, log_dir=log_dir,
-                            max_calls=max_calls)
+                            max_calls=max_calls, run_context=ctx, plan_ms=plan_ms)
             with _LOCK:
                 _STATE.update({"active": False, "status": result["status"], "error": "",
                                "percent": 100.0,

@@ -313,7 +313,7 @@ class TestTextbookKpSettings(_Isolated):
                       "memory_tip": "", "pitfall": "", "questions": [],
                       "source_ids": [1]}
 
-        def fake_call(segment, plan_):
+        def fake_call(segment, plan_, run_context=None):
             return {"points": [dict(fake_point)], "usage": {"prompt_tokens": 1,
                     "completion_tokens": 1}, "model": "m-meta", "thinking": True,
                     "reasoning_effort": "high", "output_cap": 0, "finish_reason": ""}

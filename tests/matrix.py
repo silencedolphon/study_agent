@@ -250,6 +250,16 @@ MATRIX = [
          entry="textbook_kp._plan 元数据统一解析 + preview.invalid_refs 安全回退 + kp_build.claim_pages page→owner",
          kind="read", priority="P0",
          tests=["test_00a_known_defects"], evidence="json"),
+    dict(id="F130", feature="RunContext 快照隔离（每个任务入口读一次设置；chat 可选透传）",
+         entry="core/pipeline_runtime/context.py::make_context/RunContext; "
+               "core/chat.py::chat_once/stream_chat(run_context=); textbook_kp 试点",
+         kind="read", priority="P0",
+         tests=["test_37_run_context_isolation"], evidence="json"),
+    dict(id="F131", feature="阶段 telemetry（JSONL 计数/耗时/错误类别，无敏感内容）",
+         entry="core/pipeline_runtime/telemetry.py::record/usage_tokens; "
+               "textbook_kp plan/segment_call/write",
+         kind="read", priority="P0",
+         tests=["test_38_runtime_telemetry"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
