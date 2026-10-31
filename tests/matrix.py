@@ -383,6 +383,10 @@ MATRIX = [
          entry="tools/dashboard.py::api_chat_stream make_context(chat); chat.stream_chat(run_context=)",
          kind="read", priority="P0",
          tests=["test_56_dashboard_chat_context"], evidence="json"),
+    dict(id="F158", feature="旧结构分析 outline RunContext：入口快照、cap=0 保留 32768 预算、runtime0 旧路径",
+         entry="core/outline.py::analyze_deck make_context(ingest_outline); chat_once(run_context=)",
+         kind="read", priority="P0",
+         tests=["test_57_outline_run_context"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

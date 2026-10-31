@@ -530,21 +530,47 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
     thinking = bool(int(getattr(config, "OUTLINE_THINKING", 1)))
     budget = int(getattr(config, "OUTLINE_MAX_TOKENS", 32768))
 
+    # P0-H：全局分析也走入口快照；PIPELINE_RUNTIME=0 时保持旧全局路径。
+    # cap=0 时把旧端点缺省预算写进 context，避免“无上限”被误解成“不发送”。
+    run_ctx = None
+    ctx_base = None
+    try:
+        from .pipeline_runtime import context as runtime_context
+        if runtime_context.runtime_enabled():
+            import dataclasses
+            run_ctx = runtime_context.make_context("ingest_outline", doc_id=doc_id)
+            thinking = bool(run_ctx.thinking)
+            if int(run_ctx.max_tokens or 0) > 0:
+                budget = int(run_ctx.max_tokens)
+            ctx_base = dataclasses.replace(run_ctx, max_tokens=int(budget))
+    except Exception:  # noqa: BLE001 —— 快照失败不阻断主流程，回旧路径
+        run_ctx = None
+        ctx_base = None
+
     el = 0.0
     parsed = {}
     pwarn = []
     res = {}
     for attempt in range(2):
         tokens = budget * (attempt + 1)
+        ctx_try = None
+        if ctx_base is not None:
+            import dataclasses
+            ctx_try = dataclasses.replace(ctx_base, max_tokens=int(tokens))
         t0 = time.perf_counter()
         try:
             from . import agent_bridge
             with agent_bridge.pipeline_scope("ingest_outline"):
+                kwargs = {"model": (ctx_try.model if ctx_try is not None
+                                    else _chat.CHAT_MODEL),
+                          "max_tokens": tokens, "thinking": thinking,
+                          "temperature": 0}
+                if ctx_try is not None:
+                    kwargs["reasoning_effort"] = (ctx_try.reasoning_effort
+                                                  if thinking else None)
+                    kwargs["run_context"] = ctx_try
                 res = _chat.chat_once(
-                    [{"role": "user", "content": prompt}],
-                    model=_chat.CHAT_MODEL, max_tokens=tokens,
-                    thinking=thinking, temperature=0,
-                )
+                    [{"role": "user", "content": prompt}], **kwargs)
         except Exception as e:  # noqa: BLE001
             out.warnings.append(f"全局分析调用失败: {type(e).__name__}: {e}")
             return out
