@@ -69,6 +69,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, figures
+from .pipeline_runtime import context as runtime_context
 
 # ---------------------------------------------------------------- 常量
 
@@ -852,15 +853,22 @@ def estimate_cost(calls: int, *, max_tokens: int = STRUCT_MAX_TOKENS,
 
 
 def _vision_call(img_path: Path, prompt: str, *, model: str,
-                 max_tokens: int, thinking: bool) -> dict:
+                 max_tokens: int, thinking: bool, run_context=None) -> dict:
     """真实视觉调用（危险：花钱）。只在 `build_structures(dry_run=False)` 里被调。
 
     复用 `core/figures.py::_http_post`（带重试/超时），不复制网络代码。
     返回 {ok, text, usage, elapsed, model, error}；网络/HTTP 错误收在 error 里，不抛。
     """
     from . import agent_bridge
+    vctx = (run_context if run_context is not None
+            and runtime_context.runtime_enabled() else None)
+    if vctx is not None:
+        model = str(vctx.model)
+        max_tokens = int(vctx.max_tokens or 0)
+        thinking = bool(vctx.thinking)
     key = _api_key()
-    if not key and not agent_bridge.has_adapter("structures"):
+    if not key and not agent_bridge.has_adapter(
+            str(vctx.pipeline) if vctx is not None else "structures"):
         return {"ok": False, "error": "没有 DEEPSEEK_API_KEY", "usage": {},
                 "elapsed": 0.0, "model": model, "text": ""}
     try:
@@ -878,17 +886,19 @@ def _vision_call(img_path: Path, prompt: str, *, model: str,
                  "image_url": {"url": "data:image/png;base64,%s" % b64}},
             ],
         }],
-        "max_tokens": int(max_tokens),
         "stream": False,
     }
+    if int(max_tokens or 0) > 0:
+        payload["max_tokens"] = int(max_tokens)
     if not thinking:
         payload["thinking"] = {"type": "disabled"}
     t0 = time.perf_counter()
-    with agent_bridge.pipeline_scope("structures"):
+    with agent_bridge.pipeline_scope(
+            str(vctx.pipeline) if vctx is not None else "structures"):
         st, body = figures._http_post(
             "%s/chat/completions" % str(getattr(config, "DEEPSEEK_BASE_URL",
                                                 "https://api.deepseek.com")).rstrip("/"),
-            payload, key or "")
+            payload, key or "", run_context=vctx)
     el = time.perf_counter() - t0
     if st != 200 or not isinstance(body, dict):
         return {"ok": False, "error": "HTTP %s: %s" % (st, str(body)[:300]),
@@ -971,7 +981,7 @@ def build_structures(doc_id: int, *, pages: list[int] | None = None,
                      model: str | None = None,
                      max_tokens: int = STRUCT_MAX_TOKENS,
                      thinking: bool = STRUCT_THINKING,
-                     vision_fn=None, log=print) -> dict:
+                     vision_fn=None, log=print, run_context=None) -> dict:
     """对候选结构页做**专用识图**（默认 dry-run：0 调用、0 写盘）。
 
     - `pages`：只处理这些页（默认=扫描出的候选页，按 score 降序，最多 `limit` 个）；
@@ -992,6 +1002,14 @@ def build_structures(doc_id: int, *, pages: list[int] | None = None,
          n_calls, n_cached, tokens: {in,out}, cost_cny, elapsed_s, written,
          errors: [...], meta: {...}}
     """
+    # P0-F：结构式入口只建一次 context；PIPELINE_RUNTIME=0 不建。
+    run_ctx = (run_context if run_context is not None
+               else (runtime_context.make_context("structures", doc_id=doc_id)
+                     if runtime_context.runtime_enabled() else None))
+    if run_ctx is not None:
+        model = str(run_ctx.model)
+        max_tokens = int(run_ctx.max_tokens or 0)
+        thinking = bool(run_ctx.thinking)
     try:
         row, src = _resolve_source(doc_id, db_path)
         slides = _scan_all_slides(src)
@@ -1095,6 +1113,8 @@ def build_structures(doc_id: int, *, pages: list[int] | None = None,
                 "error": "没有 DEEPSEEK_API_KEY：真实构建需要视觉模型密钥；"
                          "dry-run 不受影响（可先 --scan/--dry-run 看计划）。"}
     call_fn = vision_fn or _vision_call
+    call_kw = ({"run_context": run_ctx} if vision_fn is None and run_ctx is not None
+               else {})
     started = time.perf_counter()
     new_entries = 0
     data = {"meta": {}, "pages": dict(old_pages)}
@@ -1107,7 +1127,8 @@ def build_structures(doc_id: int, *, pages: list[int] | None = None,
         try:
             call_result = call_fn(
                 img, "%s\n\n%s" % (prompt["sys"], user_prompt),
-                model=model, max_tokens=int(max_tokens), thinking=bool(thinking))
+                model=model, max_tokens=int(max_tokens), thinking=bool(thinking),
+                **call_kw)
         except Exception as e:  # noqa: BLE001  （注入的假函数/网络都算失败页）
             call_result = {"ok": False, "error": "%s: %s" % (type(e).__name__, e),
                            "usage": {}, "elapsed": 0.0, "model": model, "text": ""}

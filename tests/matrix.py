@@ -370,6 +370,12 @@ MATRIX = [
          kind="read", priority="P0",
          tests=["test_54_teach_run_context"], evidence="json"),
 
+    dict(id="F155", feature="视觉/结构式管线 RunContext 隔离：入口一次快照，_http_post/describe/并发/结构式显式透传",
+         entry="core/figures.py::_http_post/describe_page/_probe_page/ingest_document_figures; "
+               "core/structures.py::_vision_call/build_structures",
+         kind="read", priority="P0",
+         tests=["test_55_vision_run_context"], evidence="json"),
+
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
          entry="tools/healthcheck.py --json", kind="cli", priority="P1",

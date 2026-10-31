@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, db
+from .pipeline_runtime import context as runtime_context
 
 # ---------------------------------------------------------------- 提示词
 
@@ -857,7 +858,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                             verbose: bool = False,
                             workers: int | None = None,
                             store_chunks: bool = True,
-                            pre_extracted=None) -> dict:
+                            pre_extracted=None, run_context=None) -> dict:
     """**完整识图管线**：渲染 → 逐页描述 → 写入库（含向量）。
 
     这是"入库"的一部分，由 `core.ingest.ingest_file` 调用，
@@ -903,6 +904,10 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
     # 窗口里写库，就会等到 `busy_timeout` 耗尽后抛 `database is locked`。
     conn.commit()
 
+    # P0-F：视觉入库入口只建一次 context；PIPELINE_RUNTIME=0 不建。
+    run_ctx = (run_context if run_context is not None
+               else (runtime_context.make_context("ingest_vision", doc_id=doc_id)
+                     if runtime_context.runtime_enabled() else None))
     kind = kind or ("pdf" if path.suffix.lower() == ".pdf" else "pptx")
     stats = {"pages": 0, "described": 0, "reused": 0, "no_info": 0,
              "chunks": 0, "cost_cny": 0.0, "errors": [],
@@ -1018,7 +1023,11 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         textless = not (ctx.title or "").strip() and not (ctx.body or "").strip()
         cached_body = (row or {}).get("description") or ""
         cache_ok = len(cached_body.strip()) >= 30 or (not textless and is_no_info(cached_body))
-        vkey = visual_cache_key(ctx, ihash, thinking=thinking)
+        vkey = visual_cache_key(
+            ctx, ihash, thinking=(bool(run_ctx.thinking) if run_ctx is not None else thinking),
+            model=(str(run_ctx.model) if run_ctx is not None else ""),
+            api_base=(str(run_ctx.api_base) if run_ctx is not None else ""),
+            reasoning_effort=(str(run_ctx.reasoning_effort) if run_ctx is not None else ""))
         vstate = visual_cache_state(outdir, p, vkey)
         if (row and row["image_hash"] == ihash and cache_ok
                 and not (textless and is_no_info(cached_body))
@@ -1157,7 +1166,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                 _settle(item, item["body"])
                 continue
             r, r2 = _probe_gated(item["img"], item["ctx"], thinking,
-                                 gate, inflight)
+                                 gate, inflight, run_context=run_ctx)
             _settle(item, _commit(item, r, r2))
     else:
         # ---- 并发路径 ----
@@ -1177,7 +1186,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                     stats["reused"] += 1
                     _settle(item, item["body"])
             futs = {ex.submit(_probe_gated, item["img"], item["ctx"], thinking,
-                              gate, inflight): item
+                              gate, inflight, run_context=run_ctx): item
                     for item in plan if item["kind"] == "describe"}
             for fut in as_completed(futs):
                 item = futs[fut]
@@ -1275,7 +1284,7 @@ def ingest_pages_as_blocks(conn, doc_id: int, path: Path, kind: str = "",
                            *, n_pages: int = 0, verbose: bool = False,
                            workers: int | None = None,
                            limit: int | None = None,
-                           thinking: bool = True) -> dict:
+                           thinking: bool = True, run_context=None) -> dict:
     """**图片型课件**专用：整页渲染 → 逐页识图 → 产出**正文块**。
 
     ## 它解决的是什么
@@ -1331,6 +1340,9 @@ def ingest_pages_as_blocks(conn, doc_id: int, path: Path, kind: str = "",
     """
     from . import db, extract as _ex, progress as _pg
 
+    run_ctx = (run_context if run_context is not None
+               else (runtime_context.make_context("ingest_vision", doc_id=doc_id)
+                     if runtime_context.runtime_enabled() else None))
     kind = kind or ("pdf" if path.suffix.lower() == ".pdf" else "pptx")
     stats: dict = {
         "pages": 0, "described": 0, "reused": 0, "no_info": 0, "chunks": 0,
@@ -1535,12 +1547,13 @@ def ingest_pages_as_blocks(conn, doc_id: int, path: Path, kind: str = "",
             inflight.enter()
             try:
                 r = describe_page(img, ctx, thinking=thinking, max_tokens=caps,
-                                  zero_text=True)
+                                  zero_text=True, run_context=run_ctx)
                 if r.ok and _usable_page_text(r.text):
                     return r, None
                 return r, describe_page(img, ctx, thinking=thinking,
                                         max_tokens=caps, zero_text=True,
-                                        extra_hint=ZERO_TEXT_RETRY_HINT)
+                                        extra_hint=ZERO_TEXT_RETRY_HINT,
+                                        run_context=run_ctx)
             finally:
                 inflight.exit()
 
@@ -1613,8 +1626,8 @@ def _write_page_md(outdir: Path, page: int, body: str) -> None:
 
 # ---------------------------------------------------------------- 逐页识图（可并发）
 
-def _probe_page(img: Path, ctx: PageContext, thinking: bool
-                ) -> tuple[FigureResult, FigureResult | None]:
+def _probe_page(img: Path, ctx: PageContext, thinking: bool,
+                run_context=None) -> tuple[FigureResult, FigureResult | None]:
     """一页的**纯网络**部分：识图（必要时按更大的上限重试一次空输出）。
 
     ⚠ 这里**不碰数据库、不写文件**——所以它可以安全地放进线程池。
@@ -1626,8 +1639,10 @@ def _probe_page(img: Path, ctx: PageContext, thinking: bool
     这样一次线程池任务里最多两次网络等待，主线程始终只做毫秒级的写库。
     """
     textless = not (ctx.title or "").strip() and not (ctx.body or "").strip()
-    r = (describe_page(img, ctx, thinking=thinking, zero_text=True) if textless
-         else describe_page(img, ctx, thinking=thinking))
+    r = (describe_page(img, ctx, thinking=thinking, zero_text=True,
+                       run_context=run_context) if textless
+         else describe_page(img, ctx, thinking=thinking,
+                            run_context=run_context))
     if not r.ok or (len((r.text or "").strip()) >= 30 and not (textless and is_no_info(r.text or ""))):
         return r, None
     # 半成品页才重试：判据与改造前逐字相同（`len(body.strip()) < 30`）。
@@ -1636,13 +1651,16 @@ def _probe_page(img: Path, ctx: PageContext, thinking: bool
     caps = getattr(config, "FIGURE_RETRY_MAX_TOKENS", 32768)
     if textless:
         return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
-                                zero_text=True, extra_hint=ZERO_TEXT_RETRY_HINT)
-    return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps)
+                                zero_text=True, extra_hint=ZERO_TEXT_RETRY_HINT,
+                                run_context=run_context)
+    return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
+                            run_context=run_context)
 
 
 def _probe_gated(img: Path, ctx: PageContext, thinking: bool,
                  gate: threading.Semaphore,
-                 inflight: "_Inflight") -> tuple[FigureResult, FigureResult | None]:
+                 inflight: "_Inflight", run_context=None,
+                 ) -> tuple[FigureResult, FigureResult | None]:
     """线程池里的入口：过**进程级闸门** → 记在飞 → 调模型。
 
     闸门是给"批量 4 份 × 每份 4 页 = 16 路"这种乘法叠加收口的（见文件上方
@@ -1652,7 +1670,7 @@ def _probe_gated(img: Path, ctx: PageContext, thinking: bool,
     with gate:
         inflight.enter()
         try:
-            return _probe_page(img, ctx, thinking)
+            return _probe_page(img, ctx, thinking, run_context=run_context)
         finally:
             inflight.exit()
 
@@ -1939,16 +1957,43 @@ def build_contexts(slides_text: list[dict], deck_title: str = "",
 # ---------------------------------------------------------------- 调用
 
 def _http_post(url: str, payload: dict, key: str, timeout: int = 300,
-               retries: int = 4, wait: float = 4.0) -> tuple[int, dict | str]:
+               retries: int = 4, wait: float = 4.0,
+               run_context=None) -> tuple[int, dict | str]:
     from . import agent_bridge
-    # ★ 2026-10-31：识图/结构式两条路的输出上限也走中央设置
-    # （scope 分别是 ingest_vision / structures；0 = 无上限 = 不发送 max_tokens）。
-    payload = config.apply_token_cap(payload, agent_bridge.current_pipeline())
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    if ctx is not None:
+        # P0-F：AgentRequest/payload/URL 全部用快照；不再读中央 token cap/当前管线。
+        payload = dict(payload)
+        payload["model"] = str(ctx.model)
+        payload["thinking"] = {"type": "enabled" if ctx.thinking else "disabled"}
+        if int(ctx.max_tokens or 0) > 0:
+            payload["max_tokens"] = int(ctx.max_tokens)
+        else:
+            payload.pop("max_tokens", None)
+        if ctx.thinking and ctx.reasoning_effort:
+            payload["reasoning_effort"] = str(ctx.reasoning_effort)
+        else:
+            payload.pop("reasoning_effort", None)
+        base = str(ctx.api_base or "").rstrip("/")
+        if base:
+            url = base + "/chat/completions"
+        pipeline = str(ctx.pipeline)
+        req_model = str(ctx.model)
+        req_max = int(ctx.max_tokens or 0)
+        req_think = bool(ctx.thinking)
+        req_eff = str(ctx.reasoning_effort) if req_think else None
+    else:
+        payload = config.apply_token_cap(payload, agent_bridge.current_pipeline())
+        pipeline = agent_bridge.current_pipeline()
+        req_model = str(payload.get("model") or "")
+        req_max = int(payload.get("max_tokens") or 0)
+        req_think = (payload.get("thinking") or {}).get("type") != "disabled"
+        req_eff = payload.get("reasoning_effort")
     request = agent_bridge.AgentRequest(
-        pipeline=agent_bridge.current_pipeline(), messages=payload.get("messages") or [],
-        model=str(payload.get("model") or ""), max_tokens=int(payload.get("max_tokens") or 0),
-        thinking=(payload.get("thinking") or {}).get("type") != "disabled",
-        reasoning_effort=payload.get("reasoning_effort"),
+        pipeline=pipeline, messages=payload.get("messages") or [],
+        model=req_model, max_tokens=req_max,
+        thinking=req_think, reasoning_effort=req_eff,
         temperature=float(payload.get("temperature", 0.3)), timeout=timeout)
     adapted = agent_bridge.complete(request)
     if adapted is not None:
@@ -2301,7 +2346,8 @@ def describe_page(img_path: Path, ctx: PageContext,
                   thinking: bool = True,
                   max_tokens: int | None = None,
                   zero_text: bool = False,
-                  extra_hint: str = "") -> FigureResult:
+                  extra_hint: str = "",
+                  run_context=None) -> FigureResult:
     """在整章语境下描述一页的图。
 
     thinking=True 时开启推理模式——用户要求尝试。
@@ -2316,13 +2362,21 @@ def describe_page(img_path: Path, ctx: PageContext,
     在重试时补一句"上一轮你说这页没图，但这份课件没有文字层"。
     """
     from . import agent_bridge
+    vctx = (run_context if run_context is not None
+            and runtime_context.runtime_enabled() else None)
     key = load_deepseek_key()
-    if not key and not agent_bridge.has_adapter("ingest_vision"):
+    if not key and not agent_bridge.has_adapter(
+            str(vctx.pipeline) if vctx is not None else "ingest_vision"):
         return FigureResult(False, error="没有 DEEPSEEK_API_KEY")
-    model = model or getattr(config, "DEEPSEEK_VISION_MODEL", "deepseek-flash")
-    # 0 = 无上限：不显式写 max_tokens（真正的 cap 在 _http_post 里按管线统一应用）。
-    max_tokens = int(max_tokens) if max_tokens is not None else \
-        int(config.token_cap("ingest_vision"))
+    if vctx is not None:
+        model = str(vctx.model)
+        thinking = bool(vctx.thinking)
+        max_tokens = int(vctx.max_tokens or 0)
+    else:
+        model = model or getattr(config, "DEEPSEEK_VISION_MODEL", "deepseek-flash")
+        # 0 = 无上限：不显式写 max_tokens（真正的 cap 在 _http_post 里按管线统一应用）。
+        max_tokens = int(max_tokens) if max_tokens is not None else \
+            int(config.token_cap("ingest_vision"))
 
     b64 = base64.b64encode(img_path.read_bytes()).decode()
     if zero_text:
@@ -2353,7 +2407,7 @@ def describe_page(img_path: Path, ctx: PageContext,
     t0 = time.perf_counter()
     with agent_bridge.pipeline_scope("ingest_vision"):
         st, body = _http_post(f"{config.DEEPSEEK_BASE_URL}/chat/completions",
-                              payload, key or "")
+                              payload, key or "", run_context=vctx)
     el = time.perf_counter() - t0
     if st != 200 or not isinstance(body, dict):
         return FigureResult(False, error=f"HTTP {st}: {body}", elapsed=el)
