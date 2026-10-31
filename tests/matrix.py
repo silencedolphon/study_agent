@@ -347,6 +347,10 @@ MATRIX = [
          entry="core/kp_owners.py::claim_pages/release_pages; core/kp_build.py 导入别名",
          kind="read", priority="P4",
          tests=["test_49_kp_owners_split"], evidence="json"),
+    dict(id="F151", feature="S16 第二步：纯页码/页列表工具抽到 kp_pages（parse_ref/pages_label/page_list，旧别名同一对象）",
+         entry="core/kp_pages.py::parse_ref/pages_label/page_list/REF_RE; core/kp_build.py 导入别名",
+         kind="read", priority="P4",
+         tests=["test_51_kp_pages_split"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

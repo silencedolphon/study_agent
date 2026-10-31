@@ -55,6 +55,11 @@ from pathlib import Path
 from . import config, outline as outline_mod, progress
 # S16 第一步：页面预约/释放抽到 kp_owners；旧名字继续可访问。
 from .kp_owners import claim_pages, release_pages  # noqa: F401
+# S16 第二步：纯页码/页列表工具抽到 kp_pages；旧下划线名字继续可访问。
+from .kp_pages import REF_RE as _REF_RE  # noqa: F401
+from .kp_pages import page_list as _page_list  # noqa: F401
+from .kp_pages import pages_label as _pages_label  # noqa: F401
+from .kp_pages import parse_ref as _parse_ref  # noqa: F401
 
 # ---------------------------------------------------------------- 常量
 # 【卡 C-0049：整理管线不再读入库结构，两代管线的版本号如下】
@@ -346,9 +351,6 @@ EST_OUT_TOKENS = 350
 _PROMPT_NAME = "提示词-知识点总结.md"
 
 
-_REF_RE = re.compile(r"^p\.(\d+)(?:-(\d+))?(\s*图)?$")
-
-
 def default_prompt_file() -> Path:
     own = config.LOG_DIR / "knowledge" / _PROMPT_NAME
     if own.exists():
@@ -362,26 +364,6 @@ def default_prompt_file() -> Path:
     # 源码模式下 `config.BUNDLE_ROOT` 与 `config.ROOT` 是同一个目录，
     # 上面一行已经返回，走不到这里 ⇒ **源码模式行为逐字不变**。
     return config.BUNDLE_ROOT / "logs" / "knowledge" / _PROMPT_NAME
-
-
-def _parse_ref(ref: str):
-    """解析 `source_ref` → (起始页, 结束页, 是否识图块)；认不出来返回 None。
-
-    三种写法都要认（`chunks` 表**没有 page 列**，页码只能从这里来）：
-      - `p.3`      单页正文块
-      - `p.3 图`   单页识图块（图片理解）
-      - `p.1-2`    **跨页块**：内容是这几页共有的，同时属于区间内的每一页
-                   （C-0031 §2 的既定口径）。实测有课件带这种块，
-                   不认它就会把整份课件拒跑。
-    """
-    m = _REF_RE.match((ref or "").strip())
-    if not m:
-        return None
-    a = int(m.group(1))
-    b = int(m.group(2) or a)
-    if b < a:
-        a, b = b, a
-    return a, b, bool(m.group(3))
 
 
 # ---------------------------------------------------------------- 提示词
@@ -2615,22 +2597,6 @@ def render_struct_drafts(drafts: list) -> str:
     return "\n".join(out)
 
 
-def _pages_label(pages) -> str:
-    """页列表 → `1-3、7` 这样的紧凑标签（只看连续性，不改顺序）。"""
-    ps = sorted({int(x) for x in (pages or [])})
-    if not ps:
-        return ""
-    out, a, b = [], ps[0], ps[0]
-    for x in ps[1:]:
-        if x == b + 1:
-            b = x
-            continue
-        out.append(str(a) if a == b else "%d-%d" % (a, b))
-        a = b = x
-    out.append(str(a) if a == b else "%d-%d" % (a, b))
-    return "、".join(out)
-
-
 # ---------------------------------------------------------------- 并发闸门（卡 C-0063）
 #
 # 卡 C-0063（2026-10-08）按人拍板「课件入库和总结知识点的用时太久了」做**单份整理
@@ -3046,32 +3012,6 @@ def _reasoning_tokens(usage):
         except (TypeError, ValueError):
             pass
     return 0
-
-
-def _page_list(raw):
-    """把模型给的 pages 读成升序去重整数列表（认 `[1,2]` / `"1-3"` / `"1、2"` 三种写法）。"""
-    out = []
-    if isinstance(raw, (int, float)):
-        raw = [raw]
-    if isinstance(raw, str):
-        parts = re.split('[、,，;；\\s]+', raw.strip())
-    elif isinstance(raw, (list, tuple)):
-        parts = list(raw)
-    else:
-        return []
-    for x in parts:
-        if isinstance(x, (int, float)):
-            out.append(int(x))
-            continue
-        s = str(x or '').strip()
-        m = re.match('^p?\\.?(\\d+)\\s*[-~—]\\s*p?\\.?(\\d+)$', s)
-        if m:
-            a, b = int(m.group(1)), int(m.group(2))
-            out.extend(range(min(a, b), max(a, b) + 1))
-            continue
-        for t in re.findall('\\d+', s):
-            out.append(int(t))
-    return sorted({x for x in out if x > 0})
 
 
 def _clean_section(node, depth: int = 0) -> dict | None:
