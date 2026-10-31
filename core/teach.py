@@ -67,6 +67,7 @@
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -74,6 +75,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import threading
 import time
 from pathlib import Path
@@ -925,8 +927,222 @@ def _ref_span(ref) -> tuple[int, int] | None:
     return (min(a, b), max(a, b))
 
 
+# ==========================================================================
+# S08B：共享材料进程内缓存（教材章候选 / 名词预习候选）
+#
+# 背景（docs/优化全路径-2026-10-31.md §S08B）：教材补充映射与名词整理会在
+# 一次界面操作里多次调用 `_chapter_candidates()` / `_preview_artifact()`，
+# 每次都重新 `SELECT ... GROUP BY heading_path`（实测 882 块教材约 4.3~5.5ms）
+# 或重新读 45KB 预习 JSON。这些数据**只读、不依赖模型**，且已由 S08 引入了
+# 事务内递增的 `meta.data_revision`，所以可以安全地做**进程内缓存**：
+#
+# 失效口径（与 S08 一致，不看 DB 文件 mtime/size——WAL 提交时主文件可能不变）：
+#   · 键里必须含 **db_path + data_revision**；revision 缺失/0 → **不缓存**
+#     （旧库没写 revision 时行为逐字等于改造前，安全回退）；
+#   · 再叠加数据自身签名：教材章候选用 documents 行的稳定字段
+#     （id/title/path/n_chunks/size_bytes），名词预习候选用 artifact sha256；
+#   · 因此"内容变但 revision 没变"的极端情况也能被签名兜住。
+#
+# 两条红线：
+#   1. **只缓存只读数据**（章候选列表 / 已存在的预习 JSON 归一化结果），
+#      不缓存任何模型输出/付费结果，不写新产物；
+#   2. **返回 deepcopy**：调用方改返回值不会污染缓存。
+#
+# 开关：环境变量 `SHARED_MATERIAL_CACHE=0`（或 false/off/no）→ 全部走旧路径
+# （不读不写缓存，也不改统计）。默认开。
+# ==========================================================================
+_SHARED_CACHE_LOCK = threading.RLock()
+_SHARED_CACHE: dict = {}
+_SHARED_CACHE_MAX = 64
+_SHARED_CACHE_STATS = {"hit": 0, "miss": 0, "store": 0, "skip": 0, "evict": 0}
+# 文件内容 sha 的记忆表：键=(绝对路径, mtime_ns, size) → sha24。
+# 为什么不直接每次读文件算 sha：名词预习 artifact 约 42KB，实测 sha256 一次中位
+# **0.77ms**，比"重新解析 JSON"（0.43ms）还贵——不记忆的话缓存热路径反而更慢。
+# 记忆键用文件自身的 mtime_ns+size，文件一改 mtime 就变 → 自动重算；这是"记忆哈希"
+# 而非"用 mtime 当失效判据"（缓存键里放的仍是真正的 sha256 值）。
+_SHARED_FILE_SIG_CACHE: dict = {}
+_SHARED_FILE_SIG_MAX = 128
+SHARED_CACHE_ENV = "SHARED_MATERIAL_CACHE"
+_SHARED_CACHE_OFF = ("0", "false", "off", "no", "disabled")
+
+
+def shared_material_cache_enabled() -> bool:
+    """S08B 共享材料缓存是否启用（`SHARED_MATERIAL_CACHE=0` 可整体回退）。"""
+    raw = os.environ.get(SHARED_CACHE_ENV)
+    if raw is None:
+        try:
+            raw = str(config.value_of(SHARED_CACHE_ENV, "1"))
+        except Exception:  # noqa: BLE001  （配置中心没有这个键时走默认）
+            raw = "1"
+    return str(raw or "").strip().lower() not in _SHARED_CACHE_OFF
+
+
+def _shared_cache_note(name: str, n: int = 1) -> None:
+    with _SHARED_CACHE_LOCK:
+        _SHARED_CACHE_STATS[name] = int(_SHARED_CACHE_STATS.get(name, 0)) + int(n)
+
+
+def shared_material_cache_note(name: str, n: int = 1) -> None:
+    """给统计计数 +n（测试/报告用；只影响统计，不影响缓存行为）。"""
+    _shared_cache_note(name, n)
+
+
+def shared_material_cache_get(key):
+    """读缓存并返回 deepcopy；未命中返回 None（miss 计数 +1）。"""
+    with _SHARED_CACHE_LOCK:
+        val = _SHARED_CACHE.get(key)
+        if val is None:
+            _SHARED_CACHE_STATS["miss"] += 1
+            return None
+        _SHARED_CACHE_STATS["hit"] += 1
+        return copy.deepcopy(val)
+
+
+def shared_material_cache_put(key, value) -> None:
+    """存缓存（存 deepcopy，LRU 上限 64：超了从最早插入的丢）。value=None 不存。"""
+    if value is None:
+        return
+    with _SHARED_CACHE_LOCK:
+        _SHARED_CACHE[key] = copy.deepcopy(value)
+        _SHARED_CACHE_STATS["store"] += 1
+        while len(_SHARED_CACHE) > _SHARED_CACHE_MAX:
+            _SHARED_CACHE.pop(next(iter(_SHARED_CACHE)))
+            _SHARED_CACHE_STATS["evict"] += 1
+
+
+def clear_shared_material_cache() -> None:
+    """清空共享材料缓存（测试/诊断用；同时重置统计与文件哈希记忆）。"""
+    with _SHARED_CACHE_LOCK:
+        _SHARED_CACHE.clear()
+        _SHARED_FILE_SIG_CACHE.clear()
+        for k in _SHARED_CACHE_STATS:
+            _SHARED_CACHE_STATS[k] = 0
+
+
+def shared_material_cache_stats() -> dict:
+    """缓存现状：{enabled, size, max, hit, miss, store, skip, evict, file_sig_size}。"""
+    with _SHARED_CACHE_LOCK:
+        out = {k: int(v) for k, v in _SHARED_CACHE_STATS.items()}
+        out.update({"enabled": shared_material_cache_enabled(),
+                    "size": len(_SHARED_CACHE), "max": _SHARED_CACHE_MAX,
+                    "file_sig_size": len(_SHARED_FILE_SIG_CACHE)})
+        return out
+
+
+def shared_material_db_path(conn: sqlite3.Connection) -> str:
+    """从连接拿主库文件路径（缓存键的一部分）；拿不到返回 ""（此时仍可用）。
+
+    `PRAGMA database_list` 给的已经是绝对路径；**不做 `resolve()`**（Windows 上
+    `resolve()` 要走一次文件系统，实测比缓存命中本身还贵）。路径写法不同只会
+    产生"多一个缓存键"，不会命中错数据。
+    """
+    try:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            # row = (seq, name, file)
+            name = row["name"] if hasattr(row, "keys") else row[1]
+            path = row["file"] if hasattr(row, "keys") else row[2]
+            if str(name) == "main":
+                if not path:
+                    return ""
+                p = Path(str(path))
+                return str(p if p.is_absolute() else p.absolute())
+    except sqlite3.Error:
+        pass
+    return ""
+
+
+def shared_material_data_revision(conn: sqlite3.Connection) -> int:
+    """读 S08 的 `meta.data_revision`；缺失/损坏返回 0（缓存据此安全回退）。"""
+    from . import db as _db
+
+    try:
+        return int(_db.data_revision(conn))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def shared_material_file_sha24(path: Path) -> str:
+    """文件内容 sha256 前 24 位；不存在/读失败返回 ""（"" 表示"不缓存"）。
+
+    内容哈希按 `(路径, mtime_ns, size)` 记忆：文件未变时不做第二次 IO；
+    文件一变 mtime 就变 → 自动重算。**缓存键里放的仍是真正的 sha256 值**，
+    mtime 只用于决定"要不要重算哈希"，不充当失效判据本身。
+    """
+    try:
+        p = Path(path)
+        st = os.stat(p)                       # 只 stat 一次（Windows 上每次 ~0.05ms）
+        if not stat.S_ISREG(st.st_mode):
+            return ""
+    except OSError:
+        return ""
+    memo_key = (str(p if p.is_absolute() else p.absolute()),
+                int(getattr(st, "st_mtime_ns", 0)), int(st.st_size))
+    with _SHARED_CACHE_LOCK:
+        cached = _SHARED_FILE_SIG_CACHE.get(memo_key)
+    if cached is not None:
+        return cached
+    try:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        sha = h.hexdigest()[:24]
+    except OSError:
+        return ""
+    with _SHARED_CACHE_LOCK:
+        _SHARED_FILE_SIG_CACHE[memo_key] = sha
+        while len(_SHARED_FILE_SIG_CACHE) > _SHARED_FILE_SIG_MAX:
+            _SHARED_FILE_SIG_CACHE.pop(next(iter(_SHARED_FILE_SIG_CACHE)))
+    return sha
+
+
+def _textbook_cache_signature(tb: dict) -> str:
+    """教材数据签名（不含正文）：id/title/path/n_chunks/size_bytes 的稳定哈希。
+
+    这些字段都来自 `documents` 行（`textbook_docs()` 的 SELECT 结果），取用零成本；
+    真正的失效主判据仍是 `data_revision`，本签名兜"revision 没变但教材被替换"的兜底。
+    """
+    parts = [str(tb.get("id") or ""), str(tb.get("title") or ""),
+             str(tb.get("path") or ""), str(tb.get("n_chunks") or ""),
+             str(tb.get("size_bytes") or "")]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _chapter_candidates(conn: sqlite3.Connection, tb: dict) -> list:
-    """教材的**章候选**：`SELECT heading_path, COUNT(*) GROUP BY heading_path`。
+    """教材的**章候选**（S08B：带进程内缓存，返回 deepcopy）。
+
+    缓存键 = 教材 doc_id + db_path + data_revision + 教材行签名；
+    revision 缺失/0 时不缓存（逐字走旧查询）；空结果不缓存（避免把
+    "暂时没读到章"固化）；调用方修改返回值不会影响下一次命中。
+    实际查询在 `_chapter_candidates_uncached()`（旧实现逐字保留）。
+    """
+    if not isinstance(tb, dict) or not tb.get("id"):
+        return []
+    key = None
+    if shared_material_cache_enabled():
+        try:
+            rev = shared_material_data_revision(conn)
+            if rev > 0:
+                key = ("teach_chapters", int(tb["id"]),
+                       shared_material_db_path(conn), int(rev),
+                       _textbook_cache_signature(tb))
+        except Exception:  # noqa: BLE001  （任何异常都退回旧路径，不因缓存而失败）
+            key = None
+        if key is not None:
+            hit = shared_material_cache_get(key)
+            if hit is not None:
+                return hit
+    result = _chapter_candidates_uncached(conn, tb)
+    if key is not None:
+        if result:
+            shared_material_cache_put(key, result)
+        else:
+            _shared_cache_note("skip")
+    return result
+
+
+def _chapter_candidates_uncached(conn: sqlite3.Connection, tb: dict) -> list:
+    """教材的**章候选**（旧实现，逐字保留；S08B 缓存未命中时走这里）。
 
     **只读 heading_path 分组计数，不读任何块正文**（整本扫描的红线也适用于这里）。
     取 heading_path 最后一段为章名并解析章号；书名级（front matter，只有书名一段）

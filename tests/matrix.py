@@ -329,6 +329,24 @@ MATRIX = [
                "bind_adapter/complete/stream; docs/agent-adapter.md",
          kind="read", priority="P4",
          tests=["test_47_agent_capabilities"], evidence="json"),
+    dict(id="F147", feature="教材补充章候选共享缓存（S08B）：doc+db_path+data_revision+教材行签名，deepcopy；SHARED_MATERIAL_CACHE=0 回退",
+         entry="core/teach.py::_chapter_candidates/_chapter_candidates_uncached; "
+               "shared_material_cache_*; revision=0 不缓存",
+         kind="read", priority="P1",
+         tests=["test_48_shared_material_cache"], evidence="json"),
+    dict(id="F148", feature="名词整理预习候选共享缓存（S08B）：doc+chapter+preview artifact sha256+data_revision，只读 JSON；SHARED_MATERIAL_CACHE=0 回退",
+         entry="core/terms_preview.py::_preview_artifact/_preview_artifact_uncached/"
+               "clear_preview_artifact_cache（与教材侧共用同一进程缓存）",
+         kind="read", priority="P1",
+         tests=["test_48_shared_material_cache"], evidence="json"),
+    dict(id="F149", feature="S14 节点粒度实验：只读 plan_small_node_merge（同父相邻小节点模拟，不接真实 build）",
+         entry="core/kp_granularity.py::plan_small_node_merge; KP_MERGE_SMALL_NODES=0 默认关闭",
+         kind="read", priority="P4",
+         tests=["test_50_kp_granularity"], evidence="json"),
+    dict(id="F150", feature="S16 第一步：claim_pages/release_pages 抽到 kp_owners（行为逐字，kp_build 旧入口可访问）",
+         entry="core/kp_owners.py::claim_pages/release_pages; core/kp_build.py 导入别名",
+         kind="read", priority="P4",
+         tests=["test_49_kp_owners_split"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

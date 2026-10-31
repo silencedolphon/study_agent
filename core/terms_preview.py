@@ -160,8 +160,65 @@ def _resolve_chapter(conn, doc_id: int) -> dict:
     return {}
 
 
+def _preview_artifact_path(tb: dict, chapter: dict) -> Path:
+    """教材预习产物的路径（旧口径逐字不变：`<tb_id>-预习总结-第N章.json`）。"""
+    return (config.LOG_DIR / "knowledge" /
+            ("%d-预习总结-第%d章.json" % (int(tb["id"]), int(chapter.get("no") or 0))))
+
+
 def _preview_artifact(doc_id: int, chapter: dict, conn=None, db_path=None) -> tuple:
-    """读教材预习产物 → `(path, terms)`；返回 terms 为 `_clean_terms` 同形字典列表。"""
+    """读教材预习产物 → `(path, terms)`（S08B：只读 JSON 的进程内缓存）。
+
+    缓存键 = `doc_id + 章 + 预习 artifact sha256 + data_revision`：
+      · 只缓存**已存在且能解析出候选词**的 JSON（旧 artifact 缺失/损坏 → 逐字走旧路径，
+        不缓存空结果，这样文件后来修好/新增时会因 sha 变化自然失效）；
+      · revision 缺失/0 → 不缓存（旧库安全回退）；
+      · 返回 deepcopy，调用方改 terms 不会污染缓存；
+      · `SHARED_MATERIAL_CACHE=0` → 直接走旧路径（不读不写缓存）。
+    真实读取/归一化在 `_preview_artifact_uncached()`（旧实现逐字保留）。
+    """
+    teach = _teach()
+    if not teach.shared_material_cache_enabled():
+        return _preview_artifact_uncached(doc_id, chapter, conn=conn,
+                                          db_path=db_path)
+    own = conn is None
+    conn = conn or _open_db(db_path)
+    try:
+        try:
+            tb = teach.pick_textbook(conn)
+            rev = teach.shared_material_data_revision(conn)
+        except Exception:  # noqa: BLE001  （缓存前置条件拿不到就按旧路径）
+            tb, rev = None, 0
+        if not tb or rev <= 0:
+            return _preview_artifact_uncached(doc_id, chapter, conn=conn,
+                                              db_path=db_path)
+        path = _preview_artifact_path(tb, chapter)
+        sha = teach.shared_material_file_sha24(path)
+        key = ("terms_preview", int(doc_id), int(tb["id"]),
+               int(chapter.get("no") or 0), str(chapter.get("name") or ""),
+               int(rev), sha)
+        if sha:
+            hit = teach.shared_material_cache_get(key)
+            if hit is not None:
+                return hit
+        result = _preview_artifact_uncached(doc_id, chapter, conn=conn,
+                                            db_path=db_path)
+        if sha and result[1]:
+            teach.shared_material_cache_put(key, result)
+        else:
+            teach.shared_material_cache_note("skip")
+        return result
+    finally:
+        if own:
+            conn.close()
+
+
+def _preview_artifact_uncached(doc_id: int, chapter: dict, conn=None,
+                               db_path=None) -> tuple:
+    """读教材预习产物 → `(path, terms)`；返回 terms 为 `_clean_terms` 同形字典列表。
+
+    旧实现逐字保留（S08B 缓存未命中/关闭时走这里）：只读 JSON + 归一化，不写产物。
+    """
     teach = _teach()
     own = conn is None
     conn = conn or _open_db(db_path)
@@ -174,8 +231,7 @@ def _preview_artifact(doc_id: int, chapter: dict, conn=None, db_path=None) -> tu
             conn.close()
     if not tb:
         return Path(""), [], {}
-    p = (config.LOG_DIR / "knowledge" /
-         ("%d-预习总结-第%d章.json" % (int(tb["id"]), int(chapter.get("no") or 0))))
+    p = _preview_artifact_path(tb, chapter)
     data = _load_json(p)
     raw = data.get("terms") if isinstance(data.get("terms"), list) else []
     items, seen = [], set()
@@ -199,6 +255,14 @@ def _preview_artifact(doc_id: int, chapter: dict, conn=None, db_path=None) -> tu
     return p, items, {"textbook_doc_id": int(tb["id"]),
                       "textbook_title": str(tb.get("title") or ""),
                       "preview_meta": pm}
+
+
+def clear_preview_artifact_cache() -> None:
+    """清空 S08B 共享材料缓存（名词侧入口；与教材章候选共用同一进程缓存）。"""
+    try:
+        _teach().clear_shared_material_cache()
+    except Exception:  # noqa: BLE001  （清理失败不影响业务）
+        pass
 
 
 # ---------------------------------------------------------------- 相关度
