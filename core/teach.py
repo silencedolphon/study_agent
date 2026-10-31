@@ -81,6 +81,7 @@ import time
 from pathlib import Path
 
 from . import config
+from .pipeline_runtime import context as runtime_context
 
 # ---------------- 常量 ----------------
 
@@ -1448,6 +1449,19 @@ def _kp_max_tokens() -> int:
         return 65536
 
 
+def _snapshot_params(run_context=None) -> dict:
+    """P0-E：有 context 时返回快照参数；否则返回全局设置（旧路径）。"""
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    if ctx is not None:
+        return {"ctx": ctx, "model": str(ctx.model),
+                "thinking": bool(ctx.thinking),
+                "effort": str(ctx.reasoning_effort or ""),
+                "max_tokens": int(ctx.max_tokens or 0)}
+    return {"ctx": None, "model": _kp_model(), "thinking": _kp_thinking(),
+            "effort": _kp_effort(), "max_tokens": _kp_max_tokens()}
+
+
 def _ai_enabled() -> bool:
     """教材补充 AI 是否可用：有 key + 可 import chat + 未被环境/测试套件关闭。
 
@@ -1474,7 +1488,7 @@ def _cost_of(usage) -> float:
 
 
 def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = None,
-             log=None) -> dict:
+             log=None, run_context=None) -> dict:
     """调 1 次（失败重试 1 次）并按知识点管线口径记账；**成功/失败都返回 calls 明细**。
 
     返回 `{ok, parsed, raw, usage, tokens:{in,out,reasoning}, cost_cny, elapsed_s,
@@ -1483,10 +1497,12 @@ def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = Non
     """
     from . import chat
     kb = _kp_build()
-    model = _kp_model()
-    thinking = _kp_thinking()
-    effort = _kp_effort()
-    mt = int(max_tokens) if max_tokens else _kp_max_tokens()
+    # P0-E：有 context 时 model/max/thinking/effort 全用冻结快照，不再读 teach 全局设置。
+    snap = _snapshot_params(run_context)
+    model = snap["model"]
+    thinking = snap["thinking"]
+    effort = snap["effort"]
+    mt = snap["max_tokens"]
     calls: list = []
     last = ""
     for attempt in range(2):
@@ -1501,7 +1517,8 @@ def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = Non
                     [{"role": "system", "content": sys_p},
                      {"role": "user", "content": user_p}],
                     model=model, max_tokens=mt, thinking=thinking,
-                    reasoning_effort=(effort if thinking else None))
+                    reasoning_effort=(effort if thinking else None),
+                    run_context=snap["ctx"])
         except Exception as e:  # noqa: BLE001
             last = "%s: %s" % (type(e).__name__, e)
             rec["error"] = last
@@ -1677,7 +1694,8 @@ def _local_chapter_vote(chapters: list, kps: list, doc_title: str) -> dict:
 def map_courseware_chapter(doc_id: int, *, force: bool = False,
                            allow_ai: bool = True, out_path=None, db_path=None,
                            conn: sqlite3.Connection | None = None,
-                           prompt_path=None, log=print) -> dict:
+                           prompt_path=None, log=print,
+                           run_context=None) -> dict:
     """① 课件 → 教材**唯一章节**（AI 1 次；已有缓存/不可用时 0 调用）。
 
     - 已有 `meta.chapter_map` 且教材 id / KP 产物 sha / 提示词 sha 未变 → 直接复用（cached）；
@@ -1726,10 +1744,12 @@ def map_courseware_chapter(doc_id: int, *, force: bool = False,
                     .replace("{courseware_title}", title)
                     .replace("{kp_outline}", _kp_outline_text(kps))
                     .replace("{chapters}", _chapters_text(chapters, ranges)))
-            res = _ai_chat("teach.map", prompts["map_sys"], user, log=log)
+            res = _ai_chat("teach.map", prompts["map_sys"], user, log=log,
+                           run_context=run_context)
             for attempt in range(2):
                 if attempt:                    # 章号不合法 → 重试 1 次
-                    res = _ai_chat("teach.map", prompts["map_sys"], user, log=log)
+                    res = _ai_chat("teach.map", prompts["map_sys"], user, log=log,
+                           run_context=run_context)
                 if not res.get("ok"):
                     err = str(res.get("error") or "AI 调用失败")
                     break
@@ -1928,6 +1948,7 @@ def _supp_cache_key(prompt_sha: str, kp: dict, tb_id: int, chapter_no: int,
 
 
 def estimate_map(doc_id: int, *, db_path=None, conn: sqlite3.Connection | None = None,
+                 run_context=None,
                  prompt_path=None) -> dict:
     """MAP 调用预估（0 模型、0 写文件）。"""
     own = conn is None
@@ -1945,13 +1966,16 @@ def estimate_map(doc_id: int, *, db_path=None, conn: sqlite3.Connection | None =
             len(_chapters_text(chapters, ranges))
         kb = _kp_build()
         est_in = int(user_len / max(1.0, kb.CHARS_PER_TOKEN))
-        est_out = min(_kp_max_tokens(), int(est_in * kb.REASON_RATIO) + 400)
+        est_out = min(_snapshot_params(run_context)["max_tokens"], int(est_in * kb.REASON_RATIO) + 400)
         cost = round(est_in / 1e6 * kb.PRICE_IN * kb.FX
                      + est_out / 1e6 * kb.PRICE_OUT * kb.FX, 6)
         return {"calls": 1, "est_tokens_in": est_in, "est_tokens_out": est_out,
-                "cost_cny_max": cost, "model": _kp_model(),
-                "thinking": _kp_thinking(), "reasoning_effort": _kp_effort(),
-                "max_tokens": _kp_max_tokens(), "ai_enabled": _ai_enabled(),
+                "cost_cny_max": cost,
+                "model": _snapshot_params(run_context)["model"],
+                "thinking": _snapshot_params(run_context)["thinking"],
+                "reasoning_effort": _snapshot_params(run_context)["effort"],
+                "max_tokens": _snapshot_params(run_context)["max_tokens"],
+                "ai_enabled": _ai_enabled(),
                 "prompt_sha256": str(prompts.get("sha256") or ""),
                 "rule": ("MAP：1 次小输入调用（课件标题+%d 条 KP 大纲+%d 章）；"
                          "按 %.2f 字符/token、输出≈输入×%.1f+400（上限 max_tokens）估"
@@ -1963,6 +1987,7 @@ def estimate_map(doc_id: int, *, db_path=None, conn: sqlite3.Connection | None =
 
 
 def estimate_kp_supplement(doc_id: int, kp_id, *, db_path=None,
+                           run_context=None,
                            conn: sqlite3.Connection | None = None,
                            prompt_path=None) -> dict:
     """单条 KP 的 SUPP 调用预估（0 模型、0 写文件；本地定位可现算）。"""
@@ -2008,14 +2033,17 @@ def estimate_kp_supplement(doc_id: int, kp_id, *, db_path=None,
         kb = _kp_build()
         est_in = int((len(user) + len(prompts.get("supp_sys") or ""))
                      / max(1.0, kb.CHARS_PER_TOKEN))
-        est_out = min(_kp_max_tokens(), int(est_in * kb.REASON_RATIO) + 600)
+        est_out = min(_snapshot_params(run_context)["max_tokens"], int(est_in * kb.REASON_RATIO) + 600)
         cost = round(est_in / 1e6 * kb.PRICE_IN * kb.FX
                      + est_out / 1e6 * kb.PRICE_OUT * kb.FX, 6)
         return {"ok": True, "calls": 1, "doc_id": int(doc_id), "kp_id": str(kp_id),
                 "est_tokens_in": est_in, "est_tokens_out": est_out,
-                "cost_cny_max": cost, "model": _kp_model(),
-                "thinking": _kp_thinking(), "reasoning_effort": _kp_effort(),
-                "max_tokens": _kp_max_tokens(), "ai_enabled": _ai_enabled(),
+                "cost_cny_max": cost,
+                "model": _snapshot_params(run_context)["model"],
+                "thinking": _snapshot_params(run_context)["thinking"],
+                "reasoning_effort": _snapshot_params(run_context)["effort"],
+                "max_tokens": _snapshot_params(run_context)["max_tokens"],
+                "ai_enabled": _ai_enabled(),
                 "prompt_sha256": str(prompts.get("sha256") or ""),
                 "sections": sec.get("sections") or [],
                 "pages": sec.get("pages") or [],
@@ -2045,7 +2073,7 @@ def _backup_supplement(out: Path) -> str:
 def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
                      allow_ai: bool = True, db_path=None,
                      conn: sqlite3.Connection | None = None, prompt_path=None,
-                     log=print) -> dict:
+                     log=print, run_context=None) -> dict:
     """混合管线：AI 章映射（1 次/课件，可缓存）→ 本地逐 KP 小节/页码 → 写产物。
 
     **此处不做 per-KP AI**（省钱/省时；按需分析见 `analyze_kp_supplement`）。
@@ -2059,6 +2087,10 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
                     "out_path": str(out_path or supplement_out_file(doc_id)),
                     "error": "这份课件还没有末级知识点产物（先整理知识点再补教材）"}
         out = Path(out_path) if out_path else supplement_out_file(doc_id)
+        # P0-E：真正 AI 入口只建一次 context；PIPELINE_RUNTIME=0 不建。
+        run_ctx = (run_context if run_context is not None
+                   else (runtime_context.make_context("textbook_teach", doc_id=doc_id)
+                         if runtime_context.runtime_enabled() else None))
         doc_title = _doc_title(conn, doc_id)
         tb = pick_textbook(conn)
         prompts, prompt_sha, prompt_error = {}, "", ""
@@ -2107,7 +2139,7 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
             "prompt_sha256": prompt_sha,
             "prompt_error": prompt_error,
             "ai_enabled": _ai_enabled(),
-            "ai_model": _kp_model(),
+            "ai_model": _snapshot_params(run_ctx)["model"],
             "chapter_map": {},
             "ai_map_source": "",
             "ai_map_cost_cny": 0.0,
@@ -2138,7 +2170,8 @@ def build_supplement(doc_id: int, *, out_path=None, force: bool = False,
         # ① AI 章映射（缓存命中则 0 调用；失败降级本地）
         cm = map_courseware_chapter(doc_id, force=force, allow_ai=allow_ai,
                                     out_path=out, db_path=db_path, conn=conn,
-                                    prompt_path=prompt_path, log=log)
+                                    prompt_path=prompt_path, log=log,
+                                    run_context=run_ctx)
         meta["chapter_map"] = cm if isinstance(cm, dict) else {}
         meta["ai_map_source"] = str((cm or {}).get("source") or "")
         meta["ai_map_cost_cny"] = float((cm or {}).get("cost_cny") or 0.0)
@@ -2231,7 +2264,7 @@ def _scale_pages(pages, lo: int, hi: int) -> list:
 def analyze_kp_supplement(doc_id: int, kp_id, *, force: bool = False,
                           allow_ai: bool = True, out_path=None, db_path=None,
                           conn: sqlite3.Connection | None = None,
-                          prompt_path=None, log=print) -> dict:
+                          prompt_path=None, log=print, run_context=None) -> dict:
     """③ 按需 AI：分析某条 KP 在教材对应小节里"有什么可补充的"（带缓存）。
 
     - 无 supplement 文件/旧版（C-0124）/缺该 KP → 先本地 build 升级（不重复 AI 章映射）；
@@ -2243,13 +2276,16 @@ def analyze_kp_supplement(doc_id: int, kp_id, *, force: bool = False,
     conn = conn or _open_db(db_path)
     try:
         out = Path(out_path) if out_path else supplement_out_file(doc_id)
+        run_ctx = (run_context if run_context is not None
+                   else (runtime_context.make_context("textbook_teach", doc_id=doc_id)
+                         if runtime_context.runtime_enabled() else None))
         data = _load_supplement(out)
         meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
         if (not data or str(meta.get("version") or "") != SUPPLEMENT_VERSION
                 or not isinstance(meta.get("chapter_map"), dict)):
             build_supplement(doc_id, out_path=out, force=True, allow_ai=allow_ai,
                              db_path=db_path, conn=conn, prompt_path=prompt_path,
-                             log=log)
+                             log=log, run_context=run_ctx)
             data = _load_supplement(out)
             meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
         if not data:
@@ -2263,7 +2299,7 @@ def analyze_kp_supplement(doc_id: int, kp_id, *, force: bool = False,
         if not entry:
             build_supplement(doc_id, out_path=out, force=True, allow_ai=allow_ai,
                              db_path=db_path, conn=conn, prompt_path=prompt_path,
-                             log=log)
+                             log=log, run_context=run_ctx)
             data = _load_supplement(out)
             kps_map = data.get("kps") if isinstance(data.get("kps"), dict) else {}
             entry = kps_map.get(str(kp_id))
@@ -2309,7 +2345,8 @@ def analyze_kp_supplement(doc_id: int, kp_id, *, force: bool = False,
             return {"ok": True, "status": str(old_ai.get("status")), "cached": True,
                     "entry": entry, "ai": old_ai, "doc_id": int(doc_id),
                     "kp_id": str(kp_id), "cost_cny": 0.0}
-        res = _ai_chat("teach.supplement", prompts["supp_sys"], user, log=log)
+        res = _ai_chat("teach.supplement", prompts["supp_sys"], user, log=log,
+                       run_context=run_ctx)
         generated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
         base = {"model": res.get("model"), "cost_cny": round(float(res.get("cost_cny") or 0), 6),
                 "tokens": res.get("tokens") or {"in": 0, "out": 0},
@@ -2511,7 +2548,7 @@ def supplement_status(doc_id: int, *, db_path=None,
             conn.close()
 
 
-def supplement_for_kp(doc_id: int, kp_id) -> dict:
+def supplement_for_kp(doc_id: int, kp_id, *, run_context=None) -> dict:
     """读某条 KP 的教材补充（**不自动生成**；前端侧栏用）。
 
     返回 `{ok, available, textbook, entry, ai, estimate, legacy, needs_rebuild, note}`：
