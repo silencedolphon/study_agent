@@ -394,8 +394,46 @@ def _blank_page_texts(res) -> list[dict]:
     return [{"page": p, "title": "", "body": ""} for p in range(1, n + 1)]
 
 
-def extract_pages(src: Path, kind: str = "", *,
-                  fill_empty_pages: bool = False) -> tuple[str, list[dict]]:
+INGEST_REUSE_EXTRACT_ENV = "INGEST_REUSE_EXTRACT"
+
+
+def reuse_extract_enabled() -> bool:
+    """S05 开关：默认开；=0 时回退旧"重新 extract_pages"双解析。"""
+    return str(os.environ.get(INGEST_REUSE_EXTRACT_ENV, "1")).strip().lower() not in (
+        "0", "false", "off", "no")
+
+
+def _normalize_pre_pages(pre_extracted) -> tuple[str, list[dict]]:
+    """把 ingest 已提取的页数据规范化成 extract_pages 的返回值（纯数据、不可变副本）。"""
+    if isinstance(pre_extracted, dict):
+        title = str(pre_extracted.get("deck_title") or "")
+        pages = pre_extracted.get("pages") or []
+    else:  # 兼容 (deck_title, pages) 二元组
+        title, pages = str(pre_extracted[0] or ""), pre_extracted[1] or []
+    out = []
+    for rec in pages:
+        if not isinstance(rec, dict):
+            continue
+        try:
+            page = int(rec.get("page") or 0)
+        except (TypeError, ValueError):
+            continue
+        if page <= 0:
+            continue
+        out.append({"page": page, "title": str(rec.get("title") or ""),
+                    "body": str(rec.get("body") or "")})
+    out.sort(key=lambda x: x["page"])
+    return title, out
+
+
+def extract_pages(src: Path, kind: str = "",
+                  fill_empty_pages: bool = False, *,
+                  pre_extracted=None) -> tuple[str, list[dict]]:
+    """可选 `pre_extracted`：ingest 已提取的页数据（含 OCR 追加文本）。
+
+    传入且开关开启时**不再调用 extract_pdf/extract_pptx**（一次解析）；
+    未传入/开关关闭时旧路径逐字不变。失败回退旧路径由调用方兜底。
+    """
     """取每页的标题与正文，作为整章语境的素材。
 
     直接复用 extract 层，保证"语境"与"入库的文字"同源同口径——
@@ -419,6 +457,10 @@ def extract_pages(src: Path, kind: str = "", *,
     有文字层的 PDF）的行为**逐字不变**——只有"文字层整体为空"这一种情形
     会走补页，且只在调用方显式要求时。
     """
+    if pre_extracted is not None and reuse_extract_enabled():
+        title, pages = _normalize_pre_pages(pre_extracted)
+        return (title or src.stem), pages
+
     from . import extract as _ex
 
     kind = kind or ("pdf" if src.suffix.lower() == ".pdf" else "pptx")
@@ -588,6 +630,10 @@ def render_pages(src: Path, outdir: Path, kind: str = "",
     只有 pptx 那条路受影响（卡 C-0069 的红线）。
     """
     kind = kind or ("pdf" if src.suffix.lower() == ".pdf" else "pptx")
+    if pages is not None:
+        pages = [int(p) for p in pages]
+        if not pages:
+            return {}                    # 显式 [] = 不导出（绝不退化为全部）
     outdir.mkdir(parents=True, exist_ok=True)
     from . import progress as _pg
 
@@ -596,7 +642,7 @@ def render_pages(src: Path, outdir: Path, kind: str = "",
         from PIL import Image
         dpi = dpi or getattr(config, "FIGURE_RENDER_DPI", 110)
         doc = pymupdf.open(str(src))
-        want = pages if pages else list(range(1, doc.page_count + 1))
+        want = (list(range(1, doc.page_count + 1)) if pages is None else pages)
         result: dict[int, Path] = {}
         for i, p in enumerate(want, start=1):
             if p < 1 or p > doc.page_count:
@@ -629,12 +675,160 @@ def render_pages(src: Path, outdir: Path, kind: str = "",
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
            "-File", str(script), "-Pptx", str(src), "-Out", str(outdir),
            "-Width", str(width)]
+    if pages is not None:
+        cmd += ["-Pages", ",".join(str(p) for p in pages)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()
     if "OK" not in out:
         raise RuntimeError(f"COM 渲染失败: {out[:300]}")
     return {int(p.stem.split("_")[1]): p
             for p in sorted(outdir.glob("slide_*.png"))}
+
+
+FIGURE_CACHE_V2_ENV = "FIGURE_CACHE_V2"
+RENDER_CACHE_META = ".render_cache.json"
+RENDER_BACKEND_VERSION = "render-v2"
+
+
+def figure_cache_v2_enabled() -> bool:
+    return str(os.environ.get(FIGURE_CACHE_V2_ENV, "1")).strip().lower() not in (
+        "0", "false", "off", "no")
+
+
+def _src_fingerprint(src: Path) -> str:
+    try:
+        import hashlib as _h
+        return _h.sha256(src.read_bytes()).hexdigest()[:32]
+    except OSError:
+        return ""
+
+
+def _render_meta_path(outdir: Path) -> Path:
+    return Path(outdir) / RENDER_CACHE_META
+
+
+def _read_render_meta(outdir: Path) -> dict:
+    try:
+        raw = _render_meta_path(outdir).read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_render_meta(outdir: Path, meta: dict) -> None:
+    try:
+        _render_meta_path(outdir).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def render_pages_cached(src: Path, outdir: Path, kind: str = "",
+                        width: int = 1600, dpi: int | None = None,
+                        pages: list[int] | None = None) -> tuple[dict, dict]:
+    """页图缓存：整页缓存命中 0 次渲染；文件/后端/尺寸变化或缺页才补渲染。
+
+    返回 `({页号: 图片路径}, {"cache_hit": bool, "rendered": [...], "reused": n})`。
+    旧目录没有 manifest → 按旧行为渲染（不删除任何旧页图）。
+    """
+    kind = kind or ("pdf" if src.suffix.lower() == ".pdf" else "pptx")
+    dpi_eff = (dpi if dpi is not None else
+               (getattr(config, "FIGURE_RENDER_DPI", 110) if kind == "pdf" else 0))
+    if not figure_cache_v2_enabled():
+        slides = render_pages(src, outdir, kind=kind, width=width, dpi=dpi,
+                              pages=pages)
+        return slides, {"cache_hit": False, "rendered": sorted(slides),
+                        "reused": 0, "mode": "legacy"}
+    fp = _src_fingerprint(src)
+    meta = _read_render_meta(outdir)
+    same = bool(fp and meta.get("src_fingerprint") == fp
+                and meta.get("backend") == RENDER_BACKEND_VERSION
+                and str(meta.get("kind")) == kind
+                and int(meta.get("width") or 0) == int(width)
+                and int(meta.get("dpi") or 0) == int(dpi_eff))
+    cached: dict[int, Path] = {}
+    if same:
+        for key, rel in (meta.get("pages") or {}).items():
+            try:
+                page = int(key)
+            except (TypeError, ValueError):
+                continue
+            path = Path(outdir) / str(rel)
+            if path.is_file():
+                cached[page] = path
+    want = pages
+    need = (sorted(cached) if want is None else [p for p in want
+                                                 if int(p) > 0 and int(p) not in cached])
+    if want is None and same and cached:
+        need = []
+    slides = dict(cached)
+    rendered: list[int] = []
+    if need or not cached:
+        fresh = render_pages(src, outdir, kind=kind, width=width, dpi=dpi,
+                             pages=(want if want is not None else None)
+                             if not cached else need)
+        slides.update(fresh)
+        rendered = sorted(fresh)
+    pages_map = {str(p): Path(path).name for p, path in sorted(slides.items())}
+    _write_render_meta(outdir, {
+        "src_fingerprint": fp, "backend": RENDER_BACKEND_VERSION, "kind": kind,
+        "width": int(width), "dpi": int(dpi_eff), "pages": pages_map,
+        "adopted_legacy": bool(meta and not same)})
+    if pages is not None:
+        slides = {p: slides[p] for p in pages if p in slides}
+    return slides, {"cache_hit": bool(cached and not rendered),
+                    "rendered": rendered, "reused": len(cached),
+                    "mode": "v2"}
+
+
+VISUAL_CACHE_VERSION = "visual-v2"
+
+
+def visual_cache_key(ctx, image_hash: str, *, thinking: bool = True,
+                     model: str = "", api_base: str = "",
+                     reasoning_effort: str = "", response_format: str = "json_object",
+                     prompt_version: str = VISUAL_CACHE_VERSION) -> str:
+    """视觉缓存扩展键：页图 hash + 实际页上下文(含 OCR 文本) + 提示词/模型/推理设置/输出格式。"""
+    import hashlib as _h
+    try:
+        prompt = ctx.to_prompt() if hasattr(ctx, "to_prompt") else str(ctx)
+    except Exception:  # noqa: BLE001
+        prompt = str(ctx)
+    raw = "\n".join([
+        str(prompt_version), str(image_hash), prompt,
+        "thinking=%s" % bool(thinking),
+        "model=%s" % str(model), "base=%s" % str(api_base),
+        "effort=%s" % str(reasoning_effort),
+        "format=%s" % str(response_format),
+    ])
+    return _h.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _visual_meta_path(outdir: Path, page: int) -> Path:
+    return Path(outdir) / ("slide_%02d.visual.json" % int(page))
+
+
+def write_visual_meta(outdir: Path, page: int, key: str) -> None:
+    try:
+        _visual_meta_path(outdir, page).write_text(
+            json.dumps({"version": VISUAL_CACHE_VERSION, "key": key},
+                       ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def visual_cache_state(outdir: Path, page: int, key: str) -> str:
+    """'match' / 'mismatch' / 'legacy'（旧缓存没有元数据 → 继续按旧规则读）。"""
+    path = _visual_meta_path(outdir, page)
+    if not path.exists():
+        return "legacy"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        old = str((data or {}).get("key") or "")
+    except (OSError, ValueError):
+        return "legacy"
+    return "match" if old == key else "mismatch"
 
 
 def _fig_skip(stats: dict, reason: str) -> None:
@@ -662,7 +856,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                             max_calls: int | None = None,
                             verbose: bool = False,
                             workers: int | None = None,
-                            store_chunks: bool = True) -> dict:
+                            store_chunks: bool = True,
+                            pre_extracted=None) -> dict:
     """**完整识图管线**：渲染 → 逐页描述 → 写入库（含向量）。
 
     这是"入库"的一部分，由 `core.ingest.ingest_file` 调用，
@@ -716,7 +911,10 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
              # 空串 = 正常跑过（或页数为 0 属于正常）；非空 = 一句人话的原因。
              "skipped_reason": ""}
 
-    deck_title, stexts = extract_pages(path, kind, fill_empty_pages=True)
+    # S05：有 ingest 已提取页数据时不再二次 extract；OCR 追加文本已包含在页 body 里。
+    deck_title, stexts = extract_pages(path, kind, fill_empty_pages=True,
+                                       pre_extracted=pre_extracted)
+    stats["extract_reused"] = bool(pre_extracted is not None and reuse_extract_enabled())
     ctxs = build_contexts(stexts, deck_title)
     if not ctxs:
         # ★ 不静默（卡 C-0122 修的就是这一处）。
@@ -755,7 +953,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
     _adopt_previous_renders(path, outdir)
 
     try:
-        slides = render_pages(path, outdir, kind=kind)
+        slides, render_info = render_pages_cached(path, outdir, kind=kind)
+        stats["render_cache"] = render_info
     except Exception as e:  # noqa: BLE001
         # ★ 不静默（卡 C-0069）：渲染失败 = 这一轮的**图注全缺**，
         # 用户必须知道为什么、以及怎么办。`stats["errors"]` 会被
@@ -819,15 +1018,19 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         textless = not (ctx.title or "").strip() and not (ctx.body or "").strip()
         cached_body = (row or {}).get("description") or ""
         cache_ok = len(cached_body.strip()) >= 30 or (not textless and is_no_info(cached_body))
+        vkey = visual_cache_key(ctx, ihash, thinking=thinking)
+        vstate = visual_cache_state(outdir, p, vkey)
         if (row and row["image_hash"] == ihash and cache_ok
-                and not (textless and is_no_info(cached_body))):
+                and not (textless and is_no_info(cached_body))
+                and vstate != "mismatch"):
             plan.append({"page": p, "kind": "reuse", "img": img, "ctx": ctx,
                          "ihash": ihash,
                          "title": row.get("page_title") or ctx.title,
                          "body": row["description"]})
         else:
             plan.append({"page": p, "kind": "describe", "img": img, "ctx": ctx,
-                         "ihash": ihash, "title": ctx.title})
+                         "ihash": ihash, "title": ctx.title,
+                         "visual_key": vkey})
 
     done_n = 0
 
@@ -880,6 +1083,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         # Only reusable, validated responses go into the cache.
         _save_figure_row(conn, doc_id, p, title, item["ihash"], chosen, now)
         conn.commit()
+        if item.get("visual_key"):
+            write_visual_meta(outdir, p, item["visual_key"])
         (outdir / f"slide_{p:02d}.md").write_text(
             f"# p{p} · {title}\n\n{body}", encoding="utf-8")
         if verbose:

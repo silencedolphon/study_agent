@@ -689,7 +689,9 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
                 max_calls=max_calls,
                 # ★ 整页切块模式：identified 描述**不单独建 p.N 图 块**，
                 # 随后由 build_page_chunks 并进该页那一块（旧模式传 True，逐字不变）。
-                store_chunks=not page_mode)
+                store_chunks=not page_mode,
+                # S05：把**已提取（含 OCR 追加）**的页文本传给识图，避免二次 extract。
+                pre_extracted=_page_pre_from_res(res, path))
             if page_mode:
                 # 只进日志，不改返回结构：让人一眼看出这一轮没建独立识图块。
                 progress.stage("识别图片", note="有图页识图（描述并入整页块）")
@@ -1300,3 +1302,28 @@ def ingest_paths(conn: sqlite3.Connection, paths: list[Path], force: bool = Fals
     progress.end("done" if not rep.failed else "failed",
                  error=(f"{rep.failed} 个文件失败" if rep.failed else ""))
     return rep
+
+
+def _page_pre_from_res(res, path: Path) -> dict:
+    """S05：把 ingest 已提取的页文本（含 OCR 追加）整理成 figures.extract_pages 口径。
+
+    纯数据副本，不共享可变 extract 对象；未传/开关关闭时 figures 侧回退旧路径。
+    """
+    title = str((getattr(res, "meta", {}) or {}).get("title") or path.stem).strip() or path.stem
+    by_page: dict = {}
+    for b in getattr(res, "blocks", []) or []:
+        try:
+            page = int(getattr(b, "page", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if page <= 0:
+            continue
+        rec = by_page.setdefault(page, {"page": page, "title": "", "body": []})
+        text = str(getattr(b, "text", "") or "")
+        if getattr(b, "kind", "") == "heading" and not rec["title"]:
+            rec["title"] = text
+        else:
+            rec["body"].append(text)
+    pages = [{"page": p, "title": by_page[p]["title"],
+              "body": "\n".join(by_page[p]["body"])} for p in sorted(by_page)]
+    return {"deck_title": title, "pages": pages}

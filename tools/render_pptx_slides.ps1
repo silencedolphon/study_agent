@@ -17,7 +17,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Pptx,
     [Parameter(Mandatory=$true)][string]$Out,
-    [int]$Width = 1600
+    [int]$Width = 1600,
+    [string]$Pages = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,15 @@ try {
     # Open ReadOnly so the source file is not modified or locked.
     $pres = $app.Presentations.Open($Pptx, -1, 0, 0)
     $n = $pres.Slides.Count
+    $wanted = @{}
+    if (-not [string]::IsNullOrWhiteSpace($Pages)) {
+        foreach ($part in $Pages.Split(',')) {
+            $num = 0
+            if ([int]::TryParse($part.Trim(), [ref]$num)) { $wanted[$num] = $true }
+        }
+    }
     for ($i = 1; $i -le $n; $i++) {
+        if ($wanted.Count -gt 0 -and -not $wanted.ContainsKey($i)) { continue }
         $name = 'slide_{0:d2}.png' -f $i
         $dest = Join-Path $Out $name
         # Export(FileName, FilterName, ScaleWidth, ScaleHeight); 0 = keep aspect

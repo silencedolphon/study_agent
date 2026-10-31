@@ -280,6 +280,16 @@ MATRIX = [
          entry="core/embed.py::embed_documents_cached/embed_cache_key; core/ingest.py embed_documents 前查缓存",
          kind="read", priority="P1",
          tests=["test_40_cache_reuse"], evidence="json"),
+    dict(id="F136", feature="入库一次解析（S05）：ingest 已提取/OCR 页文本直接给识图，不二次 extract",
+         entry="core/figures.py::extract_pages(pre_extracted=)/ingest_document_figures; "
+               "core/ingest.py::_page_pre_from_res; INGEST_REUSE_EXTRACT=0 回退",
+         kind="read", priority="P1",
+         tests=["test_41_ingest_figure_reuse"], evidence="json"),
+    dict(id="F137", feature="页图/视觉缓存（S06）：选择渲染/完整缓存 0 渲染/视觉键扩展旧缓存兼容",
+         entry="core/figures.py::render_pages(pages)/render_pages_cached/visual_cache_key; "
+               "tools/render_pptx_slides.ps1 -Pages; FIGURE_CACHE_V2=0 回退",
+         kind="read", priority="P1",
+         tests=["test_41_ingest_figure_reuse"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
