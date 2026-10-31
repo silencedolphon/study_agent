@@ -60,6 +60,10 @@ _LOCK = threading.RLock()
 _STATE = {"active": False, "status": "", "doc_id": 0, "chapter": 0,
           "done": 0, "total": 0, "error": "", "started_at": 0.0}
 _REVIEW_INTERVALS = (1, 3, 7, 14, 30, 60)
+# 窗口式阅读用的教材原文出处（task-41）：摘录长度与页码列表上限
+_SOURCE_TEXT_CHARS = 400
+_SOURCE_MAX_PAGES = 20
+_SOURCE_REF_RE = re.compile(r"p\.\s*(\d+)(?:\s*[-–—~]\s*(\d+))?")
 
 
 class SegmentOutputError(ValueError):
@@ -431,6 +435,127 @@ def progress() -> dict:
         return st
 
 
+def _ref_span(ref) -> tuple[int, int] | None:
+    """解析 `p.N` / `p.N-M` / `p.N–M`（也认 `~`）→ (起页, 止页)；无页码返回 None。"""
+    match = _SOURCE_REF_RE.search(str(ref or ""))
+    if not match:
+        return None
+    try:
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+    except (TypeError, ValueError):
+        return None
+    return (min(start, end), max(start, end))
+
+
+def _empty_source_fields(point: dict) -> None:
+    point["sources"] = []
+    point["pages"] = []
+    point["page_start"] = 0
+    point["page_end"] = 0
+
+
+def _attach_sources(result: dict, *, db_path=None) -> dict:
+    """给 `read_summary()` 的每个 point 补教材原文出处（**只读 DB、不写产物**）。
+
+    `point.sources = [{id, ref, page_start, page_end, heading_path, text(前400字)}]`
+    `point.pages` = 排序去重的页码（最多 20 个）；`point.page_start/page_end` = 全范围首尾页。
+    只查 artifact 自己的教材 doc_id；无页码/查不到的块跳过；任何异常都吞掉（主结果照常返回）。
+    """
+    try:
+        points = result.get("points")
+        if not isinstance(points, list) or not points:
+            return result
+        doc_id = int(result.get("doc_id") or 0)
+        if doc_id <= 0:
+            return result
+        # 1) 收集所有 source_ids（保持 int；坏值忽略）
+        wanted: set[int] = set()
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            for sid in (point.get("source_ids") or []):
+                try:
+                    wanted.add(int(sid))
+                except (TypeError, ValueError):
+                    continue
+        if not wanted:
+            for point in points:
+                if isinstance(point, dict):
+                    _empty_source_fields(point)
+            return result
+        # 2) 只读连接 + 只允许该教材 doc_id（再确认 role=textbook）
+        db = Path(db_path if db_path is not None else config.DB_PATH)
+        conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        infos: dict[int, dict] = {}
+        try:
+            role = conn.execute("SELECT role FROM documents WHERE id=?",
+                                (doc_id,)).fetchone()
+            if not role or str(role["role"] or "") != "textbook":
+                raise ValueError("not a textbook doc")
+            ids = sorted(wanted)
+            for i in range(0, len(ids), 400):
+                batch = ids[i:i + 400]
+                marks = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    "SELECT id, source_ref, heading_path, text FROM chunks "
+                    "WHERE doc_id=? AND id IN (%s)" % marks,
+                    (doc_id, *batch)).fetchall()
+                for row in rows:
+                    cid = int(row["id"])
+                    infos[cid] = {
+                        "id": cid,
+                        "ref": str(row["source_ref"] or ""),
+                        "heading_path": str(row["heading_path"] or ""),
+                        "text": str(row["text"] or ""),
+                    }
+        finally:
+            conn.close()
+        # 3) 逐点补字段（查不到/无页码 → 该来源跳过；不硬凑）
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            sources: list[dict] = []
+            all_pages: set[int] = set()
+            for sid in (point.get("source_ids") or []):
+                try:
+                    cid = int(sid)
+                except (TypeError, ValueError):
+                    continue
+                info = infos.get(cid)
+                if not info:
+                    continue
+                span = _ref_span(info["ref"])
+                if span is None:
+                    continue
+                start, end = span
+                all_pages.update(range(start, end + 1))
+                sources.append({
+                    "id": cid,
+                    "ref": info["ref"],
+                    "page_start": start,
+                    "page_end": end,
+                    "heading_path": info["heading_path"],
+                    "text": info["text"][:_SOURCE_TEXT_CHARS],
+                })
+            sources.sort(key=lambda x: (x["page_start"], x["page_end"], x["id"]))
+            pages = sorted(all_pages)
+            point["sources"] = sources
+            point["pages"] = pages[:_SOURCE_MAX_PAGES]
+            point["page_start"] = pages[0] if pages else 0
+            point["page_end"] = pages[-1] if pages else 0
+        return result
+    except Exception:  # noqa: BLE001 —— 出处补不出来不影响知识点主结果
+        try:
+            for point in (result.get("points") or []):
+                if isinstance(point, dict):
+                    _empty_source_fields(point)
+        except Exception:  # noqa: BLE001
+            pass
+        return result
+
+
 def read_summary(doc_id: int, chapter: int, *, log_dir=None, db_path=None) -> dict:
     final, pending, review = _paths(doc_id, chapter, log_dir)
     result = _read(final)
@@ -443,7 +568,8 @@ def read_summary(doc_id: int, chapter: int, *, log_dir=None, db_path=None) -> di
     result.update({"ok": True, "exists": True, "pending": resumable,
                    "stale": result.get("signature") != plan["signature"],
                    "reviews": _read(review).get("points") or {}})
-    return result
+    # 窗口式阅读（task-41）：只读补齐教材原文出处/页码；失败不抛。
+    return _attach_sources(result, db_path=db_path)
 
 
 def due_chapters(*, db_path=None, log_dir=None) -> dict:

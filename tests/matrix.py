@@ -227,7 +227,7 @@ MATRIX = [
          entry="core/textbook_kp.py + /api/textbook-kp/{estimate,start,progress,doc,review,due} + 知识点页「教材」模式",
          kind="ui", priority="P1",
          tests=["test_32_textbook_agent_visual", "test_33_textbook_settings_progress",
-                "test_34_textbook_settings_ui"], evidence="json+shot"),
+                "test_34_textbook_settings_ui", "test_35_textbook_popup_ui"], evidence="json+shot"),
     dict(id="F125", feature="全管线输出 token 上限设置（0=无上限，默认 0）+ 教材知识点设置分区",
          entry="core/config.py token_cap/apply_token_cap + 设置中心 6 条管线 Token 上限卡",
          kind="ui", priority="P1",
@@ -238,6 +238,10 @@ MATRIX = [
          kind="health", priority="P2",
          tests=["test_01_health", "test_05_browser", "test_32_textbook_agent_visual"],
          evidence="dom+json"),
+    dict(id="F127", feature="教材知识点窗口式阅读：左侧目录 + 教材页图/页码 + 原文摘录",
+         entry="point.sources/pages/page_start/page_end + /api/teach-page + 52 窗口 evPop",
+         kind="ui", priority="P1",
+         tests=["test_35_textbook_sources", "test_35_textbook_popup_ui"], evidence="json+shot"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
