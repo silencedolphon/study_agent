@@ -351,6 +351,10 @@ MATRIX = [
          entry="core/kp_pages.py::parse_ref/pages_label/page_list/REF_RE; core/kp_build.py 导入别名",
          kind="read", priority="P4",
          tests=["test_51_kp_pages_split"], evidence="json"),
+    dict(id="F156", feature="S16 第三步：结构分页纯函数抽到 kp_pages（page_text_for_structure/plan_structure_segments）",
+         entry="core/kp_pages.py::page_text_for_structure/plan_structure_segments; kp_build 导入同一对象",
+         kind="read", priority="P4",
+         tests=["test_51_kp_pages_split"], evidence="json"),
 
     dict(id="F152", feature="preview 管线 RunContext 隔离：入口一次快照，_preview_call/meta 用快照，旧路径不变",
          entry="core/preview.py::build_chapter_preview 建立 make_context(preview); "

@@ -59,6 +59,7 @@ from .kp_owners import claim_pages, release_pages  # noqa: F401
 # S16 第二步：纯页码/页列表工具抽到 kp_pages；旧下划线名字继续可访问。
 from .kp_pages import REF_RE as _REF_RE  # noqa: F401
 from .kp_pages import page_list as _page_list  # noqa: F401
+from .kp_pages import page_text_for_structure, plan_structure_segments  # noqa: F401
 from .kp_pages import pages_label as _pages_label  # noqa: F401
 from .kp_pages import parse_ref as _parse_ref  # noqa: F401
 
@@ -2502,51 +2503,6 @@ def read_text_pages_by_ids(doc_id: int, chunk_ids,
     return {"blocks": blocks, "cover": cover, "figrows": figrows,
             "max_page": max_page, "n_blocks": n_blocks,
             "pages_all": list(range(1, max_page + 1))}
-
-
-def page_text_for_structure(p: int, ch: dict, cap: int = STRUCT_PAGE_CHARS) -> str:
-    """该页喂给**结构模型**的文本（截断到 `cap` 字符，截断处标 `……`）。"""
-    bs = sorted(ch["blocks"].get(p) or [], key=lambda x: (x["ord"], x["chunk_id"]))
-    parts = []
-    for b in bs:
-        t = re.sub(r"\s+", " ", b["text"] or "").strip()
-        if t:
-            parts.append("〔%s〕%s" % (b["kind"], t))
-    s = " ".join(parts)
-    if len(s) > cap:
-        s = s[:cap] + "……"
-    return s
-
-
-def plan_structure_segments(ch: dict) -> list:
-    """把全页切成若干段（map 的输入）：**页数与字符数双阈值，谁先到就切**。
-
-    - 字符数按"该段各页喂给结构模型的文本"算（每页先截断到 `STRUCT_PAGE_CHARS`）；
-    - 空页（没有块）也占一个页位，字符按 0 算——它同样是"这一段的第几页"；
-    - 单页自身就超阈值时它独占一段（段长 1），不会出现空段或死循环。
-
-    返回 [{index, a, b, pages, chars}]（升序、无缝覆盖 `pages_all`）。
-    """
-    pages = list(ch["pages_all"])
-    if not pages:
-        return []
-    segs: list = []
-    cur: list = []
-    cur_chars = 0
-    for p in pages:
-        t = page_text_for_structure(p, ch)
-        n = len(t)
-        if cur and (len(cur) >= STRUCT_SEG_PAGES
-                    or cur_chars + n > STRUCT_SEG_CHARS):
-            segs.append(cur)
-            cur, cur_chars = [], 0
-        cur.append(p)
-        cur_chars += n
-    if cur:
-        segs.append(cur)
-    return [{"index": i + 1, "a": s[0], "b": s[-1], "pages": list(s),
-             "chars": sum(len(page_text_for_structure(p, ch)) for p in s)}
-            for i, s in enumerate(segs)]
 
 
 def render_struct_material(seg: dict, ch: dict) -> str:

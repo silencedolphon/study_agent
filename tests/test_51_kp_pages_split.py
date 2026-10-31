@@ -45,6 +45,27 @@ class TestKpPagesSplit(unittest.TestCase):
         from core import preview
         self.assertEqual(preview.kp_build._parse_ref("p.4 图"), (4, 4, True))
 
+    def test_structure_functions_are_same_objects(self):
+        self.assertIs(kp_build.page_text_for_structure,
+                      kp_pages.page_text_for_structure)
+        self.assertIs(kp_build.plan_structure_segments,
+                      kp_pages.plan_structure_segments)
+
+    def test_page_text_and_structure_segments(self):
+        ch = {"blocks": {
+            1: [{"kind": "正文块", "text": "甲", "ord": 1, "chunk_id": 10}],
+            2: [{"kind": "图片理解", "text": "乙" * 500, "ord": 2, "chunk_id": 11}],
+        }, "pages_all": [1, 2, 3]}
+        self.assertEqual(kp_pages.page_text_for_structure(1, ch), "〔正文块〕甲")
+        self.assertTrue(kp_pages.page_text_for_structure(2, ch).endswith("……"))
+        segs = kp_pages.plan_structure_segments(ch, page_cap=420,
+                                                seg_pages=12, seg_chars=6000)
+        self.assertEqual([s["pages"] for s in segs], [[1, 2, 3]])
+        self.assertEqual(segs[0]["a"], 1)
+        self.assertEqual(segs[0]["b"], 3)
+        self.assertEqual(kp_pages.plan_structure_segments(
+            {"blocks": {}, "pages_all": []}), [])
+
 
 if __name__ == "__main__":
     unittest.main()
