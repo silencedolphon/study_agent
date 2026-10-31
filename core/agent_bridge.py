@@ -20,6 +20,55 @@ PIPELINES = frozenset({
 
 
 @dataclass(frozen=True)
+class AgentCapabilities:
+    """Agent adapter 的能力声明（**没有声明 = 旧兼容模式**）。"""
+
+    pipelines: frozenset[str] | None = None
+    stream: bool = False
+    images: bool = False
+    json: bool = False
+    usage: bool = True
+
+    def supports_pipeline(self, pipeline: str) -> bool:
+        return self.pipelines is None or str(pipeline) in self.pipelines
+
+
+def _request_has_images(messages) -> bool:
+    def walk(obj) -> bool:
+        if isinstance(obj, dict):
+            t = str(obj.get("type") or "").lower()
+            if t in ("image_url", "input_image", "image"):
+                return True
+            if "image_url" in obj or "image" in obj:
+                return True
+            return any(walk(v) for v in obj.values())
+        if isinstance(obj, (list, tuple)):
+            return any(walk(v) for v in obj)
+        return False
+    return walk(messages)
+
+
+def adapter_capabilities(adapter):
+    """返回 `(AgentCapabilities, declared)`；旧适配器 declared=False 保持兼容。"""
+    fn = getattr(adapter, "capabilities", None)
+    if not callable(fn):
+        return AgentCapabilities(), False
+    raw = fn()
+    if isinstance(raw, AgentCapabilities):
+        return raw, True
+    if isinstance(raw, dict):
+        pipelines = raw.get("pipelines", None)
+        if pipelines is not None:
+            pipelines = frozenset(str(x) for x in pipelines) or None
+        return AgentCapabilities(
+            pipelines=pipelines, stream=bool(raw.get("stream", False)),
+            images=bool(raw.get("images", False)),
+            json=bool(raw.get("json", False)),
+            usage=bool(raw.get("usage", True))), True
+    raise ValueError("adapter.capabilities() 必须返回 AgentCapabilities 或 dict")
+
+
+@dataclass(frozen=True)
 class AgentRequest:
     pipeline: str
     messages: list[dict[str, Any]]
@@ -75,6 +124,12 @@ def bind_adapter(pipeline: str, name: str | None) -> None:
         elif name not in _adapters:
             raise ValueError("适配器尚未注册: " + str(name))
         else:
+            adapter = _adapters[name]
+            caps, _declared = adapter_capabilities(adapter)
+            if not caps.supports_pipeline(pipeline):
+                raise ValueError(
+                    "适配器 %s 声明不支持管线 %s；拒绝绑定，不会静默 fallback 到原模型"
+                    % (name, pipeline))
             _routes[pipeline] = name
 
 
@@ -88,11 +143,26 @@ def has_adapter(pipeline: str | None = None) -> bool:
     return _adapter(pipeline or current_pipeline()) is not None
 
 
+def _validate_request(adapter, request: AgentRequest) -> AgentCapabilities:
+    """绑定后再次校验：管线/图片/JSON；不支持就明确报错（不 fallback）。"""
+    caps, declared = adapter_capabilities(adapter)
+    if not caps.supports_pipeline(request.pipeline):
+        raise ValueError("适配器不支持管线 %s；拒绝调用，不会 fallback 原模型"
+                         % request.pipeline)
+    if declared and not caps.images and _request_has_images(request.messages):
+        raise ValueError("适配器声明 images=False：拒绝图片请求，"
+                         "不会把图片/正文发出去，也不会 fallback 原模型")
+    if declared and request.response_format is not None and not caps.json:
+        raise ValueError("适配器声明 json=False：拒绝 JSON 输出请求（response_format）")
+    return caps
+
+
 def complete(request: AgentRequest) -> dict[str, Any] | None:
     """Return None only when no adapter is bound; adapter errors propagate."""
     adapter = _adapter(request.pipeline)
     if adapter is None:
         return None
+    _validate_request(adapter, request)
     result = adapter.complete(request)
     if not isinstance(result, dict) or not isinstance(result.get("content"), str):
         raise ValueError("适配器返回格式不正确：需要 content 字符串")
@@ -110,6 +180,7 @@ def stream(request: AgentRequest):
     adapter = _adapter(request.pipeline)
     if adapter is None:
         return None
+    _validate_request(adapter, request)
     fn = getattr(adapter, "stream", None)
     if callable(fn):
         return fn(request)

@@ -9,3 +9,29 @@
 现有路由：`chat`（知识库问答）、`deck_chat`（课件答疑）、`ingest_vision`（入库识图）、`ingest_outline`（入库结构分析）、`structures`（结构式分析）、`courseware_kp`（课件知识点）、`terms`（名词整理）、`preview`（教材预习）、`textbook_kp`（教材知识点）和 `textbook_teach`（教材补充答疑）。调用上下文通过线程上下文传递；课件知识点的超时陪跑线程也保留该上下文。
 
 未来接 DSH 或 Codex 时，需要单独实现适配器与用户可见的选择、授权、取消、超时和用量呈现。资料正文与图片会作为消息发送给被选中的适配器，应明确告知使用者；模型或 Agent 输出仍需经过管线自己的 JSON、来源和内容校验。不要把密钥写入消息、日志或产物，也不要依据文档内容拼接 shell 命令。
+
+
+## 能力声明（P4，默认关闭）
+
+适配器可选实现 `capabilities()` 返回 `AgentCapabilities`（或同字段 dict）：
+
+```python
+from core.agent_bridge import AgentCapabilities
+
+class MyAgent:
+    def capabilities(self):
+        return AgentCapabilities(
+            pipelines=frozenset({"chat", "textbook_kp"}),
+            stream=False, images=False, json=True, usage=True)
+```
+
+- `pipelines=None`（或空集合）= 旧适配器兼容：可绑定全部已有管线；
+- `stream=False` 且没有 `stream()`：`stream_chat` 把一次 `complete()` 响应降级成
+  `delta/usage/done` 事件（显式兼容旧语义，不会自动改走其它服务）；
+- `images=False`：图片请求在发送前明确报错（不把图片/正文发给不支持者，不 fallback 原模型）；
+- `json=False`：`response_format` JSON 输出请求明确报错；未声明 capabilities 的旧适配器保持
+  旧行为（不新增拒绝）；
+- 绑定（`bind_adapter`）到适配器未声明的管线会**明确拒绝**，路由保持原样，不会静默 fallback
+  到原付费模型；适配器内部异常原样上抛。
+- 没有绑定任何适配器时行为与改造前完全一致（走原模型路径）；不安装/启动 DSH/Codex，
+  不真实调用任何外部模型。

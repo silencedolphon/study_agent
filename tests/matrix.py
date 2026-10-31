@@ -324,6 +324,11 @@ MATRIX = [
          entry="core/textbook_kp.py::migrate_reviews; _build v2 写最终产物后备份+迁移",
          kind="read", priority="P3",
          tests=["test_46_textbook_segment_migration"], evidence="json"),
+    dict(id="F146", feature="Agent 能力声明/绑定校验：pipelines/stream/images/json/usage；不支持明确拒绝不 fallback",
+         entry="core/agent_bridge.py::AgentCapabilities/adapter_capabilities/register_adapter/"
+               "bind_adapter/complete/stream; docs/agent-adapter.md",
+         kind="read", priority="P4",
+         tests=["test_47_agent_capabilities"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
