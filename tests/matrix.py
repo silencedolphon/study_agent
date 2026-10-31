@@ -290,6 +290,15 @@ MATRIX = [
                "tools/render_pptx_slides.ps1 -Pages; FIGURE_CACHE_V2=0 回退",
          kind="read", priority="P1",
          tests=["test_41_ingest_figure_reuse"], evidence="json"),
+    dict(id="F138", feature="教材知识点实际配置签名（不改旧 signature；settings_changed/unknown 只提示不重跑）",
+         entry="core/textbook_kp.py::settings_fingerprint; _plan.config_fingerprint; "
+               "产物 meta config_fingerprint/prompt_version/schema_version; read_summary",
+         kind="read", priority="P2",
+         tests=["test_42_textbook_signature_partial"], evidence="json"),
+    dict(id="F139", feature="教材 partial：保留有效点/不冒充 done/续跑只补缺段/不自动重试",
+         entry="core/textbook_kp.py::_call(partial/invalid_points); _build(status=partial,parts)",
+         kind="read", priority="P2",
+         tests=["test_42_textbook_signature_partial"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
