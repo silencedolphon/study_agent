@@ -153,6 +153,11 @@ def main() -> int:
         _print_est(est, args.pipeline, args.json)
         return 0
 
+    # GPT 真实验收发现：--out 只被 argparse 接收、没有传给 build，
+    # 导致“用 --out 跑隔离样本”实际覆盖默认 logs/knowledge 产物。
+    # dry-run 不写文件，estimate 也没有 out_path 参数；只给真实 build 传。
+    if args.out:
+        kw["out_path"] = args.out
     rep = kp_build.build(args.doc, dry_run=False, limit=args.limit,
                          max_cost=args.max_cost, force=args.force, **kw,
                          budget_unlimited=(not args.enforce_budget))

@@ -406,6 +406,10 @@ MATRIX = [
                "core/pipeline_runtime/state.py::SingleFlight; core/kp_build.py ModelCallHang",
          kind="read", priority="P0",
          tests=["test_61_gptfix_keys_unknown"], evidence="json"),
+    dict(id="F163", feature="CLI 隔离产物：tools/kp_build.py --out 真正传给 build（避免覆盖默认 logs/knowledge）",
+         entry="tools/kp_build.py::main --out; build(out_path=)",
+         kind="cli", priority="P0",
+         tests=["test_62_cli_out"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
