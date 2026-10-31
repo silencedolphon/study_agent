@@ -673,3 +673,32 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
     )
+
+# ---------------- 应用数据版本（P1-A / S08） ----------------
+DATA_REVISION_KEY = "data_revision"
+
+
+def data_revision(conn: sqlite3.Connection) -> int:
+    """读应用数据版本；缺失/损坏返回 0（调用方据此禁用缓存，安全回退）。"""
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key=?",
+                           (DATA_REVISION_KEY,)).fetchone()
+    except sqlite3.Error:
+        return 0
+    if not row or row[0] in (None, ""):
+        return 0
+    try:
+        return max(0, int(row[0]))
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_data_revision(conn: sqlite3.Connection) -> int:
+    """原子 +1（同一条 UPSERT）；**不 commit**，必须由调用方放在同一写事务里。"""
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES(?, '1') "
+        "ON CONFLICT(key) DO UPDATE SET value="
+        "CAST(COALESCE(meta.value, '0') AS INTEGER) + 1",
+        (DATA_REVISION_KEY,),
+    )
+    return data_revision(conn)

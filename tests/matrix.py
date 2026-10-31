@@ -271,6 +271,15 @@ MATRIX = [
          tests=["test_same_key_busy_then_release", "test_thread_concurrency_only_one_wins",
                 "test_busy_error_and_release_after_done"],
          evidence="json"),
+    dict(id="F134", feature="章节目录/本章材料进程内缓存（data_revision + block content hash 失效，deepcopy）",
+         entry="core/db.py::data_revision/bump_data_revision; "
+               "core/preview.py::list_chapters/read_chapter_ch; core/ingest.py 同事务 bump",
+         kind="read", priority="P1",
+         tests=["test_40_cache_reuse"], evidence="json"),
+    dict(id="F135", feature="确定性向量复用（同文本/模型/维度 0 次 ONNX 前向；不同模型不混用）",
+         entry="core/embed.py::embed_documents_cached/embed_cache_key; core/ingest.py embed_documents 前查缓存",
+         kind="read", priority="P1",
+         tests=["test_40_cache_reuse"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

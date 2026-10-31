@@ -117,3 +117,89 @@ def to_blob(vec: np.ndarray) -> bytes:
 def from_blob(blob: bytes, dim: int | None = None) -> np.ndarray:
     # 注意：`dim` 参数被忽略，这里不做维度校验（历史遗留占位参数，保留签名用）。
     return np.frombuffer(blob, dtype=np.float32).copy()
+
+# ---------------- 确定性向量复用（P1-A / S07） ----------------
+import hashlib as _hashlib          # noqa: E402
+import threading as _threading      # noqa: E402
+from collections import OrderedDict as _OrderedDict  # noqa: E402
+
+_EMBED_CACHE: "_OrderedDict[str, np.ndarray]" = _OrderedDict()
+_EMBED_CACHE_LOCK = _threading.RLock()
+_EMBED_CACHE_MAX = 4096
+_EMBED_CACHE_STATS = {"hit": 0, "miss": 0, "forward": 0, "saved": 0}
+
+
+def embed_cache_signature() -> str:
+    """模型/维度/归一化/切词口径指纹：不同模型/维度绝不混用。"""
+    return "|".join([
+        "bge", str(config.EMBED_MODEL_REPO), str(config.EMBED_ONNX_FILE),
+        "dim=%d" % int(config.EMBED_DIM), "max_tokens=%d" % int(config.EMBED_MAX_TOKENS),
+        "pool=cls", "norm=l2", "query_prefix",
+    ])
+
+
+def embed_cache_key(text: str) -> str:
+    raw = embed_cache_signature() + "\n" + str(text)
+    return _hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def clear_embed_cache() -> None:
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE.clear()
+        for k in _EMBED_CACHE_STATS:
+            _EMBED_CACHE_STATS[k] = 0
+
+
+def embed_cache_stats() -> dict:
+    with _EMBED_CACHE_LOCK:
+        return dict(_EMBED_CACHE_STATS, size=len(_EMBED_CACHE))
+
+
+def embed_documents_cached(texts: list[str], embedder=None, batch_size: int = 16,
+                           progress: bool = False):
+    """带进程内缓存的 `embed_documents`：同文本/同模型/同维度只前向一次。
+
+    只缓存向量（不含正文）；miss 才调用 ONNX。旧 embeddings 表/读取路径完全不改。
+    """
+    emb = embedder or get_embedder()
+    texts = list(texts)
+    n = len(texts)
+    dim = int(getattr(emb, "dim", config.EMBED_DIM))
+    out = [None] * n
+    missing: list[tuple[int, str, str]] = []
+    with _EMBED_CACHE_LOCK:
+        for i, text in enumerate(texts):
+            key = embed_cache_key(text)
+            vec = _EMBED_CACHE.get(key)
+            if vec is not None and getattr(vec, "shape", (0, 0))[-1] == dim:
+                _EMBED_CACHE.move_to_end(key)
+                out[i] = vec
+                _EMBED_CACHE_STATS["hit"] += 1
+                _EMBED_CACHE_STATS["saved"] += 1
+            else:
+                _EMBED_CACHE_STATS["miss"] += 1
+                missing.append((i, key, text))
+    if missing:
+        miss_texts = [m[2] for m in missing]
+        try:
+            vecs = emb.embed_documents(miss_texts, batch_size=batch_size,
+                                       progress=progress)
+        except TypeError:
+            # 兼容旧/测试 embedder 的签名（只接受 texts）
+            vecs = emb.embed_documents(miss_texts)
+        vecs = np.asarray(vecs)
+        if vecs.ndim != 2 or vecs.shape[0] != len(missing):
+            raise RuntimeError("嵌入器返回的向量形状与输入不匹配")
+        with _EMBED_CACHE_LOCK:
+            _EMBED_CACHE_STATS["forward"] += 1
+            for row, (i, key, _text) in enumerate(missing):
+                vec = np.array(vecs[row], dtype=vecs.dtype, copy=True)
+                out[i] = vec
+                if vec.shape[-1] == dim:
+                    _EMBED_CACHE[key] = vec
+                    _EMBED_CACHE.move_to_end(key)
+                    while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+                        _EMBED_CACHE.popitem(last=False)
+    if n == 0:
+        return np.zeros((0, dim), dtype="float32")
+    return np.vstack([np.asarray(v) for v in out])

@@ -52,6 +52,7 @@
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -63,6 +64,7 @@ import time
 from pathlib import Path
 
 from . import config
+from . import db as db_mod
 from . import kp_build
 
 # ---------------------------------------------------------------- 常量
@@ -237,7 +239,7 @@ def _norm_chapter_arg(chapter) -> dict:
     return {"no": 0, "name": s}
 
 
-def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> dict:
+def _list_chapters_uncached(doc_id: int, *, db_path: str | os.PathLike | None = None) -> dict:
     """列这份教材的章（**零模型成本**）：`chunks.heading_path` 里的 `> 第N章 …` 归章。
 
     返回 `{"ok", "doc_id", "title", "chapters":[{no,name,heading_path,n_blocks,
@@ -489,8 +491,8 @@ def _read_chapter_ch_slow(doc_id: int, chapter, *,
     return _assemble_chapter(full, info)
 
 
-def read_chapter_ch(doc_id: int, chapter, *,
-                    db_path: str | os.PathLike | None = None) -> tuple:
+def _read_chapter_ch_uncached(doc_id: int, chapter, *,
+                              db_path: str | os.PathLike | None = None) -> tuple:
     """构造**章级 ch**并渲染整章材料。
 
     返回 `(ch, info, material, inv, render_stats)`：
@@ -1962,3 +1964,107 @@ def read_preview_artifact(doc_id: int, chapter) -> dict:
     return {"ok": True, "artifact": artifact, "path": str(path),
             "legacy": bool(legacy_used or not is_current),
             "is_current_version": bool(is_current)}
+
+
+# ---------------- 章节目录/材料缓存（P1-A / S08） ----------------
+_PREVIEW_CACHE_LOCK = threading.RLock()
+_CHAPTER_LIST_CACHE: dict = {}
+_CHAPTER_MATERIAL_CACHE: dict = {}
+_PREVIEW_CACHE_MAX = 64
+
+
+def clear_preview_caches() -> None:
+    with _PREVIEW_CACHE_LOCK:
+        _CHAPTER_LIST_CACHE.clear()
+        _CHAPTER_MATERIAL_CACHE.clear()
+
+
+def _cache_get(cache: dict, key):
+    with _PREVIEW_CACHE_LOCK:
+        val = cache.get(key)
+        return copy.deepcopy(val) if val is not None else None
+
+
+def _cache_put(cache: dict, key, val) -> None:
+    with _PREVIEW_CACHE_LOCK:
+        cache[key] = copy.deepcopy(val)
+        while len(cache) > _PREVIEW_CACHE_MAX:
+            cache.pop(next(iter(cache)))
+
+
+def _file_signature(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:24]
+    except OSError:
+        return "0"
+
+
+def _db_revision(db_path: Path) -> int:
+    try:
+        if not db_path.exists():
+            return 0
+        conn = sqlite3.connect("file:" + db_path.as_posix() + "?mode=ro", uri=True)
+        try:
+            return int(db_mod.data_revision(conn))
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError):
+        return 0
+
+
+def _chapter_block_sig(db_path: Path, block_ids) -> str:
+    ids = sorted({int(x) for x in (block_ids or [])})
+    if not ids:
+        return ""
+    try:
+        conn = sqlite3.connect("file:" + db_path.as_posix() + "?mode=ro", uri=True)
+        try:
+            marks = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                "SELECT id, COALESCE(content_hash, '') FROM chunks WHERE id IN (%s)"
+                % marks, ids).fetchall()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError):
+        return ""
+    rows = sorted((int(a), str(b or "")) for a, b in rows)
+    return hashlib.sha256(json.dumps(rows).encode("utf-8")).hexdigest()[:24]
+
+
+def list_chapters(doc_id: int, *, db_path: str | os.PathLike | None = None) -> dict:
+    """带进程内缓存的章节目录；键含 db_path+doc+data_revision+sections 产物签名。"""
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    rev = _db_revision(db)
+    key = None
+    if rev > 0:
+        key = (str(db.resolve()), int(doc_id), int(rev),
+               _file_signature(sections_out_file(doc_id)))
+        hit = _cache_get(_CHAPTER_LIST_CACHE, key)
+        if hit is not None:
+            return hit
+    result = _list_chapters_uncached(doc_id, db_path=db_path)
+    if key is not None and result.get("ok"):
+        _cache_put(_CHAPTER_LIST_CACHE, key, result)
+    return result
+
+
+def read_chapter_ch(doc_id: int, chapter, *,
+                    db_path: str | os.PathLike | None = None) -> tuple:
+    """带章节材料缓存；键含 doc/chapter/data_revision/本章 block ids+content hash。
+
+    返回 deepcopy，调用方改返回值不会污染缓存；rev=0/无块时不缓存（安全回退）。
+    """
+    db = Path(db_path) if db_path else Path(config.DB_PATH)
+    rev = _db_revision(db)
+    info = locate_chapter(doc_id, chapter, db_path=db_path)
+    key = None
+    if rev > 0 and info.get("ok") and info.get("block_ids"):
+        key = (str(db.resolve()), int(doc_id), int(info.get("no") or 0),
+               int(rev), _chapter_block_sig(db, info.get("block_ids")))
+        hit = _cache_get(_CHAPTER_MATERIAL_CACHE, key)
+        if hit is not None:
+            return hit
+    result = _read_chapter_ch_uncached(doc_id, chapter, db_path=db_path)
+    if key is not None and result and isinstance(result, tuple) and result[2]:
+        _cache_put(_CHAPTER_MATERIAL_CACHE, key, result)
+    return result

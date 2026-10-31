@@ -26,7 +26,7 @@ from pathlib import Path
 
 from . import chunk as chunk_mod
 from . import config, db, extract, progress
-from .embed import get_embedder, to_blob
+from .embed import embed_documents_cached, get_embedder, to_blob
 
 # 估算 token 数：中文约 1 字 ≈ 0.7 token，英文约 0.25 token/字符。
 # 取 0.75 作为偏保守的混合估计，用于判断是否超出嵌入模型上限。
@@ -804,7 +804,7 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
                  for c in chunks]
         if verbose:
             print(f"    嵌入 {len(texts)} 块 ...", flush=True)
-        vecs = emb.embed_documents(texts, progress=verbose)
+        vecs = embed_documents_cached(texts, embedder=emb, progress=verbose)
     except FileNotFoundError as e:
         return _tag({"path": rel, "status": "failed", "reason": str(e)})
 
@@ -1136,7 +1136,7 @@ def _write_chunks(conn, doc_id: int, title: str, chunks: list,
             emb = get_embedder()
             texts = [f"{c.heading_path}\n{c.text}" if c.heading_path else c.text
                      for c in chunks]
-            vecs = emb.embed_documents(texts)
+            vecs = embed_documents_cached(texts, embedder=emb)
         except Exception:  # noqa: BLE001
             vecs = None
     conn.execute("DELETE FROM chunks WHERE doc_id=?", (doc_id,))
@@ -1165,6 +1165,8 @@ def _write_chunks(conn, doc_id: int, title: str, chunks: list,
                 (cid, config.EMBED_MODEL_REPO, int(vecs.shape[1]), to_blob(vecs[i])),
             )
         n += 1
+    # P1-A / S08：chunks 写入成功的同一事务内推进应用数据版本（失败不提交即不 bump）。
+    db.bump_data_revision(conn)
     conn.commit()
     return n
 
