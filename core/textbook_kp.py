@@ -5,9 +5,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import time
+from difflib import SequenceMatcher
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -80,6 +82,7 @@ def settings_fingerprint() -> str:
         "prompt_sha": hashlib.sha256(_SYSTEM.encode("utf-8")).hexdigest(),
         "schema_version": SCHEMA_VERSION,
         "artifact_version": VERSION,
+        "segment_version": segment_version(),
         "segment_chars": SEGMENT_CHARS,
         "v1_signature_cap": _V1_SIGNATURE_CAP,
     }
@@ -90,6 +93,18 @@ VERSION = "textbook-kp-v1"
 PROMPT_VERSION = "textbook-kp-prompt-v1"
 SCHEMA_VERSION = "textbook-kp-schema-v1"
 COVERAGE_ENV = "TEXTBOOK_KP_COVERAGE"
+SEGMENT_V2_ENV = "TEXTBOOK_KP_SEGMENT_V2"
+SEGMENT_V2_VERSION = "textbook-kp-segment-v2"
+
+
+def segment_v2_enabled() -> bool:
+    """v2 分段 opt-in：默认 0，必须显式 `TEXTBOOK_KP_SEGMENT_V2=1`。"""
+    return str(os.environ.get(SEGMENT_V2_ENV, "0")).strip().lower() in (
+        "1", "true", "on", "yes")
+
+
+def segment_version() -> str:
+    return "v2" if segment_v2_enabled() else "v1"
 
 
 def coverage_enabled() -> bool:
@@ -144,6 +159,97 @@ def _write(path: Path, value: dict) -> None:
     finally:
         if tmp.exists():
             tmp.unlink()
+
+
+def _segments_v1(selected: list[dict]) -> list[dict]:
+    """v1（默认/旧行为）：纯 16,000 字符硬切，逐字保持旧 hash/结构。"""
+    pieces = []
+    for block in selected:
+        raw = block["text"]
+        for offset in range(0, len(raw), SEGMENT_CHARS):
+            pieces.append({"id": block["id"], "ref": block["ref"],
+                           "text": raw[offset:offset + SEGMENT_CHARS]})
+    groups, current, size = [], [], 0
+    for piece in pieces:
+        if current and size + len(piece["text"]) > SEGMENT_CHARS:
+            groups.append(current)
+            current, size = [], 0
+        current.append(piece)
+        size += len(piece["text"])
+    if current:
+        groups.append(current)
+    segments = []
+    for index, group in enumerate(groups):
+        material = "\n\n".join(
+            f"【出处 {x['id']} · {x['ref'] or '页码未知'}】\n{x['text']}"
+            for x in group)
+        ids = list(dict.fromkeys(x["id"] for x in group))
+        sig = hashlib.sha256((VERSION + "\n" + _SYSTEM + "\n" + str(index)
+                              + "\n" + material).encode("utf-8")).hexdigest()
+        segments.append({"hash": sig, "material": material, "source_ids": ids})
+    return segments
+
+
+def _section_key(heading_path: str) -> str:
+    """节标题边界：去掉「书名 > 第N章…」前缀，按剩余标题路径分组。"""
+    parts = [x.strip() for x in str(heading_path or "").split(">")]
+    return " > ".join(parts[2:]) if len(parts) > 2 else (parts[-1] if parts else "")
+
+
+def _segments_v2(selected: list[dict]) -> list[dict]:
+    """v2（opt-in）：节标题 → 标题层级 → 段落边界 → 最后 16,000 字符。
+
+    所有块按原始顺序只出现一次，不丢字符、不跨章（selected 已限定本章）；
+    超长块在 16,000 字符处切分（同 v1，不丢字）。段内保留 source_ids/页码/字符区间。
+    """
+    units = []
+    char_cursor = 0
+    for block in selected:
+        section = _section_key(block.get("heading_path") or "")
+        raw = block["text"]
+        for offset in range(0, len(raw), SEGMENT_CHARS):
+            piece = raw[offset:offset + SEGMENT_CHARS]
+            units.append({"id": block["id"], "ref": block["ref"],
+                          "section": section, "text": piece,
+                          "char_start": char_cursor,
+                          "char_end": char_cursor + len(piece)})
+            char_cursor += len(piece)
+    groups, current, size, cur_section = [], [], 0, None
+    for unit in units:
+        # 1) 节标题边界；2) 超 16k 边界；段落/块天然边界由 unit 划分。
+        boundary = (current and (unit["section"] != cur_section
+                                 or size + len(unit["text"]) > SEGMENT_CHARS))
+        if boundary:
+            groups.append(current)
+            current, size = [], 0
+        current.append(unit)
+        cur_section = unit["section"]
+        size += len(unit["text"])
+    if current:
+        groups.append(current)
+    segments = []
+    for index, group in enumerate(groups):
+        material = "\n\n".join(
+            f"【出处 {x['id']} · {x['ref'] or '页码未知'}】\n{x['text']}"
+            for x in group)
+        ids = list(dict.fromkeys(x["id"] for x in group))
+        sig = hashlib.sha256(
+            (SEGMENT_V2_VERSION + "\n" + _SYSTEM + "\n" + str(index) + "\n"
+             + material).encode("utf-8")).hexdigest()
+        pages = set()
+        for x in group:
+            span = _ref_span(x["ref"])
+            if span:
+                pages.update(range(span[0], span[1] + 1))
+        segments.append({
+            "hash": sig, "material": material, "source_ids": ids,
+            "pages": ([min(pages), max(pages)] if pages else []),
+            "char_range": [min(x["char_start"] for x in group),
+                           max(x["char_end"] for x in group)],
+            "block_ids": list(dict.fromkeys(x["id"] for x in group)),
+            "sections": list(dict.fromkeys(x["section"] for x in group)),
+        })
+    return segments
 
 
 def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
@@ -201,40 +307,26 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
         if str(row["text"] or "").strip():
             name = name or match.group(2).strip()
             selected.append({"id": int(row["id"]), "ref": str(row["source_ref"] or ""),
+                             "heading_path": str(row["heading_path"] or ""),
                              "text": str(row["text"])})
         else:
             dropped_reasons["empty_text"] = dropped_reasons.get("empty_text", 0) + 1
     if not selected:
         raise ValueError("没有找到本章的教材内容，请检查教材是否按章节入库")
 
-    # Long blocks are split without dropping characters; each piece retains its source id.
-    pieces = []
-    for block in selected:
-        raw = block["text"]
-        for offset in range(0, len(raw), SEGMENT_CHARS):
-            pieces.append({"id": block["id"], "ref": block["ref"],
-                           "text": raw[offset:offset + SEGMENT_CHARS]})
-    groups, current, size = [], [], 0
-    for piece in pieces:
-        if current and size + len(piece["text"]) > SEGMENT_CHARS:
-            groups.append(current)
-            current, size = [], 0
-        current.append(piece)
-        size += len(piece["text"])
-    if current:
-        groups.append(current)
-    segments = []
-    for index, group in enumerate(groups):
-        material = "\n\n".join(f"【出处 {x['id']} · {x['ref'] or '页码未知'}】\n{x['text']}" for x in group)
-        ids = list(dict.fromkeys(x["id"] for x in group))
-        sig = hashlib.sha256((VERSION + "\n" + _SYSTEM + "\n" + str(index) + "\n" + material).encode("utf-8")).hexdigest()
-        segments.append({"hash": sig, "material": material, "source_ids": ids})
+    seg_version = segment_version()
+    segments = (_segments_v2(selected) if seg_version == "v2"
+                else _segments_v1(selected))
+    sig_items = [VERSION, doc_id, chapter, str(doc["title"] or ""), name,
+                 [s["hash"] for s in segments], MODEL, EFFORT, _V1_SIGNATURE_CAP]
+    if seg_version == "v2":
+        sig_items.insert(1, SEGMENT_V2_VERSION)
     signature = hashlib.sha256(json.dumps(
-        [VERSION, doc_id, chapter, str(doc["title"] or ""), name,
-         [s["hash"] for s in segments], MODEL, EFFORT, _V1_SIGNATURE_CAP], ensure_ascii=False).encode("utf-8")).hexdigest()
+        sig_items, ensure_ascii=False).encode("utf-8")).hexdigest()
     result = {"doc_id": doc_id, "chapter": chapter, "chapter_name": name,
               "title": str(doc["title"] or ""), "signature": signature,
               "config_fingerprint": settings_fingerprint(),
+              "segment_version": seg_version,
               "segments": segments, "n_blocks": len(selected),
               "chars": sum(len(x["text"]) for x in selected)}
     # P3-A：只读长章覆盖统计（只增字段；关掉后与旧版逐字一致，不影响签名/分段/点 ID）。
@@ -308,6 +400,7 @@ def estimate(doc_id: int, chapter: int, *, force=False, db_path=None, log_dir=No
             "reasoning_effort": effort(), "max_tokens": cap,
             "estimated_input_tokens": input_tokens,
             "estimated_output_cap": output_tokens,
+            "segment_version": plan.get("segment_version") or "v1",
             **({"coverage": plan["coverage"]} if plan.get("coverage") else {})}
 
 
@@ -441,6 +534,8 @@ def _call(segment: dict, plan: dict, run_context=None) -> dict:
 
 def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: int,
            run_context=None, plan_ms: float = 0.0) -> dict:
+    if plan.get("segment_version") == "v2" and not force:
+        raise ValueError("教材分段 v2 仅在显式 force 时生成，未生成新产物")
     ctx = (run_context if (run_context is not None
                            and runtime_context.runtime_enabled()) else None)
     # S02 telemetry：plan 阶段（work_ms 由 start 传入真实耗时；直接调用时为 0）。
@@ -459,6 +554,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
     attempts = ([x for x in raw_attempts if isinstance(x, dict)]
                 if pending_data.get("signature") == plan["signature"] and isinstance(raw_attempts, list) else [])
     previous = _read(final)
+    previous_artifact = dict(previous) if isinstance(previous, dict) else {}
     if previous.get("status") == "done" and previous.get("signature") == plan["signature"] and not force and not parts and not attempts:
         return {"ok": True, "status": "done", "reused": True}
     # partial 续跑：只有本版本 partial 产物才带 per-segment parts；旧产物无此字段，
@@ -581,6 +677,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                                        or settings_fingerprint()),
                 "prompt_version": PROMPT_VERSION,
                 "schema_version": SCHEMA_VERSION,
+                "segment_version": plan.get("segment_version") or "v1",
                 **({"coverage": plan["coverage"]} if plan.get("coverage") else {}),
                 "partial_segments": partial_segments,
                 "invalid_points": invalid_points,
@@ -594,6 +691,18 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
     _write(final, artifact)
     if pending.exists():
         pending.unlink()
+    # P3-B：v2 构建完成且存在旧产物/review → 先备份再迁移（失败不影响新产物）。
+    if (plan.get("segment_version") == "v2"
+            and previous_artifact.get("points")
+            and previous_artifact.get("signature") != plan["signature"]):
+        try:
+            _migrate_reviews_after_build(plan, previous_artifact, final, log_dir)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                telemetry.record("migrate_reviews", run_context=ctx,
+                                 status="failed", error_class=type(exc).__name__)
+            except Exception:  # noqa: BLE001
+                pass
     try:
         telemetry.record("write", run_context=ctx, status="ok",
                          work_ms=(time.perf_counter() - write_t0) * 1000.0,
@@ -850,6 +959,135 @@ def _attach_sources(result: dict, *, db_path=None) -> dict:
         except Exception:  # noqa: BLE001
             pass
         return result
+
+
+# ---------------------------------------------------------------- P3-B 复习迁移
+def _norm_title(text) -> str:
+    raw = str(text or "").strip().lower()
+    raw = re.sub(r"[\s\W_]+", "", raw, flags=re.UNICODE)
+    return raw
+
+
+def _title_similarity(a, b) -> float:
+    na, nb = _norm_title(a), _norm_title(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    if na in nb or nb in na:
+        return 0.95
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def migrate_reviews(old_points, new_points, old_reviews, *,
+                    title_threshold: float = 0.72,
+                    source_min: float = 0.5,
+                    old_chapter=None, new_chapter=None) -> dict:
+    """把旧复习记录按 source_ids 重叠 + 标题归一化匹配到新点；**纯函数、零模型**。
+
+    只有"唯一最佳且达标"才迁移；歧义/无匹配保留清单（不丢记录）。
+    跨章直接拒绝。迁移字段原样复制 stage/due/last_review/remembered。
+    """
+    empty = {"ok": True, "reviews": {}, "migrated": [], "unmatched": [],
+             "ambiguous": [], "cross_chapter": False,
+             "total_old": len(old_reviews or {})}
+    try:
+        if old_chapter is not None and new_chapter is not None:
+            if int(old_chapter) != int(new_chapter):
+                empty["cross_chapter"] = True
+                return empty
+    except (TypeError, ValueError):
+        pass
+    old_by_id = {}
+    for p in old_points or []:
+        if isinstance(p, dict) and p.get("id"):
+            old_by_id[str(p["id"])] = p
+    new_list = [p for p in (new_points or []) if isinstance(p, dict)
+                and p.get("id")]
+    migrated = {}
+    migrated_list = []
+    unmatched = []
+    ambiguous = []
+    for old_id, rec in (old_reviews or {}).items():
+        old_id = str(old_id)
+        oldp = old_by_id.get(old_id)
+        if oldp is None:
+            unmatched.append(old_id)
+            continue
+        old_sources = set()
+        for v in (oldp.get("source_ids") or []):
+            try:
+                old_sources.add(int(v))
+            except (TypeError, ValueError):
+                continue
+        scored = []
+        for newp in new_list:
+            new_sources = set()
+            for v in (newp.get("source_ids") or []):
+                try:
+                    new_sources.add(int(v))
+                except (TypeError, ValueError):
+                    continue
+            union = old_sources | new_sources
+            jac = (len(old_sources & new_sources) / len(union)) if union else 0.0
+            tsim = _title_similarity(oldp.get("title"), newp.get("title"))
+            qualifies = ((bool(old_sources & new_sources) and jac >= source_min)
+                         or tsim >= title_threshold)
+            if not qualifies:
+                continue
+            score = 0.7 * jac + 0.3 * tsim
+            scored.append((score, str(newp["id"]), newp))
+        if not scored:
+            unmatched.append(old_id)
+            continue
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        best = scored[0][0]
+        tops = [x for x in scored if abs(x[0] - best) < 1e-9]
+        if len(tops) > 1:
+            ambiguous.append({"old_id": old_id,
+                              "new_ids": [x[1] for x in tops]})
+            continue
+        new_id = tops[0][1]
+        copy = {}
+        for key in ("stage", "due", "last_review", "remembered"):
+            if key in (rec or {}):
+                copy[key] = rec[key]
+        migrated[new_id] = copy
+        migrated_list.append({"old_id": old_id, "new_id": new_id,
+                              "score": round(best, 4)})
+    return {"ok": True, "reviews": migrated, "migrated": migrated_list,
+            "unmatched": unmatched, "ambiguous": ambiguous,
+            "cross_chapter": False, "total_old": len(old_reviews or {})}
+
+
+def _migrate_reviews_after_build(plan: dict, previous_artifact: dict,
+                                 final_path: Path, log_dir) -> dict:
+    """v2 产物写完后：备份旧 review → 迁移成功项写入新 review；失败不破坏新产物。"""
+    final, _pending, review = _paths(plan["doc_id"], plan["chapter"], log_dir)
+    old_reviews = _read(review).get("points") if isinstance(
+        _read(review).get("points"), dict) else {}
+    if not old_reviews:
+        return {"ok": True, "skipped": True, "reason": "旧 review 为空"}
+    backup = review.with_name(review.name + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
+    try:
+        shutil.copy2(review, backup)
+    except OSError:
+        backup = None
+    new_artifact = _read(final_path)
+    result = migrate_reviews(previous_artifact.get("points") or [],
+                             new_artifact.get("points") or [], old_reviews,
+                             old_chapter=previous_artifact.get("chapter"),
+                             new_chapter=plan.get("chapter"))
+    if result.get("migrated") or result.get("unmatched") or result.get("ambiguous"):
+        _write(review, {"version": VERSION, "doc_id": int(plan["doc_id"]),
+                        "chapter": int(plan["chapter"]),
+                        "points": result.get("reviews") or {},
+                        "migrated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "backup": (backup.name if backup else ""),
+                        "migrated": result.get("migrated") or [],
+                        "unmatched": result.get("unmatched") or [],
+                        "ambiguous": result.get("ambiguous") or []})
+    return result
 
 
 def read_summary(doc_id: int, chapter: int, *, log_dir=None, db_path=None) -> dict:

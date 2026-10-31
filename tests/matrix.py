@@ -316,6 +316,14 @@ MATRIX = [
          entry="core/textbook_kp.py::_plan.coverage/estimate/产物 meta; TEXTBOOK_KP_COVERAGE=0 可关",
          kind="read", priority="P3",
          tests=["test_45_textbook_coverage"], evidence="json"),
+    dict(id="F144", feature="教材分段 v2（opt-in 默认关闭）：节标题→标题层级→段落→16k，字符/块/页码不丢、不跨章",
+         entry="core/textbook_kp.py::segment_version/_segments_v2; TEXTBOOK_KP_SEGMENT_V2=1（仅 force 生成）",
+         kind="read", priority="P3",
+         tests=["test_46_textbook_segment_migration"], evidence="json"),
+    dict(id="F145", feature="复习记录迁移：source_ids 重叠+标题归一化，唯一最佳才迁移；歧义/无匹配保留；旧 review 备份",
+         entry="core/textbook_kp.py::migrate_reviews; _build v2 写最终产物后备份+迁移",
+         kind="read", priority="P3",
+         tests=["test_46_textbook_segment_migration"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
