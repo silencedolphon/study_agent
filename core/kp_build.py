@@ -53,6 +53,7 @@ from concurrent import futures as _cf
 from pathlib import Path
 
 from . import config, outline as outline_mod, progress
+from .pipeline_runtime import context as runtime_context
 # S16 第一步：页面预约/释放抽到 kp_owners；旧名字继续可访问。
 from .kp_owners import claim_pages, release_pages  # noqa: F401
 # S16 第二步：纯页码/页列表工具抽到 kp_pages；旧下划线名字继续可访问。
@@ -1776,6 +1777,7 @@ def merge_decisions(recs, est, ch):
 def build_v1(
     doc_id,
     *,
+    run_context=None,
     outline_path=None,
     prompt_path=None,
     out_path=None,
@@ -1914,7 +1916,8 @@ def build_v1(
                 # 旧重建版写成 _gen_one(p, user, deck=…, parent_pages=carry)：2 个位置参 + 2 个
                 # 不存在的关键字 ⇒ TypeError 被下面 except 吞成「★失败 p.x」，v1 一条都生成不出来。
                 rec = _gen_one(p, render_win, materials, inv, user, prompt, pages, ch, est, log,
-                               own_pages=own, carry_pages=carry)
+                               own_pages=own, carry_pages=carry,
+                               run_context=run_context)
             except Exception as e:
                 log("★失败 p.%d：%s: %s" % (p, type(e).__name__, e))
                 _emit(on_event, {"ev": "log", "msg": "★失败 p.%d：%s: %s" % (p, type(e).__name__, e)})
@@ -2121,12 +2124,18 @@ def _acc_extra(extra, rec):
     }
 
 
-def _gen_one(page, win, materials, inv, user, prompt, pages, ch, est, log, own_pages, carry_pages):
+def _gen_one(page, win, materials, inv, user, prompt, pages, ch, est, log, own_pages, carry_pages,
+             run_context=None):
     from . import chat
     last_err = ''
     parsed = {}
     usage = {}
-    model = MODEL
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    model = str(ctx.model) if ctx is not None else MODEL
+    call_max = int(ctx.max_tokens or 0) if ctx is not None else MAX_TOKENS
+    call_think = bool(ctx.thinking) if ctx is not None else THINKING
+    call_eff = str(ctx.reasoning_effort or '') if ctx is not None else ''
     elapsed = 0.0
     raw = ''
     for attempt in range(RETRY + 1):
@@ -2139,11 +2148,13 @@ def _gen_one(page, win, materials, inv, user, prompt, pages, ch, est, log, own_p
                         {'role': 'system', 'content': prompt['sys']},
                         {'role': 'user', 'content': user},
                     ],
-                    model=MODEL,
-                    max_tokens=MAX_TOKENS,
-                    thinking=THINKING,
+                    model=model,
+                    max_tokens=call_max,
+                    thinking=call_think,
+                    reasoning_effort=(call_eff if call_think else None),
                     temperature=TEMPERATURE,
                     timeout=TIMEOUT,
+                    run_context=ctx,
                 )
         except Exception as e:
             from .pipeline_runtime import state as runtime_state
@@ -2871,7 +2882,8 @@ def _append_call(calls: list, rec: dict, *, call_no: int = 0, kp_seq: bool = Fal
 def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int,
              retry: int, log, note: str = "", temperature: float = TEMPERATURE,
              call_no: int = 0, run_no: int = 1, thinking: bool = THINKING_V2,
-             reasoning_effort: str = REASONING_EFFORT, kp_seq: bool = False) -> dict:
+             reasoning_effort: str = REASONING_EFFORT, kp_seq: bool = False,
+             run_context=None) -> dict:
     """调一次模型，**成功与失败都逐次记账**（`calls` 直接进产物 `meta.calls`）。
 
     记账字段：run（第几轮运行）/ kind（这一步是谁）/ attempt（第几次试）/
@@ -2894,14 +2906,29 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
     """
     from . import chat  # 延迟 import：dry-run 时不需要 key
 
+    # P0-D：有 RunContext 时 model/max_tokens/thinking/reasoning_effort 全用冻结快照，
+    # 不再读模块全局 MODEL/KP_MAX_TOKENS/STRUCT_MAX_TOKENS/config cap；
+    # 无 context / PIPELINE_RUNTIME=0 逐字旧路径。
+    ctx = (run_context if run_context is not None
+           and runtime_context.runtime_enabled() else None)
+    if ctx is not None:
+        call_model = str(ctx.model)
+        call_max = int(ctx.max_tokens or 0)
+        call_think = bool(ctx.thinking)
+        call_eff = str(ctx.reasoning_effort or "") if call_think else ""
+    else:
+        call_model = MODEL
+        call_max = int(max_tokens)
+        call_think = bool(thinking)
+        call_eff = str(reasoning_effort) if call_think else ""
     last = ""
     last_idx = -1
     for attempt in range(retry + 1):
         t0 = time.perf_counter()
         rec = {"run": int(run_no), "kind": kind, "attempt": attempt + 1, "note": note,
-               "model": MODEL, "max_tokens": int(max_tokens),
-               "thinking": bool(thinking),
-               "reasoning_effort": (str(reasoning_effort) if thinking else ""),
+               "model": call_model, "max_tokens": call_max,
+               "thinking": call_think,
+               "reasoning_effort": call_eff,
                "chars_in": len(sys_p) + len(user_p),
                "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         try:
@@ -2922,12 +2949,14 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                     pipeline = "terms" if kind.startswith("terms.") else "courseware_kp"
                     with agent_bridge.pipeline_scope(pipeline):
                         r = _call_with_hard_timeout(
-                            lambda: chat.chat_once(
+                            lambda _ctx=ctx: chat.chat_once(
                                 [{"role": "system", "content": sys_p},
                                  {"role": "user", "content": user_p}],
-                                model=MODEL, max_tokens=max_tokens, thinking=thinking,
-                                temperature=temperature, timeout=TIMEOUT,
-                                reasoning_effort=(reasoning_effort if thinking else None)),
+                                model=call_model, max_tokens=call_max,
+                                thinking=call_think, temperature=temperature,
+                                timeout=TIMEOUT,
+                                reasoning_effort=(call_eff if call_think else None),
+                                run_context=_ctx),
                             timeout=call_hard_timeout(), kind=kind)
                 finally:
                     _abandoned_done()
@@ -2947,7 +2976,8 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
             if runtime_state.is_unknown_failure(e):
                 log("  ★remote_unknown：结果未知，禁止自动重试（P0-B）")
                 return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
-                        "model": MODEL, "error": last, "call_index": last_idx,
+                        "model": call_model, "error": last,
+                        "call_index": last_idx,
                         "call": rec, "remote_unknown": True}
             # 卡 C-0123：**挂起类错误不重试**——重试只会再挂一个陪跑线程、
             # 再白等一个硬上限；而且它通常意味着整条网络路径不通，立即把错误
@@ -2956,7 +2986,8 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                 log("  ★%s：不再重试，直接交回上层（卡 C-0123）"
                     % type(e).__name__)
                 return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
-                        "model": MODEL, "error": last, "call_index": last_idx,
+                        "model": call_model, "error": last,
+                        "call_index": last_idx,
                         "call": rec, "hang": True}
             if attempt < retry:
                 time.sleep(2 * (attempt + 1))
@@ -2972,7 +3003,7 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
         err = str(parsed.get("_parse_error") or "")
         el_ok = round(time.perf_counter() - t0, 1)
         observe_call_seconds(kind, el_ok)
-        rec.update({"ok": not err, "model": r.get("model") or MODEL,
+        rec.update({"ok": not err, "model": r.get("model") or call_model,
                     "elapsed_s": el_ok,
                     "tokens_in": usage["tokens_in"], "tokens_out": usage["tokens_out"],
                     "reasoning_tokens": usage["reasoning_tokens"],
@@ -2986,8 +3017,9 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
         log("  ★输出解析失败（%s 第 %d 次）：%s" % (kind, attempt + 1, err))
         if attempt < retry:
             time.sleep(1)
-    return {"ok": False, "parsed": {}, "usage": {}, "raw": "", "model": MODEL,
-            "error": last, "call_index": last_idx, "call": None}
+    return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
+            "model": call_model, "error": last, "call_index": last_idx,
+            "call": None}
 
 
 def _reasoning_tokens(usage):
@@ -3199,7 +3231,8 @@ def _struct_map_result(parsed, a, b):
 
 
 def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
-                     calls: list, log=print, run_no: int = 1) -> dict:
+                     calls: list, log=print, run_no: int = 1,
+                     run_context=None) -> dict:
     """生成这份课件的**思维导图结构**（章节树）：map 分段 + reduce 归并。
 
     - 段数 == 1：不调第二次模型，本地把这一段挂到课件名下面（`merged_by: "local"`）；
@@ -3231,7 +3264,8 @@ def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
                        note="第 %d/%d 段（p.%d~%d）"
                             % (seg["index"], len(segs), seg["a"], seg["b"]),
                        temperature=STRUCT_TEMPERATURE, run_no=run_no,
-                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT)
+                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT,
+                       run_context=run_context)
         if not res["ok"]:
             raise RuntimeError("结构分段分析失败（第 %d 段 p.%d~%d）：%s"
                                % (seg["index"], seg["a"], seg["b"], res["error"]))
@@ -3282,7 +3316,8 @@ def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
                        max_tokens=STRUCT_MAX_TOKENS, retry=STRUCT_RETRY, log=log,
                        note="归并 %d 段为全局结构" % len(drafts),
                        temperature=STRUCT_TEMPERATURE, run_no=run_no,
-                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT)
+                       thinking=THINKING_V2, reasoning_effort=REASONING_EFFORT,
+                       run_context=run_context)
         root = _clean_section(res["parsed"].get("root")) if res["ok"] else None
         if root and not root.get("children"):
             root = None                    # 归并输出退化成一个节点 → 不当结构用
@@ -3546,7 +3581,7 @@ def _clean_terms(raw_terms, inv, ch, mat_text):
 
 def gen_kp_v2(task: dict, ch: dict, prompt: dict, deck: str, *, calls: list,
               log=print, run_no: int = 1, claimed: dict | None = None,
-              claimed_lock=None) -> dict:
+              claimed_lock=None, run_context=None) -> dict:
     """写一条知识点：调模型 → **页仲裁** → 校验 sources → 质量自查 → 组装记录。
 
     卡 C-0052 起，覆盖页**由模型判断**（`pages` / `excluded_pages`），但**仲裁在管线**
@@ -3586,7 +3621,7 @@ def gen_kp_v2(task: dict, ch: dict, prompt: dict, deck: str, *, calls: list,
     res = _v2_call(calls, "knowledge", prompt["sys"], user,
                    max_tokens=KP_MAX_TOKENS, retry=RETRY, log=log,
                    note="%s（p.%s）" % (task["kp_id"], _pages_label(cand)),
-                   kp_seq=True, run_no=run_no)
+                   kp_seq=True, run_no=run_no, run_context=run_context)
     if not res["ok"]:
         raise RuntimeError("调用失败：%s" % res["error"])
     parsed = res["parsed"]
@@ -5077,6 +5112,10 @@ def build_v2(
     if dry_run:
         return {"ok": True, "dry_run": True, **est}
 
+    # P0-D：同一任务入口只建一次 context；estimate/dry-run 不建。
+    run_ctx = (runtime_context.make_context("courseware_kp", doc_id=doc_id)
+               if runtime_context.runtime_enabled() else None)
+
     kp_prompt = load_kp_prompts_v2(prompt_path)
     st_prompt = load_struct_prompts(struct_prompt_path)
     ch = read_text_pages(doc_id, db_path)
@@ -5176,7 +5215,7 @@ def build_v2(
             "note": "生成结构",
         })
         gen = gen_structure_v2(doc_id, ch, st_prompt, deck, calls=calls, log=log,
-                               run_no=run_no)
+                               run_no=run_no, run_context=run_ctx)
 
     norm = normalize_structure_v2(gen["root"], ch["pages_all"], deck, log=log)
     tasks = plan_kp_tasks_v2(norm["nodes"], norm["page_owner"], ch=ch)
@@ -5361,7 +5400,8 @@ def build_v2(
             """
             try:
                 rec = gen_kp_v2(task, ch, kp_prompt, deck, calls=calls, log=log,
-                                run_no=run_no, claimed=claimed, claimed_lock=claimed_lock)
+                                run_no=run_no, claimed=claimed,
+                                claimed_lock=claimed_lock, run_context=run_ctx)
                 return {"ok": True, "rec": rec, "error": ""}
             except Exception as e:
                 return {"ok": False, "rec": None, "error": f"{type(e).__name__}: {e}"}
@@ -5484,7 +5524,8 @@ def build_v2(
                 mine = _claim_pages(task["kp_id"], task["pages"])
                 rec = gen_kp_v2({**task, "doc_id": int(doc_id)}, ch, kp_prompt, deck,
                                 calls=calls, log=log, run_no=run_no,
-                                claimed=claimed, claimed_lock=claimed_lock)
+                                claimed=claimed, claimed_lock=claimed_lock,
+                                run_context=run_ctx)
                 _accept_rec(task, rec, mine)
         if extra_fail:
             # 卡 C-0123：**部分失败不许报"完成"**。用户 2026-10-15 那份产物停在
@@ -5613,10 +5654,13 @@ def build(doc_id: int, *, outline_path=None, prompt_path=None, out_path=None,
             log("预算策略：不限（人拍板 2026-09-27；v1 回退路径同样生效）："
                 "--max-cost %.2f 只记录、不作为停止条件" % mc)
             mc = 0.0
+        v1_ctx = (runtime_context.make_context('courseware_kp', doc_id=doc_id)
+                  if not dry_run and runtime_context.runtime_enabled() else None)
         return build_v1(doc_id, outline_path=outline_path, prompt_path=prompt_path,
                         out_path=out_path, db_path=db_path, dry_run=dry_run,
                         limit=limit, max_cost=mc, force=force,
-                        progress_on=progress_on, on_event=on_event, log=log)
+                        progress_on=progress_on, on_event=on_event, log=log,
+                        run_context=v1_ctx)
     return build_v2(doc_id, prompt_path=prompt_path,
                     struct_prompt_path=struct_prompt_path, out_path=out_path,
                     db_path=db_path, dry_run=dry_run, limit=limit, max_cost=max_cost,

@@ -358,6 +358,12 @@ MATRIX = [
          kind="read", priority="P0",
          tests=["test_52_preview_run_context"], evidence="json"),
 
+    dict(id="F153", feature="kp_build 管线 RunContext 隔离：入口一次快照，_v2_call/结构/KP/worker 显式透传",
+         entry="core/kp_build.py::build_v2 make_context(courseware_kp); _v2_call(run_context=)/"
+               "gen_structure_v2/gen_kp_v2/陪跑线程参数显式传",
+         kind="read", priority="P0",
+         tests=["test_53_kp_build_run_context"], evidence="json"),
+
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",
          entry="tools/healthcheck.py --json", kind="cli", priority="P1",
