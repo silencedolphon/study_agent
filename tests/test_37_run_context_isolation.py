@@ -191,15 +191,15 @@ class TestChatRunContext(_Isolated):
             return _Resp()
 
         def worker(ctx):
-            with mock.patch.object(chat, "load_api_key", return_value="sk-fake"), \
-                 mock.patch.object(urllib.request, "urlopen", side_effect=fake):
-                chat.chat_once([{"role": "user", "content": "q"}], run_context=ctx)
+            chat.chat_once([{"role": "user", "content": "q"}], run_context=ctx)
 
         threads = [threading.Thread(target=worker, args=(c,)) for c in (ctx1, ctx2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        with mock.patch.object(chat, "load_api_key", return_value="sk-fake"), \
+             mock.patch.object(urllib.request, "urlopen", side_effect=fake):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
         self.assertEqual(set(captured), {"m1", "m2"})
         self.assertEqual(captured["m1"][0][0], "https://one.example/v1/chat/completions")
         self.assertEqual(captured["m1"][0][1], 11)

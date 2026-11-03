@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 
 REF_RE = re.compile(r"^p\.(\d+)(?:-(\d+))?(\s*图)?$")
@@ -85,7 +86,7 @@ def page_text_for_structure(p: int, ch: dict, cap: int = 420) -> str:
 
 
 def plan_structure_segments(ch: dict, *, page_cap: int = 420,
-                            seg_pages: int = 12, seg_chars: int = 6000) -> list:
+                            seg_pages: int | None = None, seg_chars: int = 6000) -> list:
     """把全页切成若干段（map 的输入）：页数与字符数双阈值，谁先到就切。
 
     返回 [{index, a, b, pages, chars}]（升序、无缝覆盖 `pages_all`）。
@@ -93,6 +94,13 @@ def plan_structure_segments(ch: dict, *, page_cap: int = 420,
     pages = list(ch["pages_all"])
     if not pages:
         return []
+    # 显式给定页数时保持旧语义；默认只对整份不超过 16 页、材料不超过
+    # 字符阈值的短课件合段。逐页 420 字原有预算不变，不能丢页或省略图注。
+    if seg_pages is None:
+        enabled = str(os.environ.get("KP_ADAPT_SHORT_STRUCTURE", "1")).strip().lower() not in (
+            "0", "false", "off", "no", "disabled")
+        n_chars = sum(len(page_text_for_structure(p, ch, page_cap)) for p in pages)
+        seg_pages = 16 if enabled and 12 < len(pages) <= 16 and n_chars <= seg_chars else 12
     segs: list = []
     cur: list = []
     cur_chars = 0

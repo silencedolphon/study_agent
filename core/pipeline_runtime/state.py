@@ -4,7 +4,7 @@
 - **发送后结果未知**（超时/连接中断/服务端没回包）→ `remote_unknown`：只允许一次请求，
   上层重试循环必须立即放弃；**不得自动重发**（可能已扣费/已产生副作用）。
 - **发送前错误**（无密钥/参数/KeyError）不是 unknown，可按普通失败处理。
-- **HTTPError（服务端有响应）**不是 unknown（能明确知道失败）；429/5xx 仍可按现有策略重试。
+- 502/504 网关错误视为下游结果未知；其他 HTTPError 仍按现有策略处理。
 - 锁文件只放 token/pid/创建时间/键信息；**不放密钥/正文**。
 """
 from __future__ import annotations
@@ -133,7 +133,7 @@ def request_may_have_been_sent(exc: BaseException | None) -> bool:
     """保守判定"请求可能已经发出"。
 
     - RemoteUnknownError → True；
-    - urllib HTTPError（有服务端响应）→ False；
+    - urllib HTTPError：502/504 网关错误结果未知，其余按已知失败处理；
     - URLError / RemoteDisconnected / socket.timeout / 超时 / 连接中断 → True；
     - KeyError/TypeError/ValueError/无密钥 ChatError 等发送前错误 → False。
     """
@@ -147,7 +147,7 @@ def request_may_have_been_sent(exc: BaseException | None) -> bool:
                 or getattr(cur, "remote_unknown", False) is True):
             return True
         if isinstance(cur, urllib.error.HTTPError):
-            return False
+            return cur.code in (502, 504)
         if isinstance(cur, urllib.error.URLError):
             return True
         if isinstance(cur, (socket.timeout, TimeoutError, ConnectionError,

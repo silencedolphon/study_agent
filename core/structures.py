@@ -720,7 +720,15 @@ def find_page_images(doc_id: int, *, db_path: Path | str | None = None,
         return {"ok": False, "doc_id": int(doc_id), "error": str(e)}
     n_pages = len(slides)
     want = [int(p) for p in pages] if pages else list(range(1, n_pages + 1))
-    outdir = page_image_dir(src)
+    from . import figure_cache
+    outdir = figures.document_image_dir(src, doc_id)
+    legacy = page_image_dir(src)
+    if not outdir.is_dir() and not render and legacy.is_dir():
+        # 仅老版本数据尚无专属缓存时兼容读取；新版本不回退到旧图。
+        if not figure_cache.document_directories(config.LOG_DIR, doc_id):
+            outdir = legacy
+    elif render:
+        figures._adopt_verified_legacy_renders(src, outdir)
     images = _list_page_images(outdir)
     missing = [p for p in want if p not in images]
     rendered = 0
@@ -866,7 +874,8 @@ def _vision_call(img_path: Path, prompt: str, *, model: str,
         model = str(vctx.model)
         max_tokens = int(vctx.max_tokens or 0)
         thinking = bool(vctx.thinking)
-    key = _api_key()
+    key = (config.pipeline_key(runtime_context.canonical_credential_ref(
+        str(getattr(vctx, "credential_ref", "") or vctx.pipeline))) if vctx is not None else "") or _api_key()
     if not key and not agent_bridge.has_adapter(
             str(vctx.pipeline) if vctx is not None else "structures"):
         return {"ok": False, "error": "没有 DEEPSEEK_API_KEY", "usage": {},
@@ -1108,7 +1117,11 @@ def build_structures(doc_id: int, *, pages: list[int] | None = None,
         return result
 
     # ---------- 真实构建（dry_run=False） ----------
-    if vision_fn is None and not _api_key():
+    from . import agent_bridge
+    key = (config.pipeline_key(runtime_context.canonical_credential_ref(
+        str(getattr(run_ctx, "credential_ref", "") or run_ctx.pipeline))) if run_ctx is not None else "") or _api_key()
+    if vision_fn is None and not key and not agent_bridge.has_adapter(
+            str(run_ctx.pipeline) if run_ctx is not None else "structures"):
         return {"ok": False, "doc_id": int(doc_id),
                 "error": "没有 DEEPSEEK_API_KEY：真实构建需要视觉模型密钥；"
                          "dry-run 不受影响（可先 --scan/--dry-run 看计划）。"}

@@ -971,11 +971,8 @@ def activate(pipeline: str) -> dict:
             ch.CHAT_MODEL = str(value_of("INGEST_MODEL") or "").strip() or ch.CHAT_MODEL
     except Exception as e:                     # noqa: BLE001
         info["chat_error"] = "%s: %s" % (type(e).__name__, e)
-    k = pipeline_key(pipeline)
-    if k:
-        # 识图那条路（core/figures.py::load_deepseek_key）只认环境变量，
-        # 所以这里把它同步进去；chat 那条有 install_hooks() 的包装按管线取。
-        os.environ["DEEPSEEK_API_KEY"] = k
+    # 密钥按请求上下文读取；不能把某条管线的密钥写进全进程环境变量，
+    # 否则其他没有单独配置密钥的管线会错误继承最近一次激活的密钥。
     return info
 
 

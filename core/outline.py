@@ -577,8 +577,12 @@ def analyze_deck(conn, doc_id, src, deck, pages=None, *, force=False,
                     kwargs["reasoning_effort"] = (ctx_try.reasoning_effort
                                                   if thinking else None)
                     kwargs["run_context"] = ctx_try
-                res = _chat.chat_once(
-                    [{"role": "user", "content": prompt}], **kwargs)
+                from . import kp_build
+                with kp_build.model_slot("ingest_outline", timeout=kp_build.slot_wait_timeout()):
+                    res = kp_build._call_with_hard_timeout(
+                        lambda: _chat.chat_once(
+                            [{"role": "user", "content": prompt}], **kwargs),
+                        timeout=kp_build.call_hard_timeout(), kind="ingest_outline")
         except Exception as e:  # noqa: BLE001
             out.warnings.append(f"全局分析调用失败: {type(e).__name__}: {e}")
             return out

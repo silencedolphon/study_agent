@@ -142,18 +142,20 @@ class TestContextSnapshot(_Base):
                     "finish_reason": "stop"}
 
         def worker(ctx):
-            with mock.patch.object(preview.kp_build, "model_slot",
-                                   return_value=contextlib.nullcontext()), \
-                 mock.patch("core.chat.chat_once", side_effect=fake):
-                preview._preview_call([], "preview.chapter", "s", "u",
-                                      max_tokens=0, retry=0,
-                                      log=lambda *a: None, run_context=ctx)
+            preview._preview_call([], "preview.chapter", "s", "u",
+                                  max_tokens=0, retry=0,
+                                  log=lambda *a: None, run_context=ctx)
 
         threads = [threading.Thread(target=worker, args=(c,)) for c in (ctx1, ctx2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        # Patch the shared functions once for both workers; per-thread patchers race
+        # while restoring module globals and can leave a mock installed for later tests.
+        with mock.patch.object(preview.kp_build, "model_slot",
+                               return_value=contextlib.nullcontext()), \
+             mock.patch("core.chat.chat_once", side_effect=fake):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
         self.assertEqual(sorted(captured), [("m-one", 111), ("m-two", 222)])
 
     def test_runtime_disabled_old_path(self):

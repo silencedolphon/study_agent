@@ -410,6 +410,19 @@ MATRIX = [
          entry="tools/kp_build.py::main --out; build(out_path=)",
          kind="cli", priority="P0",
          tests=["test_62_cli_out"], evidence="json"),
+    dict(id="F164", feature="并发安全：模型门限真实在飞占用/超时不虚假回收/凭据上下文隔离/短课件合段/结构化输出",
+         entry="core/chat.py/kp_build.py/pipeline_pool.py/state.py/config.py; "
+               "tests/test_62_parallel_safety.py",
+         kind="read", priority="P0",
+         tests=["test_62_parallel_safety"], evidence="json"),
+    dict(id="F165", feature="页图缓存身份：doc_id+源内容版本目录/旧目录只读兼容/分享导入版本页图",
+         entry="core/figure_cache.py; core/figures.py/ingest.py/share.py/structures.py/tools/dashboard.py",
+         kind="read", priority="P0",
+         tests=["test_63_image_cache_identity"], evidence="json"),
+    dict(id="F166", feature="视觉描述修复与速度：矛盾 no_info 复核/本地缓存原子修复/短结构/结构化输出/视觉并发",
+         entry="core/visual_repair.py; core/figures.py/kp_build.py; tools/repair_visual_descriptions.py",
+         kind="read", priority="P0",
+         tests=["test_64_pipeline_speed_and_visual_repair"], evidence="json"),
 
     # ---------------- 工具链（新增交付） ----------------
     dict(id="F90", feature="一键健康检查（解释器/导入/语法/库/study check）",

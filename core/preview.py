@@ -735,12 +735,14 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
             with kp_build.model_slot(kind, timeout=model_slot_wait_timeout()):
                 from . import agent_bridge
                 with agent_bridge.pipeline_scope("preview"):
-                    r = chat.chat_once([{"role": "system", "content": sys_p},
-                                        {"role": "user", "content": user_p}],
-                                       model=mdl, max_tokens=cap, thinking=thinking,
-                                       temperature=temperature, timeout=timeout,
-                                       reasoning_effort=(reasoning_effort if thinking else None),
-                                       run_context=ctx)
+                    r = kp_build._call_with_hard_timeout(
+                        lambda: chat.chat_once([{"role": "system", "content": sys_p},
+                                               {"role": "user", "content": user_p}],
+                                              model=mdl, max_tokens=cap, thinking=thinking,
+                                              temperature=temperature, timeout=timeout,
+                                              reasoning_effort=(reasoning_effort if thinking else None),
+                                              run_context=ctx),
+                        timeout=kp_build.call_hard_timeout(), kind=kind)
         except kp_build.ModelSlotTimeout as e:
             # 等槽位超时：说明有调用挂起没归还。再重试只会再等一轮，直接放弃。
             last = "%s: %s" % (type(e).__name__, e)
@@ -763,6 +765,8 @@ def _preview_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens
             # P0-B：发送后结果未知 → 只允许一次请求，不自动重试。
             from .pipeline_runtime import state as runtime_state
             if runtime_state.is_unknown_failure(e):
+                rec.update({"remote_unknown": True, "indeterminate": True,
+                            "cost_unknown": True, "status": runtime_state.REMOTE_UNKNOWN})
                 log("  ★remote_unknown：结果未知，禁止自动重试（P0-B）")
                 return {"ok": False, "parsed": {}, "usage": {}, "raw": "",
                         "model": mdl, "error": last, "call_index": last_idx,

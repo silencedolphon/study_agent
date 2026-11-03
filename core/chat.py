@@ -640,6 +640,27 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
               timeout: int = 180, temperature: float = 0.3,
               reasoning_effort: str | None = None,
               api_key: str | None = None, api_base: str | None = None,
+              response_format: dict | None = None, run_context=None) -> dict:
+    """所有文本请求共用进程额度；已有上层额度时不重复取槽。"""
+    from . import kp_build
+    def invoke():
+        return _chat_once_unthrottled(
+            messages, model=model, max_tokens=max_tokens, thinking=thinking,
+            timeout=timeout, temperature=temperature, reasoning_effort=reasoning_effort,
+            api_key=api_key, api_base=api_base, response_format=response_format,
+            run_context=run_context)
+    if kp_build.model_slot_active():
+        return invoke()
+    with kp_build.model_slot("chat", timeout=kp_build.slot_wait_timeout()):
+        return kp_build._call_with_hard_timeout(
+            invoke, timeout=kp_build.call_hard_timeout(), kind="chat")
+
+
+def _chat_once_unthrottled(messages: list[dict], model: str = CHAT_MODEL,
+              max_tokens: int = 2048, thinking: bool = False,
+              timeout: int = 180, temperature: float = 0.3,
+              reasoning_effort: str | None = None,
+              api_key: str | None = None, api_base: str | None = None,
               response_format: dict | None = None,
               run_context=None) -> dict:
     """非流式调用。thinking=False 省 token（实测输出从 188 降到 49）。
@@ -691,13 +712,17 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
     if adapted is not None:
         return adapted
     if ctx is not None:
-        # 凭据只按引用取；取不到再走原凭据链；key 不写日志/异常。
+        # 绕过按“最近活动管线”选钥匙的旧 hook，只回退原始环境/DSH 凭据。
+        fallback = ((config._HOOKS.get("orig_load_api_key")
+                     if getattr(load_api_key, "_c0059_wrapped", False) else None)
+                    or load_api_key)
         key = (api_key
                or config.pipeline_key(pipeline_context.canonical_credential_ref(
                    str(ctx.credential_ref or ctx.pipeline)))
-               or load_api_key())
+               or fallback())
     else:
-        key = api_key or load_api_key()
+        key = (api_key or config.pipeline_key(
+            pipeline_context.canonical_credential_ref(pipeline)) or load_api_key())
     payload = {
         "model": model,
         "messages": messages,
@@ -727,7 +752,9 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = json.loads(r.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
-        # 服务端有响应 = 已知失败（不是 unknown；可安全重试/展示）
+        if e.code in (502, 504):
+            raise runtime_state.RemoteUnknownError(
+                f"模型网关返回 HTTP {e.code}，下游结果未知，禁止自动重试", cause=e) from None
         detail = e.read().decode("utf-8", "replace")[:400]
         raise ChatError(f"模型接口返回 HTTP {e.code}：{detail}") from None
     except Exception as e:
@@ -749,6 +776,30 @@ def chat_once(messages: list[dict], model: str = CHAT_MODEL,
 
 
 def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
+                max_tokens: int = 2048, thinking: bool = False,
+                timeout: int = 300, temperature: float = 0.3,
+                reasoning_effort: str | None = None,
+                api_key: str | None = None, run_context=None):
+    """流式响应在本地连接关闭前持有同一共享额度。"""
+    from . import kp_build
+    def events():
+        return _stream_chat_unthrottled(
+            messages, model=model, max_tokens=max_tokens, thinking=thinking,
+            timeout=timeout, temperature=temperature, reasoning_effort=reasoning_effort,
+            api_key=api_key, run_context=run_context)
+    def deliver():
+        for event in events():
+            # 生成器暂停时控制权已经回到消费者；消费者的新请求不能借用此槽。
+            with kp_build.suspend_model_slot_scope():
+                yield event
+    if kp_build.model_slot_active():
+        yield from deliver()
+    else:
+        with kp_build.model_slot("chat_stream", timeout=kp_build.slot_wait_timeout()):
+            yield from deliver()
+
+
+def _stream_chat_unthrottled(messages: list[dict], model: str = CHAT_MODEL,
                 max_tokens: int = 2048, thinking: bool = False,
                 timeout: int = 300, temperature: float = 0.3,
                 reasoning_effort: str | None = None,
@@ -808,12 +859,16 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
             yield "done", None
         return
     if ctx is not None:
+        fallback = ((config._HOOKS.get("orig_load_api_key")
+                     if getattr(load_api_key, "_c0059_wrapped", False) else None)
+                    or load_api_key)
         key = (api_key
                or config.pipeline_key(pipeline_context.canonical_credential_ref(
                    str(ctx.credential_ref or ctx.pipeline)))
-               or load_api_key())
+               or fallback())
     else:
-        key = api_key or load_api_key()
+        key = (api_key or config.pipeline_key(
+            pipeline_context.canonical_credential_ref(pipeline)) or load_api_key())
     payload = {
         "model": model,
         "messages": messages,
@@ -839,6 +894,9 @@ def stream_chat(messages: list[dict], model: str = CHAT_MODEL,
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as e:
+        if e.code in (502, 504):
+            raise runtime_state.RemoteUnknownError(
+                f"模型网关返回 HTTP {e.code}，下游结果未知，禁止自动重试", cause=e) from None
         detail = e.read().decode("utf-8", "replace")[:400]
         raise ChatError(f"模型接口返回 HTTP {e.code}：{detail}") from None
     except Exception as e:

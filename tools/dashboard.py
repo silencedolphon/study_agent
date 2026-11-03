@@ -91,6 +91,7 @@ from core import pipeline_pool as pool_mod  # noqa: E402
 from core import progress as progress_mod  # noqa: E402
 from core import search as search_mod, study  # noqa: E402
 from core import share as share_mod  # noqa: E402（卡 C-0080：课件分享包）
+from core import figure_cache as figure_cache_mod  # noqa: E402
 from core import subjects as subjects_mod  # noqa: E402（卡 C-0039：多学科）
 
 _lock = threading.Lock()
@@ -1592,12 +1593,25 @@ def _deck_name_candidates(stem):
     return tuple(out)
 
 
-def _deck_dir_for(doc_path):
+def _deck_dir_for(doc_path, doc_id=None, conn=None):
     """`documents.path` → figure_desc 里的课件目录；推不出或不存在就 None。"""
     stem = Path(str(doc_path or "").replace("\\", "/")).stem.strip()
     if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
         return None
     root = _figure_desc_root()
+    if doc_id is not None and conn is not None:
+        try:
+            row = conn.execute("SELECT content_hash FROM documents WHERE id=?",
+                               (int(doc_id),)).fetchone()
+            digest = str(row[0] or "") if row else ""
+            current = figure_cache_mod.directory(config.LOG_DIR, doc_id, digest)
+            if current is not None and current.is_dir():
+                return current
+            # 有版本化目录时不能退回同名旧图，否则可能展示过期版本。
+            if figure_cache_mod.document_directories(config.LOG_DIR, doc_id):
+                return None
+        except (ValueError, TypeError, sqlite3.Error, OSError):
+            return None
     for name in _deck_name_candidates(stem):
         d = root / name
         try:
@@ -1659,7 +1673,7 @@ def _slide_info(doc_id, pages, conn=None):
             return {"deck": "", "slides": []}
 
     try:
-        deck = _deck_dir_for(_doc_path_of(conn, doc_id))
+        deck = _deck_dir_for(_doc_path_of(conn, doc_id), doc_id=doc_id, conn=conn)
     finally:
         if own and conn is not None:
             conn.close()
@@ -1690,7 +1704,7 @@ def _slide_png_path(doc_id, page, conn=None):
             return None
 
     try:
-        deck = _deck_dir_for(_doc_path_of(conn, doc_id))
+        deck = _deck_dir_for(_doc_path_of(conn, doc_id), doc_id=doc_id, conn=conn)
     finally:
         if own and conn is not None:
             conn.close()
@@ -4296,7 +4310,7 @@ def _outline_file(doc_id):
     return p
 
 
-def _deck_dirs_for(doc_path):
+def _deck_dirs_for(doc_path, doc_id=None):
     """本文档在 `logs/figure_desc/` 下的页图目录（**复用 `_deck_dir_for` 的判据**）。
 
     两个候选名 `<stem>` 与 `<stem>_slides` 就是 `_deck_dir_for` 里那一对——
@@ -4306,6 +4320,10 @@ def _deck_dirs_for(doc_path):
     if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
         return []
     root = _figure_desc_root()
+    if doc_id is not None:
+        versioned = figure_cache_mod.document_directories(config.LOG_DIR, doc_id)
+        if versioned:
+            return versioned
     out = []
     for name in _deck_name_candidates(stem):
         d = root / name
@@ -4368,7 +4386,7 @@ def _doc_artifacts(doc_id, doc_path):
     _add(_artifact_terms_file(doc_id))
     _add(_outline_file(doc_id))
 
-    dirs = _deck_dirs_for(doc_path)
+    dirs = _deck_dirs_for(doc_path, doc_id=doc_id)
     total = 0
     for p in files:
         try:
@@ -4843,7 +4861,9 @@ def api_rename_raw(conn, payload):
                 "库里已有一条记录指向 %s（doc#%d）：改名会让两条撞上 path 的 UNIQUE 约束"
                 % (new_path, int(dup["id"])))
 
-    old_decks = _deck_dirs_for(old_path or rel_posix)
+    # 新版目录按文档 ID/内容定位，重命名原文件时不需要移动。
+    old_decks = ([] if row and figure_cache_mod.document_directories(config.LOG_DIR, row["id"])
+                 else _deck_dirs_for(old_path or rel_posix))
     new_deck_name = share_mod.safe_dirname(Path(clean).stem)
     deck_plan = [
         {"from": str(d), "to": str(d.with_name(new_deck_name))}
@@ -6120,7 +6140,11 @@ def _share_source_file(tgt, doc):
 def _share_page_files(tgt, doc):
     src = _share_source_file(tgt, doc)
     stem = src.name if src is not None else Path(str(doc.get("path") or "")).name
-    pdir = Path(tgt["log_dir"]) / "figure_desc" / share_mod.safe_dirname(Path(stem).stem)
+    pdir = figure_cache_mod.directory(tgt["log_dir"], doc.get("id"), doc.get("content_hash"))
+    if pdir is None or not pdir.is_dir():
+        if figure_cache_mod.document_directories(tgt["log_dir"], doc.get("id")):
+            return []
+        pdir = Path(tgt["log_dir"]) / "figure_desc" / share_mod.safe_dirname(Path(stem).stem)
     if not pdir.is_dir():
         return []
     return sorted(pdir.glob("slide_*.png"))

@@ -215,7 +215,9 @@ class TestVisualCache(_Base):
 
 class TestIngestDocumentFiguresReuse(_Base):
     def test_uses_pre_extracted_and_no_paid_calls(self):
+        (self.root / "x.pptx").write_bytes(b"fake-source-for-fingerprint")
         conn = self._db()
+        self.addCleanup(conn.close)
         pre = {"deck_title": "T", "pages": [{"page": 1, "title": "h",
                                              "body": "OCR 正文"}]}
         with mock.patch.object(extract, "extract_pptx",

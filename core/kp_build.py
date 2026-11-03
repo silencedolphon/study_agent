@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -194,13 +195,9 @@ RETRY = 2
 # 是 **socket 单次操作**超时，实测对"连接活着、服务端不回包"（网关挂起 / 长思考被
 # 中间设备吊住）**不生效**。chat.py 不在本卡的可改范围内，所以在**本文件**补兜底：
 #
-#   ① `model_slot(timeout=...)`：抢槽带上限，抢不到就抛错（不再无限排队）；
-#   ② `_call_with_hard_timeout()`：真调用放进**陪跑线程**，最多等 `CALL_HARD_TIMEOUT`
-#      秒 ⇒ 超时后 **worker 线程自己**从 `with model_slot` 里退出来、**当场把槽位还
-#      回去**（陪跑线程不持槽），于是后续 worker 照跑，不会连锁饿死；
-#   ③ `build_v2` 的 `_cf.wait(..., timeout=STALL_TIMEOUT)`：在飞调用全都不回来时
-#      判"停滞"，落盘已完成的部分后收尾（`status="failed"` + 明确原因），
-#      而不是永远"运行中"。
+#   ① 等待模型槽位和单次调用均有上限；
+#   ② 超时只结束等待，实际请求仍运行时继续持有槽，真实结束后才归还；
+#   ③ build_v2 有停滞判定，保留已完成结果，不强行回收其他任务的槽。
 #
 # 三个值一律走环境变量（默认值足够宽松，**正常路径永不触发**，行为逐字不变）：
 #   · `KP_SLOT_WAIT_TIMEOUT`  默认 1800 秒：等模型槽位的上限；
@@ -273,35 +270,40 @@ class ModelCallHang(RuntimeError):
 
 
 def _call_with_hard_timeout(fn, *, timeout: float, kind: str = ""):
-    """在**陪跑线程**里执行 `fn()`，最多等 `timeout` 秒；超时抛 `ModelCallHang`。
-
-    为什么要陪跑线程（而不是直接调 `fn()`）：Python 没法中断一个卡在 socket read
-    上的线程，但它**能不再等它**。这样调用方（worker）拿回控制权，
-    `_v2_call` 的 `with model_slot(...)` 正常退出 ⇒ **槽位当场归还**，
-    卡住的只是这一个陪跑线程（daemon，进程退出即清），不会拖垮别的 worker。
-
-    `timeout<=0` 时退化成直接调用（与改造前逐字相同）。
-    """
+    """最多等待 timeout 秒；若请求仍在运行，其模型槽由陪跑线程持有到结束。"""
     if not timeout or timeout <= 0:
         return fn()
     from contextvars import copy_context
     context = copy_context()
     box: dict = {}
+    lease = getattr(_GATE_LOCAL, "lease", None)
+    if lease is not None:
+        lease.defer()
 
     def _run() -> None:
         try:
             box["r"] = context.run(fn)
-        except BaseException as e:  # noqa: BLE001 - 原样带回调用方
+        except BaseException as e:  # noqa: BLE001
             box["e"] = e
+        finally:
+            if lease is not None:
+                lease.release()
 
     th = threading.Thread(target=_run, name="kp-call%s" % (("-" + kind) if kind else ""),
                           daemon=True)
-    th.start()
+    try:
+        th.start()
+    except BaseException:
+        if lease is not None:
+            lease.release()
+        raise
     th.join(timeout)
     if th.is_alive():
+        if lease is not None:
+            lease.mark_timeout()
         raise ModelCallHang(
-            "模型调用超过硬上限 %.0f 秒仍未返回（连接活着但服务端不回包）；"
-            "已放弃等待、当场归还模型槽位（卡 C-0123 兜底）" % timeout)
+            "模型调用超过硬上限 %.1f 秒仍未返回；结果未知，"
+            "本地请求结束后才释放槽位，禁止自动重试" % timeout)
     if "e" in box:
         raise box["e"]
     return box.get("r")
@@ -2453,7 +2455,7 @@ INNER_WORKERS_ENV = "KP_INNER_WORKERS"
 MODEL_GATE_ENV = "KP_MODEL_GATE"
 
 
-INNER_WORKERS_DEFAULT = 4
+INNER_WORKERS_DEFAULT = 8
 
 
 WORKERS_MIN = 1
@@ -2469,7 +2471,10 @@ _GATE: dict = {"sem": None, "limit": 0}
 # 验收用的计数器（**只活在进程里，不写进产物**）：在飞峰值 / 累计取槽次数 / 排队次数。
 
 
-_GATE_STATS: dict = {"inflight": 0, "peak_inflight": 0, "acquired": 0, "waited": 0}
+_GATE_STATS: dict = {"inflight": 0, "peak_inflight": 0, "acquired": 0, "waited": 0,
+                     "waiting": 0, "timed_out_inflight": 0}
+_GATE_LOCAL = threading.local()
+_GATE_SCOPE = contextvars.ContextVar("study_agent_model_slot", default=False)
 
 
 def render_struct_titles(pages: list, titles: dict, ch: dict) -> str:
@@ -2492,32 +2497,10 @@ def render_struct_drafts(drafts: list) -> str:
     return "\n".join(out)
 
 
-# ---------------------------------------------------------------- 并发闸门（卡 C-0063）
-#
-# 卡 C-0063（2026-10-08）按人拍板「课件入库和总结知识点的用时太久了」做**单份整理
-# 管线内部并发**（C-0062 报告 §9.1 第一步）。并发的上限不能只看本管线自己：
-#   - `core/pipeline_pool.py`（多份之间·**入库**）默认 2、上限 4；
-#   - `core/kp_batch.py`（多份之间·**整理**）默认 2、上限 4；
-#   - 本管线（单份内部）默认 4、可配 1~8。
-# 三者是**乘法叠加**（C-0062 报告 §6.3：`kp_batch=4 × 单份内部=4 = 16 路`，
-# 正好压在实测边界线上）。所以这里放的是**进程级共享闸门**：
-#
-#   `_MODEL_GATE` 是一把 `threading.BoundedSemaphore`，单位 = **一次在飞的模型调用**。
-#     - `_v2_call()` 每次真调用前后 acquire/release（**调用级**，最细的粒度）；
-#     - `core/pipeline_pool.py::_run_one()` 每份入库任务持有一个（**份级**：逐页识图
-#       的调用在 `core/figures.py` 里，那是另一张卡的范围，本卡不动那个文件）；
-#     - `core/kp_batch.py::start()` 把份数夹到不超过闸门值（份 × 份内线程全挤在
-#       同一把闸门前排队没有意义，只会让进度条长时间不动）。
-#   三者**指向同一个对象**，所以"进程内在飞的模型调用数 ≤ 闸门值"永远成立
-#   （证据：`model_gate_stats()["peak_inflight"] <= ["limit"]`）。
-#
-# ⚠ **不存在"持槽等槽"的死锁**：入库那层持槽时内部**不再取槽**（figures 不经过
-# 闸门），整理那层只在调用级取槽、份级不持槽——取槽的嵌套深度恒为 1。
-#
-# 环境变量（与 `core/pipeline_pool.py::KB_INGEST_WORKERS` 的既有做法对齐）：
-#   - `KP_INNER_WORKERS`：单份课件**内部**并发数，默认 4，夹到 1..8；
-#   - `KP_MODEL_GATE`：进程级总闸门值；**不设时取 `KP_INNER_WORKERS`**（默认也是 4），
-#     夹到 1..8。想单独控制总闸门时用它。
+# ---------------------------------------------------------------- 进程级模型请求闸门
+# 实际文本、视觉与流式请求共享额度；本地渲染/写库不预占模型请求槽。
+# KP_INNER_WORKERS 决定单份课件内部工人数，KP_MODEL_GATE 控制进程总额度；
+# 默认 8，均可通过环境变量设为 1..8。超时请求在本地结束前仍计入额度。
 
 
 def _clamp_workers(n, default: int = INNER_WORKERS_DEFAULT) -> int:
@@ -2530,7 +2513,7 @@ def _clamp_workers(n, default: int = INNER_WORKERS_DEFAULT) -> int:
 
 
 def inner_workers() -> int:
-    """**单份课件内部**的并发数：`KP_INNER_WORKERS` 优先，默认 4，夹到 1..8。
+    """**单份课件内部**的并发数：`KP_INNER_WORKERS` 优先，默认 8，夹到 1..8。
 
     `1` 是**安全的回退开关**：此时本管线走与改造前逐字相同的串行路径
     （不建线程池、不改调用顺序），产物逐字段等价。
@@ -2539,7 +2522,7 @@ def inner_workers() -> int:
 
 
 def _gate_value_from_env() -> int:
-    """闸门值：`KP_MODEL_GATE` 优先，没设则跟随 `KP_INNER_WORKERS`，都没有就是 4。"""
+    """闸门值：`KP_MODEL_GATE` 优先，没设则跟随 `KP_INNER_WORKERS`，都没有就是 8。"""
     raw = os.environ.get(MODEL_GATE_ENV)
     if raw is None or str(raw).strip() == "":
         raw = os.environ.get(INNER_WORKERS_ENV, INNER_WORKERS_DEFAULT)
@@ -2560,15 +2543,15 @@ def _gate():
 
 
 def configure_model_gate(n=None) -> int:
-    """重设闸门值（**只在没有在飞调用时**用：进程启动接线 / 验收脚本）。
-
-    `n=None` 表示按当前环境变量重算。返回新的闸门值。
-    """
+    """仅在没有在飞或排队请求时重建闸门，避免凭空增加额度。"""
     with _GATE_LOCK:
+        if _GATE_STATS["inflight"] or _GATE_STATS["waiting"]:
+            raise RuntimeError("仍有模型请求运行或排队，不能重设并发闸门")
         limit = _gate_value_from_env() if n is None else _clamp_workers(n)
         _GATE["limit"] = limit
         _GATE["sem"] = threading.BoundedSemaphore(limit)
-        _GATE_STATS.update({"inflight": 0, "peak_inflight": 0, "acquired": 0, "waited": 0})
+        _GATE_STATS.update({"inflight": 0, "peak_inflight": 0, "acquired": 0,
+                            "waited": 0, "waiting": 0, "timed_out_inflight": 0})
         return limit
 
 
@@ -2580,148 +2563,127 @@ def model_gate_limit() -> int:
 _CALLS_LOCK = threading.Lock()
 
 
-# ---------------------------------------------------------------- 停滞槽位回收（卡 C-0124）
-#
-# 现场（C-0124 打桩复现，`_c0124_hang_probe.py` 场景 B）：调用挂起时 `build_v2` 的
-# 判停线只等 `stall_timeout()`，而 **worker 自己的硬墙要等 `call_hard_timeout()`**。
-# 默认值下 `stall(2400) > hard(1800)`，所以判停线**必然先触发**：
-#     t=0    主线程 `_cf.wait(timeout=2400)` 等着
-#     t=2400 判停线到、主线程带着已完成的条数收尾落盘（进程不再等 worker）
-#     t=1800 **worker 自己的硬墙**才到 —— 可此时已经没人等它了
-# ⇒ 判停那一刻，在飞 worker 还**握着模型槽**（它阻塞在 `_call_with_hard_timeout`
-#   的 `th.join(1800)` 里，根本走不到 `with model_slot` 的退出路径）。实测：
-#   `model_gate_stats()["inflight"] == 1` 在 `build_v2` 返回之后仍然成立。
-# ⇒ 后果：`configure_model_gate` 只在不变量被破坏时才重建闸门；正常路径下这一格
-#   槽**要等 1800 秒**才由那个早已无人等待的 worker 释放。用户紧接着再点一次
-#   「整理」，起手就少一格并发（多份/多次运行下会一路恶化）。
-#
-# 修法：判停时由**主线程**按账回收这些"已经没人等"的槽位。回收后闸门当场恢复
-# 满额；被回收的那个 worker 之后再走完自己的退出路径时**跳过归还**（否则
-# BoundedSemaphore 会 `ValueError: released too many times`）。
-_ABANDONED_LOCK = threading.Lock()
+# 模型额度跟随请求本身，而不是跟随等待结果的上层任务。
+class _ModelLease:
+    def __init__(self, sem):
+        self.sem = sem
+        self._lock = threading.Lock()
+        self.deferred = False
+        self.released = False
+        self.timed_out = False
 
-_ABANDONED: dict = {"n": 0}
-# 本 worker 线程的槽是否已被主线程按账回收（放弃归还）/ 是否已记账。
-_ABANDONED_LOCAL = threading.local()
+    def defer(self):
+        with self._lock:
+            self.deferred = True
 
+    def mark_timeout(self):
+        with self._lock:
+            if not self.released and not self.timed_out:
+                self.timed_out = True
+                with _GATE_LOCK:
+                    _GATE_STATS["timed_out_inflight"] += 1
 
-def _abandoned_enter() -> None:
-    """worker 抢到槽后**立刻**记一笔账（卡 C-0124）。
-
-    记账时点选在 `acquire()` 成功之后，而不是"提交任务之前"——这样
-    `cancel_futures` 里那些**从没跑起来**的份不会虚增账目。
-    """
-    _ABANDONED_LOCAL.reclaimed = False
-    with _ABANDONED_LOCK:
-        _ABANDONED["n"] += 1
+    def release(self):
+        with self._lock:
+            if self.released:
+                return
+            self.released = True
+            with _GATE_LOCK:
+                self.sem.release()
+                _GATE_STATS["inflight"] -= 1
+                if self.timed_out:
+                    _GATE_STATS["timed_out_inflight"] -= 1
 
 
-def _abandoned_done() -> None:
-    """worker 正常收尾 → 销账（**恰好一次**，见 `_kp_worker` 的 finally）。
-
-    若这一格已经被主线程按账抢回去了，销账**不重复扣减**（账已经归零）。
-    """
-    if getattr(_ABANDONED_LOCAL, "reclaimed", False):
-        _ABANDONED_LOCAL.reclaimed = False
-        return
-    with _ABANDONED_LOCK:
-        if _ABANDONED["n"] > 0:
-            _ABANDONED["n"] -= 1
+def model_slot_active() -> bool:
+    """当前调用上下文已持有请求槽，防止同一请求重复取槽。"""
+    return bool(_GATE_SCOPE.get())
 
 
-def _slot_was_reclaimed() -> bool:
-    return bool(getattr(_ABANDONED_LOCAL, "reclaimed", False))
-
-
-def reclaim_stalled_slots() -> int:
-    """判停时回收**已经没人等**的在飞槽位（卡 C-0124），返回回收个数。
-
-    ⚠ 只在 `build_v2` 判定"停滞"、主线程**不再等待**在飞 worker 之后调用 ——
-    那之后这些 worker 无论多久才回来，结果都写进一个已经丢弃的 `futures`
-    字典里，槽位对本次运行已经没有意义。抢回它们，下一次运行并发额度才是满的。
-
-    回收是**逐格**还的（不重建闸门）：`_gate()` 是进程级共享的，
-    `core/pipeline_pool.py` 的入库任务也在用它，重建会把在飞额度凭空翻倍。
-    """
-    with _ABANDONED_LOCK:
-        n = int(_ABANDONED["n"])
-        if n <= 0:
-            return 0
-        _ABANDONED["n"] = 0
-    sem, _limit = _gate()
-    got = 0
-    for _ in range(n):
-        try:
-            sem.release()
-        except ValueError:      # 已经还过了（极端竞态）→ 不再多还
-            break
-        got += 1
-    if got:
-        with _GATE_LOCK:
-            _GATE_STATS["inflight"] = max(0, int(_GATE_STATS["inflight"]) - got)
-    return got
-
-
-def model_gate_stats() -> dict:
-    """闸门快照（验收证据）：{limit, inflight, peak_inflight, acquired, waited}。"""
-    with _GATE_LOCK:
-        d = dict(_GATE_STATS)
-        d["limit"] = int(_GATE["limit"])
-    d["abandoned"] = int(_ABANDONED["n"])
-    return d
-
-
-# C-0111 连带修复：`@contextlib.contextmanager` 原本被重建错位到 configure_model_gate
-# 头上，而真正需要它的是**生成器** model_slot。真值（v1.1 原始字节码）铁证：
-#   · model_slot           co_flags=0x1000023（含 CO_GENERATOR），模块级 STORE_NAME
-#                          前有一条 CALL（= 装饰器调用）；
-#   · configure_model_gate co_flags=0x1000003（非生成器），STORE_NAME 前**没有** CALL。
-# 错位后 `with model_slot(...)` 拿到的是裸生成器 ⇒ 每一次模型调用都抛
-# TypeError: 'generator' object does not support the context manager protocol
-# （gen_structure_v2 / gen_kp_v2 / build_v2 全链路必经，现象是「整理知识点」第一步就失败）。
 @contextlib.contextmanager
-def model_slot(kind: str = "", timeout: float | None = None):
-    """**进程级模型调用配额**：进入时抢一个槽，退出时还回去。
-
-    所有真发起模型调用的地方都要经过它（本文件的 `_v2_call`、`core/pipeline_pool.py`
-    的每份入库任务）。抢不到就排队等——这就是"总在飞数 ≤ 闸门值"的全部实现。
-
-    `timeout`（卡 C-0123 新增）：等槽位的上限（秒）；`None` = 不设限（**默认值，
-    与改造前逐字相同的行为**——`core/pipeline_pool.py` 的**份级**槽就是这种用法：
-    它本来就要持有一整份入库的时间，不该被超时打断）。传了正数则超时抛
-    `ModelSlotTimeout`，让排队者不至于被一个挂起的调用永久钉在 `acquire()` 上。
-    """
-    sem, _limit = _gate()
-    t0 = time.perf_counter()
-    if timeout and timeout > 0:
-        got = sem.acquire(timeout=timeout)
-        if not got:
-            raise ModelSlotTimeout(
-                "等模型槽位超过 %.0f 秒仍没抢到（闸门值 %d）：有调用挂起未归还，"
-                "本步放弃（卡 C-0123 兜底）" % (timeout, _limit))
-    else:
-        sem.acquire()
-    waited = (time.perf_counter() - t0) > 0.001
-    with _GATE_LOCK:
-        _GATE_STATS["inflight"] += 1
-        _GATE_STATS["acquired"] += 1
-        if waited:
-            _GATE_STATS["waited"] += 1
-        if _GATE_STATS["inflight"] > _GATE_STATS["peak_inflight"]:
-            _GATE_STATS["peak_inflight"] = _GATE_STATS["inflight"]
+def suspend_model_slot_scope():
+    """向流消费者让出控制权时，不让调用者继承生成器持有的槽。"""
+    token = _GATE_SCOPE.set(False)
+    previous = getattr(_GATE_LOCAL, "lease", None)
+    _GATE_LOCAL.lease = None
     try:
         yield
     finally:
-        # 卡 C-0124：判停时主线程可能已按账把这个槽抢回去了（见
-        # `reclaim_stalled_slots()`）。那时**绝不能再还一次**——闸门是
-        # `BoundedSemaphore`，多还一次直接抛 `ValueError: released too many
-        # times`，把收尾路径也炸掉。
-        if _slot_was_reclaimed():
-            _ABANDONED_LOCAL.reclaimed = False
+        _GATE_LOCAL.lease = previous
+        _GATE_SCOPE.reset(token)
+
+
+def reclaim_stalled_slots() -> int:
+    """兼容旧调用：未结束的请求不可强行回收，其槽会在请求结束后释放。"""
+    return 0
+
+
+def model_gate_stats() -> dict:
+    """进程内共享闸门快照；timed_out_inflight 仍计入 inflight。"""
+    with _GATE_LOCK:
+        d = dict(_GATE_STATS)
+        d["limit"] = int(_GATE["limit"])
+        d["abandoned"] = int(d["timed_out_inflight"])
+    return d
+
+
+@contextlib.contextmanager
+def model_slot(kind: str = "", timeout: float | None = None):
+    """获取进程内共享请求额度；硬超时不提前释放仍在执行的请求。"""
+    with _GATE_LOCK:
+        if _GATE["sem"] is None:
+            _GATE["limit"] = _gate_value_from_env()
+            _GATE["sem"] = threading.BoundedSemaphore(_GATE["limit"])
+        sem, limit = _GATE["sem"], int(_GATE["limit"])
+        _GATE_STATS["waiting"] += 1
+    t0 = time.perf_counter()
+    try:
+        if timeout and timeout > 0:
+            deadline = t0 + timeout
+            got = False
+            while True:
+                if sem.acquire(blocking=False):
+                    got = True
+                    break
+                with _GATE_LOCK:
+                    all_unknown = _GATE_STATS["timed_out_inflight"] >= limit
+                if all_unknown:
+                    raise ModelSlotTimeout(
+                        "全部模型槽都被结果未知的请求占用；本次未发送，请稍后重试")
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    break
+                if sem.acquire(timeout=min(remaining, 0.25)):
+                    got = True
+                    break
         else:
-            with _GATE_LOCK:
-                _GATE_STATS["inflight"] -= 1
-            sem.release()
+            got = sem.acquire()
+    except BaseException:
+        with _GATE_LOCK:
+            _GATE_STATS["waiting"] -= 1
+        raise
+    with _GATE_LOCK:
+        _GATE_STATS["waiting"] -= 1
+        if got:
+            _GATE_STATS["inflight"] += 1
+            _GATE_STATS["acquired"] += 1
+            if time.perf_counter() - t0 > 0.001:
+                _GATE_STATS["waited"] += 1
+            _GATE_STATS["peak_inflight"] = max(_GATE_STATS["peak_inflight"],
+                                                _GATE_STATS["inflight"])
+    if not got:
+        raise ModelSlotTimeout("等待模型槽位超过 %.1f 秒（闸门 %d），本次未发送" % (timeout, limit))
+    lease = _ModelLease(sem)
+    previous = getattr(_GATE_LOCAL, "lease", None)
+    _GATE_LOCAL.lease = lease
+    scope_token = _GATE_SCOPE.set(True)
+    try:
+        yield lease
+    finally:
+        _GATE_SCOPE.reset(scope_token)
+        _GATE_LOCAL.lease = previous
+        if not lease.deferred:
+            lease.release()
 
 
 # ---------------------------------------------------------------- 页预约（卡 C-0063）
@@ -2761,6 +2723,25 @@ def _append_call(calls: list, rec: dict, *, call_no: int = 0, kp_seq: bool = Fal
             rec["kp_no"] = int(call_no)
         calls.append(rec)
         return len(calls) - 1
+
+
+def _use_native_json_output(kind: str, sys_prompt: str, user_prompt: str,
+                            pipeline: str, model: str, api_base: str) -> bool:
+    """官方 DeepSeek 且提示词已要求 JSON 时启用；外接 Agent/其他端点保持兼容。"""
+    from urllib.parse import urlsplit
+    from . import agent_bridge
+    enabled = str(os.environ.get("KP_JSON_MODE", "1")).strip().lower() not in (
+        "0", "false", "off", "no", "disabled")
+    if not enabled or kind not in ("structure.map", "structure.merge", "knowledge"):
+        return False
+    if agent_bridge.has_adapter(pipeline) or "json" not in (sys_prompt + user_prompt).lower():
+        return False
+    try:
+        hostname = (urlsplit(str(api_base or "")).hostname or "").lower()
+    except ValueError:
+        return False
+    return hostname == "api.deepseek.com" and str(model or "").lower() in (
+        "deepseek-flash", "deepseek-v4-flash")
 
 
 def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int,
@@ -2816,34 +2797,26 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                "chars_in": len(sys_p) + len(user_p),
                "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         try:
-            # 卡 C-0063：**进程级闸门**——真调用期间持一个槽（见文件上方的
-            # "并发闸门"小节）。重试的每一次也算一次独立调用，各占各的槽。
-            #
-            # 卡 C-0123：槽位仍由**本 worker 线程**持有，真调用放进陪跑线程（硬墙）。
-            # 这样一旦服务端不回包，本线程从 `with` 里退出来时**当场把槽还回去**，
-            # 后续 worker 照跑；否则 4 个槽会被 4 个挂起的调用占死，全批一起卡住
-            # （用户 2026-10-15 08:42 那次就是这么卡住的）。
+            # 额度随实际调用存活；超时只结束等待，不释放仍运行的请求。
             with model_slot(kind, timeout=slot_wait_timeout()):
-                # 卡 C-0124：**抢到槽之后**为"这一格可能永远不回来"记一笔账
-                # （记账在 acquire 成功之后，`cancel_futures` 里没跑起来的份不会
-                # 虚增）；正常返回时在下面的 finally 里销账。判停时主线程按账回收。
-                _abandoned_enter()
-                try:
-                    from . import agent_bridge
-                    pipeline = "terms" if kind.startswith("terms.") else "courseware_kp"
-                    with agent_bridge.pipeline_scope(pipeline):
-                        r = _call_with_hard_timeout(
-                            lambda _ctx=ctx: chat.chat_once(
-                                [{"role": "system", "content": sys_p},
-                                 {"role": "user", "content": user_p}],
-                                model=call_model, max_tokens=call_max,
-                                thinking=call_think, temperature=temperature,
-                                timeout=TIMEOUT,
-                                reasoning_effort=(call_eff if call_think else None),
-                                run_context=_ctx),
-                            timeout=call_hard_timeout(), kind=kind)
-                finally:
-                    _abandoned_done()
+                from . import agent_bridge
+                pipeline = "terms" if kind.startswith("terms.") else "courseware_kp"
+                json_mode = _use_native_json_output(
+                    kind, sys_p, user_p, pipeline, call_model,
+                    str(ctx.api_base or "") if ctx is not None else str(chat.DEEPSEEK_BASE))
+                rec["json_mode"] = json_mode
+                format_args = {"response_format": {"type": "json_object"}} if json_mode else {}
+                with agent_bridge.pipeline_scope(pipeline):
+                    r = _call_with_hard_timeout(
+                        lambda _ctx=ctx: chat.chat_once(
+                            [{"role": "system", "content": sys_p},
+                             {"role": "user", "content": user_p}],
+                            model=call_model, max_tokens=call_max,
+                            thinking=call_think, temperature=temperature,
+                            timeout=TIMEOUT,
+                            reasoning_effort=(call_eff if call_think else None),
+                            run_context=_ctx, **format_args),
+                        timeout=call_hard_timeout(), kind=kind)
         except Exception as e:  # noqa: BLE001
             last = "%s: %s" % (type(e).__name__, e)
             el = round(time.perf_counter() - t0, 1)
@@ -2861,7 +2834,7 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                 # D1：硬超时（ModelCallHang）也走这里 —— 远端结果未知，不重发；
                 # rec/attempts/telemetry 显式标 indeterminate，不冒充"已知失败"。
                 rec.update({"remote_unknown": True, "indeterminate": True,
-                            "status": runtime_state.REMOTE_UNKNOWN})
+                            "cost_unknown": True, "status": runtime_state.REMOTE_UNKNOWN})
                 log("  ★remote_unknown/indeterminate：结果未知，禁止自动重试（P0-B）")
                 out = {"ok": False, "parsed": {}, "usage": {}, "raw": "",
                        "model": call_model, "error": last,
@@ -2892,6 +2865,7 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                  "reasoning_tokens": _reasoning_tokens(u),
                  "cost_cny": cost_of(u)}
         raw = r["content"] or ""
+        rec["finish_reason"] = str(r.get("finish_reason") or "")
         parsed = parse_json(raw)
         err = str(parsed.get("_parse_error") or "")
         el_ok = round(time.perf_counter() - t0, 1)
@@ -3123,6 +3097,38 @@ def _struct_map_result(parsed, a, b):
     return {"titles": titles, "sections": secs}
 
 
+def structure_input_signature(ch: dict) -> str:
+    """来源与分段策略指纹，用于防止改动材料后复用不匹配的结构/知识点。"""
+    material = {"version": "short-structure-v1", "pages": ch.get("pages_all") or [],
+                "blocks": ch.get("blocks") or {}, "cover": ch.get("cover") or {},
+                "figrows": ch.get("figrows") or {},
+                "segments": plan_structure_segments(ch)}
+    encoded = json.dumps(material, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _legacy_visual_repair_marker(doc_id: int, db_path=None) -> bool:
+    """旧成果没有来源签名时，用库内修复标记避免把修复前的成果误判为最新。"""
+    path = Path(db_path) if db_path else Path(config.DB_PATH)
+    try:
+        with contextlib.closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)) as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key=?",
+                               ("visual_repair:%d" % int(doc_id),)).fetchone()
+        return bool(row and row[0])
+    except (sqlite3.Error, OSError, ValueError):
+        return False
+
+
+def structure_source_changed(prev_struct: dict, ch: dict, doc_id: int, db_path=None) -> bool:
+    if not isinstance(prev_struct.get("raw_root"), dict):
+        return False
+    old_signature = str(prev_struct.get("input_signature") or "")
+    if old_signature:
+        return old_signature != structure_input_signature(ch)
+    return _legacy_visual_repair_marker(doc_id, db_path)
+
+
 def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
                      calls: list, log=print, run_no: int = 1,
                      run_context=None) -> dict:
@@ -3140,8 +3146,9 @@ def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
     segs = plan_structure_segments(ch)
     if not segs:
         raise RuntimeError("这份课件库里没有任何块（chunks 为空），无法生成结构")
+    planned_pages = max(STRUCT_SEG_PAGES, max(len(seg["pages"]) for seg in segs))
     log("结构生成：共 %d 页，切成 %d 段（每段 ≤%d 页 / ≤%d 字符）"
-        % (len(pages_all), len(segs), STRUCT_SEG_PAGES, STRUCT_SEG_CHARS))
+        % (len(pages_all), len(segs), planned_pages, STRUCT_SEG_CHARS))
 
     def _map_one_seg(seg: dict) -> dict:
         """一段 map：渲染材料 → 调模型 → 解析成局部草稿（顺序无关，可并发）。"""
@@ -3229,7 +3236,7 @@ def gen_structure_v2(doc_id: int, ch: dict, prompt: dict, deck: str, *,
     return {"root": root, "raw_drafts": drafts, "titles": titles,
             "segments": [{k: v for k, v in s.items() if k != "chars"} for s in segs],
             "merged_by": merged_by, "merge_note": note,
-            "params": {"seg_pages": STRUCT_SEG_PAGES, "seg_chars": STRUCT_SEG_CHARS,
+            "params": {"seg_pages": planned_pages, "seg_chars": STRUCT_SEG_CHARS,
                        "page_chars": STRUCT_PAGE_CHARS, "temperature": STRUCT_TEMPERATURE,
                        "max_tokens": STRUCT_MAX_TOKENS,
                        "thinking": THINKING_V2,
@@ -3654,6 +3661,8 @@ def _v2_cost(calls: list, run: int | None = None) -> dict:
     cost = round(sum(float(c.get("cost_cny") or 0) for c in rows), 6)
     return {"calls": len(rows), "calls_failed": sum(1 for c in rows if not c.get("ok")),
             "tokens_in": ti, "tokens_out": to, "reasoning_tokens": rt,
+            "cost_unknown_calls": sum(1 for c in rows if c.get("cost_unknown")
+                                      or c.get("remote_unknown") or c.get("indeterminate")),
             "cost_cny": cost}
 
 
@@ -4586,14 +4595,14 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
 
     seg_chars = sum(s["chars"] for s in segs)
     seg_in_tok = int(st_prompt["chars"] * len(segs) + seg_chars) / CHARS_PER_TOKEN
-    merge_in_tok = int(st_prompt["chars"] + 2500) / CHARS_PER_TOKEN
+    merge_in_tok = (int(st_prompt["chars"] + 2500) / CHARS_PER_TOKEN if len(segs) > 1 else 0)
     kp_in_tok = int(kp_prompt["chars"] * kp_max + mat_chars) / CHARS_PER_TOKEN
     est_in = seg_in_tok + merge_in_tok + kp_in_tok
     est_out = (
         int(seg_in_tok * REASON_RATIO)
         + 1200 * len(segs)
         + int(merge_in_tok * REASON_RATIO)
-        + 1500
+        + (1500 if len(segs) > 1 else 0)
         + int(kp_in_tok * REASON_RATIO)
         + 450 * kp_max
     )
@@ -4609,18 +4618,21 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
     prev_prompts = prev_meta.get("prompts") if isinstance(prev_meta.get("prompts"), dict) else {}
     prev_struct = prev.get("structure") if isinstance(prev.get("structure"), dict) else {}
     is_v2 = str(prev_meta.get("pipeline_version") or "") == PIPELINE_VERSION
+    source_changed = structure_source_changed(prev_struct, ch, doc_id, db_path)
 
     reuse_ok = bool(
-        is_v2
+        is_v2 and not source_changed
         and isinstance(prev_struct.get("raw_root"), dict)
         and int(prev_struct.get("n_pages") or 0) == n
+        and (not prev_struct.get("input_signature")
+             or prev_struct.get("input_signature") == structure_input_signature(ch))
         and str((prev_prompts.get("structure") or {}).get("sha256") or "") == st_prompt["sha256"]
         and str((prev_prompts.get("knowledge") or {}).get("sha256") or "") == kp_prompt["sha256"]
     )
     n_plan = int(prev_struct.get("n_leaves") or 0) if reuse_ok else 0
 
     done = set()
-    if is_v2:
+    if reuse_ok:
         for r in prev.get("knowledge_points") or []:
             if not isinstance(r, dict):
                 continue
@@ -4634,6 +4646,7 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
         "doc_id": int(doc_id),
         "ok": True,
         "pipeline_version": PIPELINE_VERSION,
+        "source_changed": source_changed,
         "title": doc_title_v2(doc_id, db_path),
         "deck": doc_title_v2(doc_id, db_path),
         "n_pages": n,
@@ -4665,7 +4678,7 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
             {"index": s["index"], "a": s["a"], "b": s["b"], "pages": s["pages"]}
             for s in segs
         ],
-        "seg_pages": STRUCT_SEG_PAGES,
+        "seg_pages": max(STRUCT_SEG_PAGES, max(len(seg["pages"]) for seg in segs)),
         "seg_chars": STRUCT_SEG_CHARS,
         "struct_page_chars": STRUCT_PAGE_CHARS,
         "kp_span_pages": KP_SPAN_PAGES,
@@ -4831,6 +4844,7 @@ def _v2_structure_block(gen: dict, norm: dict, tasks: list, recs: list,
                  "logs/outline/<doc_id>.json；输入只有库里的文本。"),
         "merged_by": gen["merged_by"], "merge_note": gen["merge_note"],
         "params": gen["params"], "segments": gen["segments"],
+        "input_signature": gen.get("input_signature") or "",
         "n_nodes": norm["n_nodes"], "n_leaves": norm["n_leaves"],
         "max_level": norm["max_level"],
         "level_histogram": [hist[k] for k in sorted(hist)],
@@ -4861,7 +4875,7 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
         'chapter': est.get('title') or '',
         'deck': est.get('deck') or est.get('title') or '',
         'source_card': 'C-0058',
-        'pipeline': 'C-0058 v4 知识点整理管线（core/kp_build.py）：只读库里的文本（chunks 正文 + 识图文本，按 source_ref 的页号组织）→ 模型生成思维导图结构（%d 页/段、%d 字符/段双阈值 map-reduce，层级由模型判断）→ 一个结构叶节点一条知识点（页数不限、覆盖页由模型判断 + 管线仲裁）。**只出知识点**：名词解释已摘出为独立功能（core/kp_build.py::build_terms / tools/terms_build.py）' % (STRUCT_SEG_PAGES, STRUCT_SEG_CHARS),
+        'pipeline': 'C-0058 v4 知识点整理管线（core/kp_build.py）：只读库里的文本（chunks 正文 + 识图文本，按 source_ref 的页号组织）→ 模型生成思维导图结构（%d 页/段、%d 字符/段双阈值 map-reduce，层级由模型判断）→ 一个结构叶节点一条知识点（页数不限、覆盖页由模型判断 + 管线仲裁）。**只出知识点**：名词解释已摘出为独立功能（core/kp_build.py::build_terms / tools/terms_build.py）' % (int(est.get('seg_pages') or STRUCT_SEG_PAGES), STRUCT_SEG_CHARS),
         'pipeline_version': PIPELINE_VERSION,
         'inputs': {
             'read': ['chunks.text', 'chunks.source_ref', 'chunks.ord', 'figure_desc.no_info', 'documents.title'],
@@ -4900,7 +4914,7 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
                 'thinking': THINKING_V2,
                 'reasoning_effort': REASONING_EFFORT if THINKING_V2 else '',
                 'max_tokens': STRUCT_MAX_TOKENS,
-                'seg_pages': STRUCT_SEG_PAGES,
+                'seg_pages': int(est.get('seg_pages') or STRUCT_SEG_PAGES),
                 'seg_chars': STRUCT_SEG_CHARS,
                 'page_chars': STRUCT_PAGE_CHARS,
                 'level_rule': '层级不设上限，由模型按内容判断（鼓励四到五级）',
@@ -4960,6 +4974,9 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
                      and (c.get("remote_unknown") or c.get("indeterminate"))]
     unknown = bool(unknown_calls) or ("结果未知" in str(err or ""))
     meta["remote_unknown"] = unknown
+    meta["cost_unknown_calls"] = len(unknown_calls)
+    if unknown_calls:
+        meta["cost_note"] = "已记录金额不含结果未知请求可能产生的费用；实际账单需向服务商核实。"
     meta["indeterminate"] = unknown
     meta["status_detail"] = (runtime_state.REMOTE_UNKNOWN if unknown
                              else str(status))
@@ -5083,11 +5100,14 @@ def build_v2(
 
     prev_prompts = prev_meta.get("prompts") if isinstance(prev_meta.get("prompts"), dict) else {}
     prev_struct = prev.get("structure") if isinstance(prev.get("structure"), dict) else {}
+    source_changed = structure_source_changed(prev_struct, ch, doc_id, db_path)
     reuse = bool(
-        (not force)
+        (not force) and not source_changed
         and str(prev_meta.get("pipeline_version") or "") == PIPELINE_VERSION
         and isinstance(prev_struct.get("raw_root"), dict)
         and int(prev_struct.get("n_pages") or 0) == len(ch["pages_all"])
+        and (not prev_struct.get("input_signature")
+             or prev_struct.get("input_signature") == structure_input_signature(ch))
         and str((prev_prompts.get("structure") or {}).get("sha256") or "") == st_prompt["sha256"]
         and str((prev_prompts.get("knowledge") or {}).get("sha256") or "") == kp_prompt["sha256"]
     )
@@ -5101,7 +5121,11 @@ def build_v2(
             "merged_by": prev_struct.get("merged_by") or "",
             "merge_note": "（续跑：复用产物里的结构）",
             "params": prev_struct.get("params") or {},
+            # 旧产物没有来源签名时不能冒称已经核对来源。
+            "input_signature": prev_struct.get("input_signature") or "",
         }
+        if not gen["input_signature"]:
+            log("旧产物缺少来源签名，按原有续跑规则保留；不能核实历史输入是否改变")
         log("续跑：复用产物里的结构（%d 节点 / %d 叶节点），不重新生成、不重复花钱" % (
             prev_struct.get("n_nodes") or 0,
             prev_struct.get("n_leaves") or 0,
@@ -5121,8 +5145,15 @@ def build_v2(
             "stage_index": 1,
             "note": "生成结构",
         })
+        # 已有带签名成果的材料或分段发生变化时，在重新写入前先留存旧成果。
+        if source_changed and out.exists():
+            import shutil
+            archive = out.with_name(out.name + ".before-input-change-%d.bak" % time.time_ns())
+            shutil.copy2(out, archive)
+            log("材料或结构分段已改变；旧成果已备份，重新生成")
         gen = gen_structure_v2(doc_id, ch, st_prompt, deck, calls=calls, log=log,
                                run_no=run_no, run_context=run_ctx)
+        gen["input_signature"] = structure_input_signature(ch)
 
     norm = normalize_structure_v2(gen["root"], ch["pages_all"], deck, log=log)
     tasks = plan_kp_tasks_v2(norm["nodes"], norm["page_owner"], ch=ch)
@@ -5349,17 +5380,10 @@ def build_v2(
                 done, _still = _cf.wait(list(futures), timeout=(wait_to or None),
                                         return_when=_cf.FIRST_COMPLETED)
                 if not done:
-                    # 卡 C-0124：判停 = 主线程不再等这些 worker ⇒ 它们手里的模型槽
-                    # 对本次运行已经没有意义，按账**当场抢回来**。不抢的话，实测
-                    # `build_v2` 返回后 `inflight` 仍为 1（worker 阻塞在自己的
-                    # `th.join(1800)` 里，要等硬墙到点才释放），下一次整理起手就
-                    # 少一格并发。⚠ 必须在 `stalled` 置位**之前**调用，确保后面
-                    # 无论走哪条收尾路径，槽位都已经回收。
-                    freed = reclaim_stalled_slots()
-                    stalled = ("★停滞：%d 个在飞模型调用超过 %.0f 秒没有任何返回"
-                               "（模型接口挂起；已完成的 %d 条已落盘，剩余下次续跑；"
-                               "已回收 %d 个滞留模型槽位）"
-                               % (len(futures), wait_to, len(recs), freed))
+                    stalled = ("★停滞：%d 个任务超过 %.0f 秒没有返回"
+                               "（已完成的 %d 条已落盘；仍运行的请求继续占用槽位，"
+                               "结束后自动释放，结果未知时不要重复发送）"
+                               % (len(futures), wait_to, len(recs)))
                     log(stalled)
                     _emit(on_event, {"ev": "log", "msg": stalled})
                     break

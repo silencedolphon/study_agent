@@ -685,8 +685,14 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
         pages_bytes = 0
         if with_pages:
             src_stem = Path(src_file.name).stem if src_file.is_file() else Path(doc["path"]).stem
-            pdir = log_dir / "figure_desc" / safe_dirname(src_stem)
-            if pdir.is_dir():
+            from . import figure_cache
+            pdir = figure_cache.directory(log_dir, doc_id, doc.get("content_hash"))
+            if pdir is None or not pdir.is_dir():
+                if figure_cache.document_directories(log_dir, doc_id):
+                    pdir = None  # 版本变更时不能悄悄导出旧图
+                else:
+                    pdir = log_dir / "figure_desc" / safe_dirname(src_stem)
+            if pdir is not None and pdir.is_dir():
                 for f in sorted(pdir.glob("slide_*.png")):
                     page_files.append((f, "%s/%s/%s" % (PAGE_DIR, safe_dirname(src_stem), f.name)))
                     pages_bytes += f.stat().st_size
@@ -1440,7 +1446,10 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
             if page_entries:
                 stem = Path(new_file.name).stem if new_file else clean_name(
                     str(doc.get("file_name") or doc["title"]), 60)
-                pdir = log_dir / "figure_desc" / safe_dirname(stem)
+                from . import figure_cache
+                pdir = figure_cache.directory(log_dir, new_doc_id, doc.get("content_hash"))
+                if pdir is None:
+                    raise ShareError("导入页图时无法确认文档内容指纹")
                 if not pdir.exists():
                     made_dirs.append(pdir)
                 pdir.mkdir(parents=True, exist_ok=True)

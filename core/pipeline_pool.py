@@ -661,17 +661,12 @@ def _run_one(bid: str, task: dict) -> None:
     _local.task = task          # ← 进度分流的开关：本线程的进度都归这份文件
     conn = None
     try:
-        # 卡 C-0063：与整理管线**共享同一把进程级模型闸门**（`core/kp_build.py`
-        # 的"并发闸门"小节）。这里按**份**持有一个槽——逐页识图的调用在
-        # `core/figures.py` 里，那是另一张卡的范围，本卡不动那个文件，所以口径
-        # 取"一份入库任务 = 一个在飞的模型调用"。持槽期间内部**不再取槽**，
-        # 不存在"持槽等槽"的死锁（见 model_slot 的说明）。
-        with _model_slot("ingest"):
-            conn = task_connect(batch["db_path"] or None)
-            rep = ingest_mod.ingest_paths(
-                conn, [Path(task["abs"])], force=batch["force"],
-                with_ocr=batch["with_ocr"], verbose=False,
-                with_figures=batch["with_figures"])
+        # 份级解析、渲染和写库不占模型槽；实际模型请求在发送处取槽。
+        conn = task_connect(batch["db_path"] or None)
+        rep = ingest_mod.ingest_paths(
+            conn, [Path(task["abs"])], force=batch["force"],
+            with_ocr=batch["with_ocr"], verbose=False,
+            with_figures=batch["with_figures"])
         detail = rep.details[0] if rep.details else {}
         st = str(detail.get("status") or "failed")
         task["pipeline_status"] = st

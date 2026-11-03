@@ -1028,8 +1028,14 @@ def _figure_texts(conn, doc_id: int, *, skip_no_info: bool = False) -> dict[int,
         d = (r["description"] or "").strip()
         if not d:
             continue
-        if skip_no_info and int(r["no_info"] or 0):
-            continue
+        if skip_no_info:
+            # 旧缓存可能误把“有结构但标记不适用”记成 no_info；重新核对正文。
+            from . import figures
+            if figures.is_no_info(d):
+                continue
+            d = figures.clean_contradictory_no_info(d)
+            if not d:
+                continue
         pno = int(r["page"])
         out[pno] = (out.get(pno, "") + "\n" + d).strip()
     return out

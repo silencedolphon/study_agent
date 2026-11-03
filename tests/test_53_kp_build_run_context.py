@@ -141,16 +141,15 @@ class TestV2CallSnapshot(_Base):
             return {"content": _JSON, "model": kw["model"], "usage": {},
                     "finish_reason": "stop"}
         def worker(ctx):
-            with mock.patch.object(kp_build, "model_slot",
-                                   return_value=contextlib.nullcontext()), \
-                 mock.patch.object(kp_build, "_call_with_hard_timeout",
-                                   side_effect=hard), \
-                 mock.patch("core.chat.chat_once", side_effect=fake):
-                kp_build._v2_call([], "knowledge", "s", "u", max_tokens=0,
-                                  retry=0, log=lambda *a: None, run_context=ctx)
+            kp_build._v2_call([], "knowledge", "s", "u", max_tokens=0,
+                              retry=0, log=lambda *a: None, run_context=ctx)
         ts = [threading.Thread(target=worker, args=(c,)) for c in (ctx1, ctx2)]
-        for t in ts: t.start()
-        for t in ts: t.join(10)
+        with mock.patch.object(kp_build, "model_slot",
+                               return_value=contextlib.nullcontext()), \
+             mock.patch.object(kp_build, "_call_with_hard_timeout", side_effect=hard), \
+             mock.patch("core.chat.chat_once", side_effect=fake):
+            for t in ts: t.start()
+            for t in ts: t.join(10)
         self.assertEqual(sorted(captured), [("m1", 11), ("m2", 22)])
 
     def test_gen_kp_v2_passes_context(self):

@@ -122,14 +122,14 @@ class TestHttpPost(_Base):
                 results.append(json.loads(req.data.decode())["model"])
             return Resp()
         def worker(ctx):
-            with mock.patch.object(agent_bridge, "complete", return_value=None), \
-                 mock.patch("urllib.request.urlopen", side_effect=fake):
-                figures._http_post("https://old", {"messages": [], "model": "x"},
-                                   "k", retries=0, wait=0, run_context=ctx)
+            figures._http_post("https://old", {"messages": [], "model": "x"},
+                               "k", retries=0, wait=0, run_context=ctx)
         ts = [threading.Thread(target=worker, args=(c,))
               for c in (self._ctx("m1", 11), self._ctx("m2", 22))]
-        for t in ts: t.start()
-        for t in ts: t.join(10)
+        with mock.patch.object(agent_bridge, "complete", return_value=None), \
+             mock.patch("urllib.request.urlopen", side_effect=fake):
+            for t in ts: t.start()
+            for t in ts: t.join(10)
         self.assertEqual(sorted(results), ["m1", "m2"])
 
 

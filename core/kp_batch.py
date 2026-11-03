@@ -165,6 +165,8 @@ def done_state(est: dict, prev: dict) -> tuple[bool, str]:
     """
     if not prev.get("exists"):
         return False, "还没有产物"
+    if est.get("source_changed"):
+        return False, "资料内容已更改或修复，原总结需要更新"
     if not prev.get("is_current_version"):
         return False, "产物不是本版管线（%s）产出的" % (prev.get("pipeline_version") or "未知版本")
     # ⚠ 比的是**末级节点数**，不是 outline 的总页数：产物里的 `meta.pages_total`

@@ -1526,6 +1526,11 @@ def _ai_chat(kind: str, sys_p: str, user_p: str, *, max_tokens: int | None = Non
             if log:
                 log("  ★教材补充 AI 调用失败（%s 第 %d 次）：%s" % (kind, attempt + 1, last))
             calls.append(rec)
+            from .pipeline_runtime import state as runtime_state
+            if runtime_state.is_unknown_failure(e):
+                rec.update({"remote_unknown": True, "indeterminate": True,
+                            "cost_unknown": True})
+                break
             if attempt == 0:
                 time.sleep(1)
             continue

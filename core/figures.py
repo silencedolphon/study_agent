@@ -266,30 +266,25 @@ class PageContext:
 # （`net_gate()`，默认 8 路）：无论外面套了几层并发，同时打出去的识图请求
 # 数不超过 `KB_FIGURE_NET_LIMIT`。
 
-DEFAULT_PAGE_WORKERS = 4
+DEFAULT_PAGE_WORKERS = 8
+MAX_PAGE_WORKERS = 8
 _PAGE_WORKERS_ENV = "KB_FIGURE_WORKERS"
 _NET_LIMIT_ENV = "KB_FIGURE_NET_LIMIT"
 DEFAULT_NET_LIMIT = 8
 
 
 def _clamp_workers(n) -> int:
-    """把页级并发数夹到 `pipeline_pool` 的 1..MAX_WORKERS。
-
-    **不在这里另写一个上限**：`pipeline_pool.MAX_WORKERS`（=4）是"入库并发"
-    这件事在项目里的唯一定义，多份之间与单份内部共用同一个数，改一处同时
-    生效，不会出现"批量允许 4、单份允许 8"这种口径分叉。
-    """
-    from . import pipeline_pool as _pp
+    """单文件页级线程单独限为 1..8；跨文件并发仍由 pipeline_pool 控制。"""
     try:
-        return int(_pp.clamp_workers(int(n)))
+        return max(1, min(MAX_PAGE_WORKERS, int(n)))
     except (TypeError, ValueError):
-        return int(_pp.clamp_workers(_pp.DEFAULT_WORKERS))
+        return DEFAULT_PAGE_WORKERS
 
 
 def page_workers(n=None) -> int:
     """本次逐页识图用几路并发。
 
-    优先级：显式入参 > 环境变量 `KB_FIGURE_WORKERS` > 默认 4。
+    优先级：显式入参 > 环境变量 `KB_FIGURE_WORKERS` > 默认 8。
     `1` 表示**完全走改造前的串行路径**（安全回退开关）。
     """
     if n is None:
@@ -760,6 +755,43 @@ def _write_render_meta(outdir: Path, meta: dict) -> None:
         pass
 
 
+def document_image_dir(src: Path, doc_id: int) -> Path:
+    """每个文档的每个源文件版本有独立目录，避免同名课件写到一处。"""
+    from . import figure_cache
+    digest = _src_fingerprint(Path(src))
+    out = figure_cache.directory(config.LOG_DIR, doc_id, digest)
+    if out is None:
+        raise OSError("无法确认源文件指纹或文档编号，拒绝使用共享页图目录")
+    return out
+
+
+def _adopt_verified_legacy_renders(src: Path, outdir: Path) -> int:
+    """只有旧目录 manifest 与源文件一致才复制缓存；保留原目录不动。"""
+    import shutil
+    legacy = Path(config.LOG_DIR) / "figure_desc" / _safe_dirname(src.stem)
+    fp = _src_fingerprint(src)
+    meta = _read_render_meta(legacy)
+    if not fp or meta.get("src_fingerprint") != fp or not legacy.is_dir():
+        return 0
+    if _read_render_meta(outdir).get("src_fingerprint") == fp:
+        return 0
+    pages = meta.get("pages") if isinstance(meta.get("pages"), dict) else {}
+    outdir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for rel in pages.values():
+        name = str(rel)
+        if not re.fullmatch(r"slide_\d+\.png", name):
+            continue
+        source = legacy / name
+        target = outdir / name
+        if source.is_file() and not target.exists():
+            shutil.copy2(source, target)
+            copied += 1
+    if pages:
+        _write_render_meta(outdir, meta)
+    return copied
+
+
 def _expected_page_numbers(src: Path, kind: str) -> list[int] | None:
     """只读拿全量预期页集合：PDF 用 pymupdf 页数；PPTX 数 zip 里的 slide*.xml。"""
     try:
@@ -947,7 +979,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
        「本页无知识性图示」的页**不入库**——文字层已覆盖，存进去只占检索名额。
 
      `workers`：逐页并发数，默认取 `page_workers()`（环境变量
-     `KB_FIGURE_WORKERS`，上限与 `pipeline_pool.MAX_WORKERS` 同口径）。
+     `KB_FIGURE_WORKERS`，单文件页级上限为 8；共享模型额度另行约束）。
      **`1` = 改造前的串行行为**（逐字回退）。
 
      `store_chunks`（**2026-10-19 新增，默认 True = 旧行为逐字不变**）：
@@ -1013,7 +1045,8 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
     # `config.LOG_DIR` 而不是 `config.ROOT / "logs"`（卡 C-0039）：
     # 默认学科下两者**逐字相同**；切到别的学科后 LOG_DIR 指向该学科的 logs/，
     # 渲染出来的页图才不会串库。
-    outdir = config.LOG_DIR / "figure_desc" / _safe_dirname(path.stem)
+    outdir = document_image_dir(path, doc_id)
+    outdir.mkdir(parents=True, exist_ok=True)
     # 把上一轮的整页图搬进本轮目录，再渲染。
     #
     # 为什么必须搬：复用判定是"库里的 image_hash == 磁盘上这张图的哈希"，
@@ -1023,7 +1056,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
     # 实测 doc#60 因此白跑了 8 页（¥0.1656），doc#89 那 78 页要 ¥1.3345。
     #
     # 搬过来之后哈希即可对上：同一份 PDF 用同一 dpi 渲染是确定性的。
-    _adopt_previous_renders(path, outdir)
+    _adopt_verified_legacy_renders(path, outdir)
 
     try:
         slides, render_info = render_pages_cached(path, outdir, kind=kind)
@@ -1429,19 +1462,21 @@ def ingest_pages_as_blocks(conn, doc_id: int, path: Path, kind: str = "",
     # 写锁就会跨过下面整份渲染 + 逐页模型调用（几十秒~几十分钟）。
     conn.commit()
 
-    if not load_deepseek_key():
+    from . import agent_bridge
+    if not vision_api_key(run_ctx) and not agent_bridge.has_adapter(
+            str(run_ctx.pipeline) if run_ctx is not None else "ingest_vision"):
         out["error"] = "没有读到可用的识图密钥（DEEPSEEK_API_KEY）"
         out["error_kind"] = "no_key"
         return out
 
-    outdir = config.LOG_DIR / "figure_desc" / _safe_dirname(path.stem)
+    outdir = document_image_dir(path, doc_id)
     stats["outdir"] = str(outdir)
     try:
         outdir.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     # 把历史渲染结果搬进本轮目录（目录不同 → 哈希永远对不上 → 复用从不生效）
-    _adopt_previous_renders(path, outdir)
+    _adopt_verified_legacy_renders(path, outdir)
 
     t0 = time.perf_counter()
     _W = page_workers(workers)
@@ -1618,7 +1653,7 @@ def ingest_pages_as_blocks(conn, doc_id: int, path: Path, kind: str = "",
             try:
                 r = describe_page(img, ctx, thinking=thinking, max_tokens=caps,
                                   zero_text=True, run_context=run_ctx)
-                if r.ok and _usable_page_text(r.text):
+                if not r.ok or _usable_page_text(r.text):
                     return r, None
                 return r, describe_page(img, ctx, thinking=thinking,
                                         max_tokens=caps, zero_text=True,
@@ -2041,6 +2076,24 @@ def build_contexts(slides_text: list[dict], deck_title: str = "",
 def _http_post(url: str, payload: dict, key: str, timeout: int = 300,
                retries: int = 4, wait: float = 4.0,
                run_context=None) -> tuple[int, dict | str]:
+    """视觉和文本请求共享同一进程级额度；超时后额度跟随实际调用。"""
+    from . import kp_build
+    try:
+        with kp_build.model_slot("vision", timeout=kp_build.slot_wait_timeout()):
+            return kp_build._call_with_hard_timeout(
+                lambda: _http_post_unthrottled(url, payload, key, timeout=timeout,
+                                               retries=retries, wait=wait,
+                                               run_context=run_context),
+                timeout=kp_build.call_hard_timeout(), kind="vision")
+    except kp_build.ModelCallHang as e:
+        return 0, "remote_unknown: %s" % e
+    except kp_build.ModelSlotTimeout as e:
+        return 0, "模型请求未发送: %s" % e
+
+
+def _http_post_unthrottled(url: str, payload: dict, key: str, timeout: int = 300,
+               retries: int = 4, wait: float = 4.0,
+               run_context=None) -> tuple[int, dict | str]:
     from . import agent_bridge
     ctx = (run_context if run_context is not None
            and runtime_context.runtime_enabled() else None)
@@ -2123,7 +2176,7 @@ def load_deepseek_key() -> str | None:
     （`Path.home()` 就是那个目录、同一个文件），别人机器上不再探测无关路径。
     """
     import os
-    v = os.environ.get("DEEPSEEK_API_KEY")
+    v = config.pipeline_key("ingest") or os.environ.get("DEEPSEEK_API_KEY")
     if v:
         return v
     for cred in (Path.home() / ".dsh" / ".credentials.yaml",):
@@ -2134,6 +2187,17 @@ def load_deepseek_key() -> str | None:
         if m:
             return m.group(1)
     return None
+
+
+def vision_api_key(run_context=None) -> str | None:
+    """优先使用当前运行快照所属管线的密钥；凭据本身不进入运行快照。"""
+    if run_context is not None and runtime_context.runtime_enabled():
+        ref = runtime_context.canonical_credential_ref(
+            str(getattr(run_context, "credential_ref", "") or run_context.pipeline))
+        key = config.pipeline_key(ref)
+        if key:
+            return key
+    return load_deepseek_key()
 
 
 @dataclass
@@ -2169,22 +2233,28 @@ def image_hash(path: Path) -> str:
 # ---------------------------------------------------------------- 过滤
 
 def is_no_info(text: str) -> bool:
-    """这份描述是不是模型明确声明的「本页无知识性图示」。
+    """只过滤明确的无图结果；包含实质图示分析的矛盾回复保守保留。"""
+    text = str(text or "")
+    pos = text.find(NO_INFO_MARKER)
+    if pos < 0:
+        return False
+    after = text[pos + len(NO_INFO_MARKER):].lstrip(" \t\r\n—–-：:，,")
+    # 有些回复明确把标记本身否定，如“【本页无知识性图示】不适用”。
+    if re.match(r"^(?:不适用|并不适用|不成立|并非如此|并非无图|实际有|确有|本页有|本页确有)", after):
+        return False
+    # 即使首句自相矛盾，只要后续有多节充分的图示内容，也不可丢弃。
+    parts = re.findall(
+        r"【(本页作用|图的内容|结构说明|对应关系|图中文字|补充信息)】\s*([^【]*)", text)
+    substantive = [body for _, body in parts if len(re.sub(r"\s+", "", body)) >= 24]
+    return len(substantive) < 2
 
-    **只认显式标记**，不做关键词猜测。
 
-    为什么不做关键词猜测（试过，放弃了）：模型常写"本页不是机制图，而是……"，
-    后面却从图里读出了实质内容（如 p54 的药代动力学柱状图、
-    p12 的胰岛素原二硫键走向）。按关键词过滤会把这类页误杀——
-    实测宽松规则在 104 页里命中 46 页，其中很多页其实有真内容；
-    收严到"描述 ≤300 字且明确说没图"又变成 0 页（描述普遍 400~800 字）。
-    两头都不成立，说明**关键词不是可靠判据**。
-
-    代价与取舍：标记上线前已跑完的 104 页不会被过滤（它们没有标记）。
-    这是**故意**的——宁可多花下一轮的钱，也不要静默丢掉真内容。
-    要过滤老结果就重跑一遍（带上标记），标记会自己生效。
-    """
-    return NO_INFO_MARKER in (text or "")
+def clean_contradictory_no_info(text: str) -> str:
+    """对含有效图示但附有相反标记的文本，去除标记再交给下游。"""
+    text = str(text or "")
+    if NO_INFO_MARKER in text and not is_no_info(text):
+        return text.replace(NO_INFO_MARKER, "").strip()
+    return text
 
 
 def _usable_page_text(text: str, min_chars: int = 30) -> bool:
@@ -2449,7 +2519,7 @@ def describe_page(img_path: Path, ctx: PageContext,
     from . import agent_bridge
     vctx = (run_context if run_context is not None
             and runtime_context.runtime_enabled() else None)
-    key = load_deepseek_key()
+    key = vision_api_key(vctx)
     if not key and not agent_bridge.has_adapter(
             str(vctx.pipeline) if vctx is not None else "ingest_vision"):
         return FigureResult(False, error="没有 DEEPSEEK_API_KEY")

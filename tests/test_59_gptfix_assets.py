@@ -86,6 +86,7 @@ class TestMixedPages(_Base):
                       "复用路径必须保留入库实际 OCR 文本（不是重新提取的原始页）")
 
     def test_fake_visual_plan_includes_textless_page(self):
+        (self.root / "x.pptx").write_bytes(b"fake-source-for-fingerprint")
         conn = db.connect(self.root / "t.db", immediate=True)
         db.init_db(conn)
         conn.execute("INSERT INTO documents(id, path, abs_path, kind, title, "
