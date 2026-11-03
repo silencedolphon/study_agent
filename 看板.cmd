@@ -37,6 +37,11 @@ REM Optional: set SA_PORT before calling this file to use another port.
 if not defined SA_PORT set "SA_PORT=8757"
 set "PORT=%SA_PORT%"
 
+REM 2026-11-03: local proxy 127.0.0.1:7897 can fail TLS handshake for DeepSeek.
+REM Bypass the proxy for api.deepseek.com only; direct HTTPS is reachable.
+if not defined NO_PROXY set "NO_PROXY=api.deepseek.com"
+if not defined no_proxy set "no_proxy=api.deepseek.com"
+
 if not exist "%PY%" (
     echo.
     echo   [ERROR] Python interpreter not found:
