@@ -32,7 +32,7 @@ def _roots() -> tuple[Path, Path]:
         它们算出来的正是 `BUNDLE_ROOT/tools/`（`Path(__file__).parent.parent`
         在打包后就是解包目录），所以只要打包时把 .ps1 放进 `_internal/tools/` 即可。
 
-    `KB_HOME` 环境变量可在打包模式下把数据目录指到别处（不设＝exe 同级）。
+    `KB_HOME` 环境变量可把数据目录指到别处。源码模式未设时仍使用项目根。
     ⚠ 它只认**进程环境变量**，不认 `.env`——`.env` 本身就要先知道 `ROOT`
       才能找到，先有鸡还是先有蛋。
     """
@@ -41,7 +41,8 @@ def _roots() -> tuple[Path, Path]:
         data = Path(home).resolve() if home else Path(sys.executable).resolve().parent
         return data, Path(getattr(sys, "_MEIPASS", "") or data)
     root = Path(__file__).resolve().parent.parent
-    return root, root
+    home = os.environ.get("KB_HOME", "").strip()
+    return (Path(home).expanduser().resolve() if home else root), root
 
 
 ROOT, BUNDLE_ROOT = _roots()
@@ -63,6 +64,8 @@ def _load_env(path: Path) -> None:
 
 
 _load_env(ROOT / ".env")
+if ROOT != BUNDLE_ROOT:
+    _load_env(BUNDLE_ROOT / ".env")
 
 
 def _path(key: str, default: str) -> Path:
@@ -95,8 +98,9 @@ def _default_model_dir() -> Path:
     对方下载完不用自己再拉 100MB 模型）。
     """
     own = ROOT / "models" / "bge-small-zh-v1.5"
-    if getattr(sys, "frozen", False) and not own.exists():
-        return BUNDLE_ROOT / "models" / "bge-small-zh-v1.5"
+    bundled = BUNDLE_ROOT / "models" / "bge-small-zh-v1.5"
+    if not own.exists() and (getattr(sys, "frozen", False) or bundled.exists()):
+        return bundled
     return own
 
 
@@ -317,7 +321,7 @@ def _seed_bundle_assets() -> list[str]:
 
     源码模式下**什么都不做**（返回空列表）：项目根本身就是真身。
     """
-    if not getattr(sys, "frozen", False):
+    if ROOT == BUNDLE_ROOT:
         return []
     src = BUNDLE_ROOT / "logs" / "knowledge"
     if not src.is_dir():

@@ -32,7 +32,7 @@ REM ============================================================
 
 set "ROOT=%~dp0"
 set "PY=%ROOT%venv\Scripts\python.exe"
-set "APP=%ROOT%tools\dashboard.py"
+set "APP=%ROOT%tools\start_with_seed.py"
 REM Optional: set SA_PORT before calling this file to use another port.
 if not defined SA_PORT set "SA_PORT=8757"
 set "PORT=%SA_PORT%"
@@ -94,7 +94,7 @@ echo   Close this window to stop the dashboard.
 echo   --------------------------------------------------
 echo.
 
-REM dashboard.py opens the browser itself.
+REM The wrapper preserves any existing local library; otherwise it prepares the seed.
 "%PY%" -X utf8 "%APP%" --port %PORT%
 
 echo.

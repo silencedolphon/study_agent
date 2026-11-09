@@ -16,6 +16,7 @@ config.local.json.tmp
 # （此前漏了这一行，`git status` 里整个 subjects/ 一直显示为未跟踪。）
 subjects/
 raw/
+.study_data/
 index/*.db
 index/*.db-wal
 index/*.db-shm
