@@ -27,8 +27,13 @@ const STATE = {
 };
 const DOC_STATUS = {ok:'正常', partial:'部分完成', failed:'处理失败', error:'处理失败'};
 
+let DOCS_PAGE_SUBJECT = '';
 async function viewDocs(){
+  if (!SUBJ.loaded) await subjLoad();
+  const pageSubject = SUBJ.loaded ? SUBJ.cur : '';
   const [docsRes, rawRes] = await Promise.all([api('/api/docs'), api('/api/raw')]);
+  if (!pageSubject || SUBJ.cur !== pageSubject) return;
+  DOCS_PAGE_SUBJECT = pageSubject;
   const raw = rawRes;
 
   // 按当前子页签过滤：两个库的文件与已入库文档互不混显。
@@ -118,6 +123,7 @@ async function viewDocs(){
     acts.push(`<button class="ghost" onclick="deleteRaw('${esc(f.rel)}', ${f.doc_id || 'null'})"
       style="color:var(--bad)">删除文件</button>`);
     return `<tr>
+      <td><input type="checkbox" class="raw-delete-cb" data-rel="${esc(f.rel)}" aria-label="选择文件 ${esc(f.name)}"></td>
       <td>${f.doc_id ? `<a href="#" onclick="openDoc(${f.doc_id});return false">${esc(f.name)}</a>` : esc(f.name)}
         ${f.supported ? '' : '<span class="badge bad">格式不支持</span>'}
         <div class="small muted" title="${esc(f.rel)}">${esc(f.rel)}</div></td>
@@ -221,11 +227,12 @@ async function viewDocs(){
       <!-- 方式二：导入分享包（卡 C-0080）。刻意放在卡片末尾：不动上面任何一段
            既有布局与文案，只往下接一节。 -->
       <details class="docs-extra"><summary>导入分享包</summary><div class="docs-extra-body">
-      <div class="sub">导入别人分享的课件整理结果，无需再次生成。</div>
+      <div class="sub">一键导入课件或教材分享包，包含的切块、预习与知识点会一起导入。</div>
       <div class="row" style="margin-top:8px">
         <input id="sh-zip" placeholder="分享包完整路径，如 D:\\下载\\第一讲-share.zip"
           style="flex:1;min-width:260px">
         <button class="act" id="sh-open">查看并导入</button>
+        <button class="act" id="sh-direct">一键导入当前学科</button>
         <button class="ghost" id="sh-pick">选择本机分享包</button>
       </div>
       </div></details>
@@ -234,14 +241,14 @@ async function viewDocs(){
 
     <div class="card" style="margin-top:14px">
       <h2>本机文件 · ${rawFiles.length} 个</h2>
-      ${rawFiles.length ? `<table><thead><tr><th>文件</th><th>大小</th><th>状态</th>
+      ${rawFiles.length ? `<div class="row" style="margin:10px 0"><label><input type="checkbox" id="raw-delete-all"> 全选文件</label><button class="ghost" id="raw-delete-selected" style="color:var(--bad)">批量删除文件…</button><span class="small muted">已入库和未入库文件均可选择</span></div><table><thead><tr><th>选择</th><th>文件</th><th>大小</th><th>状态</th>
         <th>操作</th></tr></thead><tbody>${fileRows}</tbody></table>`
         : `<div class="empty">这里还没有文件。可以从上方添加资料。</div>`}
     </div>
 
     <div class="card" id="docs-indexed" style="margin-top:14px">
       <h2>已入库资料 · ${documents.length} 个</h2>
-      ${documents.length ? `<details class="docs-bulk" id="ds-bar"><summary>批量管理 <span class="small muted" id="ds-info">未选择</span></summary><div class="row">
+      ${documents.length ? `<details class="docs-bulk" id="ds-bar" open><summary>批量删除已入库资料 <span class="small muted" id="ds-info">未选择</span></summary><div class="row">
         <button class="ghost" id="ds-all">全选</button>
         <button class="ghost" id="ds-none">取消选择</button>
         <button class="ghost" id="ds-del" style="color:var(--bad)">删除所选…</button>
@@ -256,6 +263,32 @@ async function viewDocs(){
   bindDropzone();   // 卡 C-0083：拖拽入库。bindUpload() 内部一行都没动
   bindBatch(pendingFiles);
   docSelReset();    // 卡 C-0084：批量真删的选中集。上面三行一行都没动
+  const rawAll = $('#raw-delete-all');
+  if (rawAll) rawAll.onchange = () => document.querySelectorAll('.raw-delete-cb').forEach(cb => { cb.checked = rawAll.checked; });
+  const rawDelete = $('#raw-delete-selected');
+  if (rawDelete) rawDelete.onclick = deleteSelectedRawFiles;
+}
+
+async function deleteSelectedRawFiles(){
+  const paths = Array.from(document.querySelectorAll('.raw-delete-cb:checked')).map(cb => cb.dataset.rel);
+  if (!paths.length) return toast('请先勾选要删除的文件');
+  const expected_subject = DOCS_PAGE_SUBJECT;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
+  try {
+    const plan = await api('/api/raw/delete-batch', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({paths, expected_subject, dry_run:true})});
+    const ok = await confirmBox('批量删除文件？', `将永久删除 ${paths.length} 个文件，其中 ${plan.indexed} 个已入库文件的索引和部分整理结果也会删除。教材的按章预习和总结文件可能保留。此操作不可撤销。`);
+    if (!ok) return;
+    const result = await api('/api/raw/delete-batch', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({paths, expected_subject, signatures:plan.signatures, confirm:true})});
+    const errors = result.errors || [];
+    if (errors.length) {
+      modal(`<h2>批量删除结果</h2><div class="sub">已删除 ${result.deleted} 个文件；以下文件删除未完全成功：</div><div class="small" style="margin:12px 0;white-space:pre-wrap">${errors.map(x=>esc(x.path + '：' + x.error)).join('<br>')}</div><button class="ghost" onclick="closeModal();go('docs')">关闭</button>`);
+      return;
+    }
+    toast(`已删除 ${result.deleted} 个文件`);
+    await go('docs');
+  } catch(e){ toast('批量删除失败：' + e.message); }
 }
 
 function bindUpload(){
@@ -294,6 +327,8 @@ function bindUpload(){
   };
   const shPick = $('#sh-pick');
   if (shPick) shPick.onclick = () => sharePickFromDir();
+  const shDirect = $('#sh-direct');
+  if (shDirect) shDirect.onclick = () => shareImportDirect($('#sh-zip').value.trim());
 
 }
 
@@ -593,11 +628,12 @@ function renderProgress(p, sel){
     </div>`;
 }
 
+let _ingestRequestActive = false;
 async function pollProgress(){
   try {
     const p = await api('/api/ingest/progress');
     renderProgress(p);
-    if (p.active) return true;
+    if (p.active || _ingestRequestActive) return true;
     // 跑完了：停在结果上 5 秒再收起来，否则用户什么都没看清就没了
     if (p.status) { setTimeout(() => { const b=$('#ingest-progress'); if(b) b.innerHTML=''; }, 5000); }
     return false;
@@ -691,19 +727,30 @@ function tbRender(r){
 }
 
 async function reindex(rel, force, noFigures){
+  let autoKp = false;
+  try {
+    const options = await api('/api/ingest/options');
+    autoKp = !!options.auto_kp;
+    if (autoKp && !await confirmBox('入库并整理知识点？',
+      '课件入库后将自动整理知识点，会额外调用模型并产生费用；调用次数和费用需入库后才能按实际材料确定。已有完整总结会复用。' +
+      (rel ? '' : '\n\n已入库但尚无完整总结的课件也会检查并整理。') +
+      '\n\n可在入库设置中关闭。')) return;
+  } catch(e){ toast('无法读取入库设置：' + e.message); return; }
   // 识图会让入库慢很多（实测约 25 秒/页），所以提示里要说清楚。
   // 批量入库仍建议走命令行 tools/reimport_all.py —— 按资料提交、中断可续。
-  watchProgress();   // 先开轮询：请求会一直挂着，不先开就看不到过程
+  _ingestRequestActive = true;
+  watchProgress();   // 入库与知识点阶段之间也保持轮询
   if (rel) go('docs');
   toast(rel
     ? (noFigures ? '正在入库（跳过识图）…' : '正在入库（含图片理解，可能需要很久）…')
     : '正在入库全部待处理文件，可能要几分钟到几小时…');
   try {
-    const body = {force: !!force};
+    const body = {force: !!force, auto_kp: autoKp};
     if (rel) body.paths = [rel];
     if (noFigures) body.no_figures = true;
     const r = await api('/api/ingest', {method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (r.error) { toast(r.error); return; }
     const bad = (r.details||[]).filter(d => d.status !== 'added' && d.status !== 'updated');
     let msg = r.summary;
     if (bad.length) msg += '｜' + bad.slice(0,2).map(d =>
@@ -711,7 +758,7 @@ async function reindex(rel, force, noFigures){
     toast(msg);
     go('docs');
   } catch(e){ toast('入库失败：' + e.message); }
-  finally { pollProgress(); }   // 收尾时立刻刷一次，别等下一秒
+  finally { _ingestRequestActive = false; pollProgress(); }   // 收尾时立刻刷新
 }
 
 async function reindexOne(docId){

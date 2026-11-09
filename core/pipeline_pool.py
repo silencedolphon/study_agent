@@ -440,7 +440,8 @@ def _batch_still_busy(b: dict) -> bool:
 
 def submit_batch(paths: list[str], *, force: bool = False, with_ocr: bool = True,
                  with_figures: bool | None = None, workers: int | None = None,
-                 db_path: Path | str | None = None) -> dict:
+                 db_path: Path | str | None = None, auto_kp: bool = False,
+                 log_dir: Path | str | None = None) -> dict:
     """提交一批入库任务，**立刻返回** batch_id（真正跑在后台线程里）。
 
     同一时间只允许一个批次在跑：并发数已经由 `workers` 控制，再叠加批次
@@ -471,6 +472,7 @@ def submit_batch(paths: list[str], *, force: bool = False, with_ocr: bool = True
                                      else default_workers()),
             "force": bool(force), "with_ocr": bool(with_ocr),
             "with_figures": with_figures, "db_path": str(db_path or config.DB_PATH),
+            "auto_kp": bool(auto_kp), "log_dir": str(log_dir or config.LOG_DIR),
             "total": len(files), "finished": 0, "succeeded": 0, "failed": 0,
             "skipped": 0, "unsupported": 0, "chunks": 0, "cost_cny": 0.0,
             "warmup_error": "",
@@ -673,14 +675,42 @@ def _run_one(bid: str, task: dict) -> None:
         task["chunks"] = int(detail.get("chunks") or 0)
         task["warnings"] = list(detail.get("warnings") or [])[:6]
         figs = detail.get("figures") or {}
-        task["cost_cny"] = round(float(figs.get("cost_cny") or 0.0)
-                                 + float(detail.get("outline_cost") or 0.0), 4)
+        ingest_cost = float(figs.get("cost_cny") or 0.0) + float(detail.get("outline_cost") or 0.0)
+        task["cost_cny"] = round(ingest_cost, 4)
         task["reason"] = detail.get("reason") or ""
+        if batch.get("auto_kp") and st in ("added", "updated", "skipped", "partial"):
+            from . import ingest_knowledge
+            # ingest_paths 的 progress.end() 会将任务标为 done；联动整理尚未结束。
+            task.update(status="running", stage="整理课件知识点", note="准备整理", percent=5)
+            def on_kp_event(event):
+                if event.get("stage"):
+                    task["stage"] = "知识点 · " + str(event["stage"])
+                if event.get("note"):
+                    task["note"] = str(event["note"])
+                if event.get("done") is not None and event.get("total"):
+                    task["percent"] = min(99, int(100 * int(event["done"]) / int(event["total"])))
+                if event.get("ev") == "end":
+                    task["kp_cost_cny"] = float(event.get("cost_cny") or 0.0)
+                    task["cost_cny"] = round(ingest_cost + task["kp_cost_cny"], 4)
+            kp = ingest_knowledge.run(conn, detail, db_path=batch["db_path"],
+                                      log_dir=batch["log_dir"], on_event=on_kp_event)
+            task["kp_status"] = kp["status"]
+            task["kp_reason"] = kp.get("reason", "")
+            if kp.get("warning"):
+                task["warnings"].append(kp["warning"])
+            task["cost_cny"] = round(ingest_cost + float(kp.get("cost_cny") or task.get("kp_cost_cny") or 0.0), 4)
+            if kp["status"] == "failed":
+                task["status"] = "failed"
+                task["error"] = ("课件提取有提示，知识点整理失败：" if st == "partial" else
+                                 "入库已完成，知识点整理失败：") + task["kp_reason"]
+                return
+            if kp["status"] == "done":
+                task["reason"] = "课件已入库，知识点已整理"
         if st in ("added", "updated", "partial"):
             task["status"] = "done"
             task["percent"] = 100
         elif st == "skipped":
-            task["status"] = "skipped"
+            task["status"] = "done" if task.get("kp_status") == "done" else "skipped"
             task["percent"] = 100
         elif st == "unsupported":
             task["status"] = "unsupported"
@@ -768,9 +798,12 @@ def retry_failed(batch_id: str, *, workers: int | None = None,
         force = batch.get("force")
         wf = batch.get("with_figures")
         woc = batch.get("with_ocr")
+        auto_kp = bool(batch.get("auto_kp"))
+        log_dir = batch.get("log_dir")
         dbf = db_path or batch.get("db_path")
     if not paths:
         return {"error": "该批次没有失败项"}
     return submit_batch(paths, force=force, with_ocr=woc, with_figures=wf,
                         workers=workers if workers is not None
-                        else batch.get("workers"), db_path=dbf)
+                        else batch.get("workers"), db_path=dbf,
+                        auto_kp=auto_kp, log_dir=log_dir)

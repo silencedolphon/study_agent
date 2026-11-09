@@ -176,7 +176,10 @@ NO_INFO_HINT = f"""
 图标、校徽），或者图上的信息在【本页正文文字】里已经全部有了、
 看图学不到任何新东西，那么**第一行就写**{NO_INFO_MARKER}
 并在后面用一句话说明原因，**不要**再展开下面的七项。
-这一条很重要：下游要靠这个标记决定"这页不必做识图"，写错了会浪费成本。
+化学结构式、分子骨架、反应路线和图中的数据及其对应关系均是知识性图示：
+即便正文提到了药物名称或结论，也不能当成已经覆盖图里的具体结构和标注。
+这些图必须描述可见细节；看不清的位置明确说明，不要写无图标记。
+这一条很重要：下游要靠这个标记决定"这页不必做识图"，写错会丢失信息。
 """
 
 
@@ -1134,6 +1137,7 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         vstate = visual_cache_state(outdir, p, vkey)
         if (row and row["image_hash"] == ihash and cache_ok
                 and not (textless and is_no_info(cached_body))
+                and not _no_info_needs_retry(cached_body)
                 and vstate != "mismatch"):
             plan.append({"page": p, "kind": "reuse", "img": img, "ctx": ctx,
                          "ihash": ihash,
@@ -1177,8 +1181,13 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
         stats["cost_cny"] += r.cost_cny
         textless = not (item["ctx"].title or "").strip() and not (item["ctx"].body or "").strip()
 
+        contradictory = _no_info_needs_retry(body)
+
         def invalid(text):
-            return len((text or "").strip()) < 30 or (textless and is_no_info(text or ""))
+            return (len((text or "").strip()) < 30
+                    or (textless and is_no_info(text or ""))
+                    or _no_info_needs_retry(text)
+                    or (contradictory and is_no_info(text or "")))
 
         chosen = r
         if invalid(body):
@@ -1190,7 +1199,9 @@ def ingest_document_figures(conn, doc_id: int, path: Path, kind: str = "",
                 body = r2.text
             else:
                 stats.setdefault("still_empty", []).append(p)
-                stats["errors"].append(f"p{p}: 识图没有返回可用内容，请重试")
+                reason = ("模型提到化学结构却判为无图，复核仍无有效说明，请人工核查或重试"
+                          if contradictory else "识图没有返回可用内容，请重试")
+                stats["errors"].append(f"p{p}: {reason}")
                 return ""
         # Only reusable, validated responses go into the cache.
         _save_figure_row(conn, doc_id, p, title, item["ihash"], chosen, now)
@@ -1748,7 +1759,10 @@ def _probe_page(img: Path, ctx: PageContext, thinking: bool,
                        run_context=run_context) if textless
          else describe_page(img, ctx, thinking=thinking,
                             run_context=run_context))
-    if not r.ok or (len((r.text or "").strip()) >= 30 and not (textless and is_no_info(r.text or ""))):
+    contradictory = _no_info_needs_retry(r.text or "")
+    if not r.ok or (len((r.text or "").strip()) >= 30
+                    and not (textless and is_no_info(r.text or ""))
+                    and not contradictory):
         return r, None
     # 半成品页才重试：判据与改造前逐字相同（`len(body.strip()) < 30`）。
     # 阈值取 `config.FIGURE_RETRY_MAX_TOKENS`，与 `describe_page` 的默认值
@@ -1757,6 +1771,12 @@ def _probe_page(img: Path, ctx: PageContext, thinking: bool,
     if textless:
         return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
                                 zero_text=True, extra_hint=ZERO_TEXT_RETRY_HINT,
+                                run_context=run_context)
+    if contradictory:
+        return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
+                                extra_hint=("上一轮标记无图，但又提到了化学结构式等图示。"
+                                            "请重新读图，具体描述可见的结构、标注和对应关系；"
+                                            "无法辨认之处明确标注，不要仅重复正文。"),
                                 run_context=run_context)
     return r, describe_page(img, ctx, thinking=thinking, max_tokens=caps,
                             run_context=run_context)
@@ -2232,8 +2252,47 @@ def image_hash(path: Path) -> str:
 
 # ---------------------------------------------------------------- 过滤
 
+def _no_info_only_section(body: str) -> bool:
+    """只认明确否定图示信息的语句；含糊或夹带具体内容时保守保留。"""
+    clauses = [re.sub(r"^[\s*#>\-—–:：]+|[\s*]+$", "", part)
+               for part in re.split(r"[。！？!?；;，,\n]+", str(body or ""))]
+    clauses = [part for part in clauses if part]
+    if not clauses:
+        return True
+    subject = r"(?:(?:本页|该页|此页|页面|本图|该图|图中|图上|图片|图像|画面)\s*)?"
+    figure = r"(?:图示|图片|图像|图表|结构式|化学结构|结构图|示意图|流程图|知识|信息|内容)"
+    qualifier = r"(?:任何|额外|可识别的|知识性|明显的|其他|新|实质性)*"
+    no_figure = (r"(?:没有|无|未见|不存在|不含|不包含|看不到|未发现)"
+                 + qualifier + figure + r"(?:(?:和|或|与|及|以及|、)" + qualifier + figure
+                 + r")*(?:等|可识别|可识读|可见|可补充)?")
+    plain_text = (r"(?:只有|仅有|仅包含|只包含|只是|仅为|只为|为|都是|全部为)"
+                  r"(?:普通|纯|简单的|一些)?(?:文字|文本|标题|文字说明|文字内容|文字列表|装饰)")
+    for clause in clauses:
+        # 即使开头说“没有图”，后面转而描述图示时也不能丢掉。
+        if re.search(r"(?:但|然而|不过|却|实际|另有|同时|还可见|还有)", clause):
+            return False
+        if (re.fullmatch(r"(?:无|没有|不适用|暂无|未见|无图|无图示|看不清|\[看不清\])", clause)
+                or re.fullmatch(subject + no_figure, clause)
+                or re.fullmatch(subject + plain_text, clause)
+                or re.fullmatch(r"(?:正文|文字)(?:已|已经|均已|完全)(?:涵盖|包含|覆盖|体现|说明)(?:了)?(?:所有|全部|主要)?(?:内容|知识|信息|文字|正文|知识点)", clause)
+                or re.fullmatch(r"(?:无法|不能|看图学不到)(?:再|额外)?(?:获得|提供|识别|补充|看到)?(?:任何|额外|新的)?(?:知识|信息|内容)", clause)):
+            continue
+        return False
+    return True
+
+
+def _admits_chemical_figure(text: str) -> bool:
+    """识别模型明确承认存在化学图示的表述，不跨标点或否定词。"""
+    return bool(re.search(
+        r"(?:本页|该页|此页|页面|图中|图里|图片|画面)(?:上|中)?"
+        r"(?:由|包含|含有|显示|展示|呈现|可见|有|是|存在)"
+        r"(?:(?!没有|未见|不含|不存在|无结构|无图)[^，,。；;\n]){0,45}?"
+        r"(?:化学结构(?:式|图)?|分子结构|结构式|分子式|化学反应|反应式|反应路线|结构图|化学键)",
+        str(text or "")))
+
+
 def is_no_info(text: str) -> bool:
-    """只过滤明确的无图结果；包含实质图示分析的矛盾回复保守保留。"""
+    """仅过滤明确无图的回复；即使只有一节有效图示也保守保留。"""
     text = str(text or "")
     pos = text.find(NO_INFO_MARKER)
     if pos < 0:
@@ -2242,11 +2301,28 @@ def is_no_info(text: str) -> bool:
     # 有些回复明确把标记本身否定，如“【本页无知识性图示】不适用”。
     if re.match(r"^(?:不适用|并不适用|不成立|并非如此|并非无图|实际有|确有|本页有|本页确有)", after):
         return False
-    # 即使首句自相矛盾，只要后续有多节充分的图示内容，也不可丢弃。
     parts = re.findall(
-        r"【(本页作用|图的内容|结构说明|对应关系|图中文字|补充信息)】\s*([^【]*)", text)
-    substantive = [body for _, body in parts if len(re.sub(r"\s+", "", body)) >= 24]
-    return len(substantive) < 2
+        r"【(本页作用|图的内容|图示说明|图示内容|图片内容|结构说明|结构解析|化学结构|对应关系|图中文字|补充信息)】\s*([^【]*)", text)
+    # 不再要求“至少两节、每节至少 24 字”：短结构式和单节回复也可能是唯一信源。
+    if any(not _no_info_only_section(body) for _, body in parts):
+        return False
+    if parts:
+        return True
+    # 只承认有结构式但未展开时，需要重试，不能把一句泛泛的判断当成图示说明。
+    if _admits_chemical_figure(after):
+        return True
+    # 无小节格式的矛盾回复：只在明确出现正向图示描述时保留。
+    positive = re.search(
+        r"(?:图(?:中|上)|图片(?:中)?|画面(?:中)?)(?:可见|含有|包含|显示|展示|呈现|有)"
+        r"|(?:结构式|化学结构)(?:由|包含|为|呈现|显示)", after)
+    return not (positive and not _no_info_only_section(after))
+
+
+def _no_info_needs_retry(text: str) -> bool:
+    """标记无图却承认存在结构式、且没展开内容时，不缓存并请求复核。"""
+    text = str(text or "")
+    return (NO_INFO_MARKER in text and is_no_info(text)
+            and _admits_chemical_figure(text))
 
 
 def clean_contradictory_no_info(text: str) -> str:
@@ -2295,6 +2371,7 @@ def page_has_image(src: Path, kind: str = "") -> dict[int, bool] | None:
         return None
     try:
         from pptx import Presentation
+        from pptx.oxml.ns import qn
     except ImportError:
         return None
 
@@ -2311,6 +2388,21 @@ def page_has_image(src: Path, kind: str = "") -> dict[int, bool] | None:
             if v == 6:                       # GROUP：递归进去
                 walk(s.shapes, acc)
                 continue
+            if v == 14:                      # PLACEHOLDER 也可能是已经填充的图片
+                element = getattr(s, "_element", None)
+                tag = str(getattr(element, "tag", ""))
+                # python-pptx 对 p:pic 图片占位符仍报告 14，不是 PICTURE(13)。
+                if tag.rsplit("}", 1)[-1] == "pic":
+                    acc["n"] += 1
+                    continue
+                # 另有图片作为形状填充的情况；空文本/图片占位符不能一概送识图。
+                try:
+                    blips = element.xpath(".//a:blip") if element is not None else []
+                    if any(blip.get(qn("r:embed")) or blip.get(qn("r:link")) for blip in blips):
+                        acc["n"] += 1
+                        continue
+                except (AttributeError, TypeError, ValueError):
+                    pass
             # OLE 对象常承载 ChemDraw 化学结构；FREEFORM 常用于绘制键和环。
             if v in (2, 3, 5, 7, 9, 10, 11, 13, 15, 20, 21, 22, 23, 24):
                 acc["n"] += 1

@@ -50,9 +50,7 @@ async function openNote(name){
 
   // 宁可多显示几行机器壳，也不能显示成空白。
 
-  // 渲染方式刻意不动：仍是 `esc()` + CSS `white-space:pre-wrap`（`.note-body`），
-
-  // 换取值就够，别顺手改成 mdToHtml——那会给自己开一个注入面。
+  // Markdown 渲染器禁用原始 HTML，并拒绝危险链接；编辑仍使用原始文本。
 
   modal(`<h2>${esc(n.title || name)}</h2>
 
@@ -64,7 +62,7 @@ async function openNote(name){
 
       (n.tags || []).length ? ' · 标签 ' + esc(n.tags.join(' / ')) : ''}</div>
 
-    <div class="note-body">${esc(d.body ?? d.content ?? '')}</div>
+    <div class="note-body">${mdToHtml(d.body ?? d.content ?? '')}</div>
 
     <div class="row" style="margin-top:14px">
 
@@ -83,6 +81,46 @@ async function openNote(name){
 
 
 // ---------------- 检索 ----------------
+function noteSelectVisible(){
+  document.querySelectorAll('#view .nt-note').forEach(row => {
+    if (row.getClientRects().length) row.querySelector('.nt-delete-cb').checked = true;
+  });
+}
+async function noteDeleteSelected(){
+  const expected_subject = NOTES_PAGE_SUBJECT;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
+  const files = [...document.querySelectorAll('#view .nt-delete-cb:checked')].map(x => x.value);
+  if (!files.length) return toast('请先选择笔记');
+  if (!await confirmBox('删除笔记？', `将永久删除选中的 ${files.length} 篇笔记，无法撤销。`)) return;
+  try {
+    const r = await api('/api/notes/delete', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({files, confirm:true, expected_subject})});
+    if (r.error) return toast(r.error);
+    const errs = r.errors || [];
+    toast(`已删除 ${(r.deleted||[]).length} 篇；失败 ${errs.length} 篇` +
+      (errs.length ? `：${errs[0].file} ${errs[0].error}` : ''));
+    await viewNotes();
+  } catch(e){ toast('删除失败：' + e.message); }
+}
+async function batchDeleteTextbookArtifacts(kind, docId, chapters){
+  const expected_subject = kind === 'preview' ? PV.subject : BOOKKP.subject;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
+  if (!chapters || !chapters.length) return toast('请先勾选章节');
+  const what = kind === 'preview' ? '预习结果' : '教材知识点总结、未完成内容及复习记录';
+  if (!await confirmBox('删除章节产物？', `将删除选中 ${chapters.length} 章的${what}，不可撤销；教材原文和入库块保留，历史备份保留。`)) return;
+  try {
+    const r = await api('/api/textbook-artifacts/delete', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({doc_id:docId, chapters, kind, confirm:true, expected_subject})});
+    if (r.error) return toast(r.error);
+    const errs = r.errors || [];
+    toast(`已删除 ${(r.deleted||[]).length} 个文件；失败 ${errs.length} 个` +
+      (errs.length ? `：${errs[0].file} ${errs[0].error}` : ''));
+    closeModal();
+    if (kind === 'preview') { PV.arts = {}; await pvReload(); }
+    else { await bookLoadChapters(); }
+  } catch(e){ toast('删除失败：' + e.message); }
+}
+
 async function doSearch(q){
   const d = await api('/api/search?q='+encodeURIComponent(q)+'&k=8');
   const hits = d.hits.map(h => `
@@ -90,7 +128,7 @@ async function doSearch(q){
       <div class="cite">${esc(h.cite)}</div>
       <div class="why">${esc((h.why||[]).join(' · '))}
         ${h.confidence==='low'?'<span class="badge warn">低置信</span>':''}</div>
-      <pre>${esc(h.text)}</pre>
+      ${mdToHtml(h.text)}
       <div style="margin-top:8px"><button class="ghost"
         onclick="openChunk(${h.chunk_id})">看上下文</button></div>
     </div>`).join('');
@@ -107,7 +145,7 @@ async function openChunk(id, before=1, after=1){
   const blocks = d.context.map(c => `
     <div class="hit" style="${c.chunk_id===id?'border-color:var(--accent)':''}">
       <div class="cite">${esc(c.cite)}${c.chunk_id===id?' <span class="badge">命中</span>':''}</div>
-      <pre>${esc(c.text)}</pre>
+      ${mdToHtml(c.text)}
     </div>`).join('');
   modal(`<h2>${esc(d.target.title||d.target.path)}</h2>
     <div class="small muted">${esc(d.target.heading_path||'')}</div>
@@ -221,6 +259,7 @@ async function batchConfirm(){
       body: JSON.stringify({paths: rels, workers})});
   } catch(e){ return toast('预估失败：' + e.message); }
   if (!p || p.error) return toast('预估失败：' + ((p && p.error) || '未知错误'));
+  BATCH.autoKp = !!p.auto_kp;
   const money = p.est_cost_cny || 0;
   modal(`
     <h2>确认批量入库</h2>
@@ -231,12 +270,13 @@ async function batchConfirm(){
     <table><tbody>
       <tr><td>已选文件</td><td><b>${p.n_files}</b> 份</td></tr>
       <tr><td>其中待处理</td><td><b>${p.n_todo}</b> 份${
-        p.n_skip ? `（${p.n_skip} 份内容未变，会自动跳过、不花钱）` : ''}${
+        p.n_skip ? `（${p.n_skip} 份内容未变，会跳过入库${p.auto_kp ? '；如缺知识点仍会整理' : ''}）` : ''}${
         p.n_unsupported ? `（${p.n_unsupported} 份格式不支持）` : ''}</td></tr>
       <tr><td>合计页数</td><td>${p.pages_total} 页</td></tr>
       <tr><td>识图调用</td><td><b>${p.est_calls}</b> 次${
         p.est_calls ? '' : '（识图已关，或选的不是 pdf/pptx）'}</td></tr>
-      <tr><td>预估开销</td><td><b>CNY${money.toFixed(2)}</b> 以内</td></tr>
+      <tr><td>入库预估开销</td><td><b>CNY${money.toFixed(2)}</b> 以内${p.auto_kp ? '（不含后续知识点整理）' : ''}</td></tr>
+      ${p.auto_kp ? '<tr><td>后续整理</td><td>自动整理课件知识点，将产生额外模型调用及费用；次数和费用需入库后按实际材料确定，已有完整结果会跳过。</td></tr>' : ''}
       <tr><td>并发数</td><td><b>${p.workers}</b>${
         p.workers > 2 ? '（偏高：识图更容易触发限流）' : ''}</td></tr>
     </tbody></table>
@@ -257,7 +297,7 @@ async function batchStart(){
   try {
     const r = await api('/api/ingest/batch', {method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({paths: rels, workers})});
+      body: JSON.stringify({paths: rels, workers, auto_kp: !!BATCH.autoKp})});
     if (r.error){
       toast(r.error);
       // 后端说"已有一个批次在跑"时会带上它的 batch_id：接上那条，别让人干等
@@ -301,6 +341,7 @@ function batchTaskRows(s){
       mid = `<span class="small muted">排队中（等前面的份跑完）</span>`;
     } else {
       mid = `<span class="small muted">${t.chunks ? t.chunks + ' 块' : ''}${
+        t.kp_reason ? ' · ' + esc(t.kp_reason) : ''}${
         t.reason ? ' · ' + esc(t.reason) : ''}${
         (t.warnings && t.warnings.length) ? ' · ' + esc(t.warnings[0]) : ''}</span>`;
     }

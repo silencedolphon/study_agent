@@ -52,7 +52,7 @@ async function openShareExport(docId, title){
       e.n_pages ? ` · 识图页图 <b>${e.n_pages}</b> 张` : ''}</div>
     <label class="row" style="margin-top:12px;cursor:pointer">
       <input type="checkbox" id="she-orig" ${e.has_original ? '' : 'disabled'}>
-      <span>包含原课件文件${e.has_original
+      <span>包含原资料文件${e.has_original
         ? `（${fmtSize(e.parts.original)}${e.original_name ? '：' + esc(e.original_name) : ''}）`
         : '（本机找不到源文件，不可选）'}</span>
     </label>
@@ -156,6 +156,19 @@ function shareExportResult(r){
 }
 
 // ---------- 导入 ----------
+async function shareImportDirect(zip){
+  if (!zip) return toast('请先填写分享包完整路径');
+  modal(`<h2>正在导入分享包</h2><div class="sub">自动校验并导入当前学科，已有相同资料将跳过。</div><div id="shi-prog"></div>`);
+  shareWatchProgress('#shi-prog');
+  try {
+    const r = await api('/api/share/import', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({zip, subject:'', on_conflict:'skip'})});
+    if (r.error) throw new Error(r.error);
+    shareImportResult(r, zip);
+  } catch(e){ shareImportFail(e.message); }
+  finally { if (SHARE_TIMER){ clearInterval(SHARE_TIMER); SHARE_TIMER = null; } }
+}
+
 async function openShareImport(zipPath){
   const zip = zipPath || '';
   modal(`<h2>导入分享包</h2>
@@ -247,7 +260,7 @@ async function shareInspect(zip){
         <span class="badge">切块 ${m.chunks_n}</span>
         <span class="badge">向量 ${m.embeddings_n}</span>
         <span class="badge">${esc(emb.model || '?')} dim=${esc(emb.dim)}</span>
-        <span class="badge">${inc.original ? '含原课件文件' : '不含原课件文件'}</span>
+        <span class="badge">${inc.original ? '含原资料文件' : '不含原资料文件'}</span>
         <span class="badge">${inc.pages ? ('识图页图 ' + inc.pages + ' 张') : '不含页图'}</span>
       </div>
       <div class="sub" style="margin-top:8px">知识点产物：${know}</div>
@@ -279,12 +292,8 @@ async function shareInspect(zip){
             <input type="radio" name="shi-cf" value="skip" checked> 跳过（不动已有的）</label>
           <label class="row" style="cursor:pointer">
             <input type="radio" name="shi-cf" value="duplicate"> 另存一份（两份并存）</label>
-          <label class="row" style="cursor:pointer">
-            <input type="radio" name="shi-cf" value="overwrite"> 覆盖（先删本库已有的同一份，再导入）</label>
         </div>
-        <div class="sub" style="margin-top:6px">
-          「覆盖」只删本库那些记录的<b>索引</b>，raw\\ 里的原文件仍然保留；而且会先证明
-          这个包完好才动手删。</div>
+        <div class="sub" style="margin-top:6px">为保护已有资料，导入不会覆盖已有内容。</div>
       </div>` : ''}
       ${m.db_note ? `<div class="sub" style="margin-top:8px">${esc(m.db_note)}</div>` : ''}
       <div class="row" style="margin-top:12px">
@@ -325,7 +334,7 @@ async function shareImportStart(zip){
     return;
   }
   if (SHARE_TIMER){ clearInterval(SHARE_TIMER); SHARE_TIMER = null; }
-  shareImportResult(r);
+  shareImportResult(r, zip);
 }
 
 function shareImportFail(msg){
@@ -338,17 +347,19 @@ function shareImportFail(msg){
     </div>`);
 }
 
-function shareImportResult(r){
+function shareImportResult(r, zip){
   if (r.status === 'skipped'){
     modal(`<h2>已跳过</h2>
       <div class="sub">${esc(r.reason || '本库已有同一份课件')}</div>
       <div class="sub" style="margin-top:6px">
         本库已有 doc#${r.doc_id} ${esc(r.title || '')}。</div>
       <div class="sub" style="margin-top:6px">
-        想再留一份副本，就在包信息里选「另存一份」再导入一次。</div>
+        此次没有导入包内的章节、预习或知识点。若需导入这些成果，请查看包信息并选「另存一份」。</div>
       <div class="row" style="margin-top:14px">
+        <button class="act" id="shi-again">查看并另存一份</button>
         <button class="act" onclick="closeModal()">知道了</button>
       </div>`);
+    $('#shi-again').onclick = () => openShareImport(zip || '');
     return;
   }
   const c = r.counts || {};
@@ -376,8 +387,8 @@ function shareImportResult(r){
       ${r.package_sha256 ? `<div class="sub">已记录来源
         <span style="user-select:all">${esc(String(r.package_sha256).slice(0, 16))}…</span>
         （日后可追溯是从哪个包来的）</div>` : ''}
-      ${r.file ? `<div class="sub">原课件已落到 raw\\：${esc(r.file)}</div>`
-               : `<div class="sub">包内不含原课件，入库路径用占位标记（不影响检索与问答）</div>`}
+      ${r.file ? `<div class="sub">原资料已落到 raw\\：${esc(r.file)}</div>`
+               : `<div class="sub">包内不含原文件：已有文字块可检索，查看原文件和按页渲染需要源文件。</div>`}
       ${r.overwritten ? `<div class="sub">已按你的选择覆盖：先删掉本库已有的同一份
         （doc#${(r.overwritten.deleted_doc_ids||[]).join('、doc#')}，共
         ${r.overwritten.chunks_removed} 个切块），再导入这个包。raw\\ 里的原文件没动。</div>` : ''}

@@ -86,6 +86,11 @@ from core import config, db, extract, ingest as ingest_mod  # noqa: E402
 from core import outline as outline_mod  # noqa: E402
 from core import kp_build as kp_build_mod  # noqa: E402
 from core import textbook_kp as textbook_kp_mod  # noqa: E402
+from core import textbook_batch as textbook_batch_mod  # noqa: E402
+from core import deck_chapter as deck_chapter_mod  # noqa: E402
+from core import ingest_knowledge as ingest_knowledge_mod  # noqa: E402
+from core import knowledge_links as knowledge_links_mod  # noqa: E402
+from core import knowledge_links_ai as knowledge_links_ai_mod  # noqa: E402
 from core import kp_batch as kp_batch_mod  # noqa: E402
 from core import pipeline_pool as pool_mod  # noqa: E402
 from core import progress as progress_mod  # noqa: E402
@@ -102,6 +107,8 @@ _lock = threading.Lock()
 # ====================================================================
 
 _INGEST_LOCK = threading.Lock()
+_PREVIEW_JOIN_LOCK = threading.Lock()
+_PREVIEW_JOIN = {}
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 INGEST_TIMEOUT_S = 1800
 TEST_HOOKS: dict = {}
@@ -630,6 +637,9 @@ def api_preview_chapters(conn, doc_id):
     st_map = _preview_status_map(doc_id)
     for ch in (lc.get("chapters") or []):
         no = int(ch.get("no") or 0)
+        final_path, pending_path, _ = textbook_kp_mod._paths(doc_id, no)
+        book_artifact = textbook_kp_mod._read(final_path)
+        book_exists = bool(book_artifact.get("points"))
         item = {
             "no": no,
             "name": str(ch.get("name") or ""),
@@ -640,6 +650,9 @@ def api_preview_chapters(conn, doc_id):
             "n_blocks": int(ch.get("n_blocks") or 0),
             "n_sections": int(ch.get("n_sections") or 0),
             "preview": st_map.get(no) or _preview_empty_status(),
+            "textbook_summary": {"exists": book_exists,
+                                 "pending": pending_path.is_file() or book_artifact.get("status") == "partial",
+                                 "status": str(book_artifact.get("status") or "")},
         }
         chapters.append(item)
     title = str(lc.get("title") or "")
@@ -651,6 +664,7 @@ def api_preview_chapters(conn, doc_id):
         except Exception:  # noqa: BLE001
             title = ""
     return {"ok": True, "doc_id": doc_id, "title": title,
+            "auto_textbook_kp": bool(config.value_int("PREVIEW_AUTO_TEXTBOOK_KP", 1)),
             "enabled": _preview_enabled_state(), "chapters": chapters}
 
 
@@ -674,7 +688,7 @@ def api_preview_estimate(doc_id, chapter):
                 "doc_id": doc_id, "chapter": chapter}
     pages = est.get("pages") or []
     n_pages = int(est.get("n_pages") or len(pages) or 0)
-    return {
+    result = {
         "ok": True, "doc_id": doc_id, "chapter": chapter,
         "chapter_no": int(est.get("chapter_no") or chapter),
         "chapter_name": str(est.get("chapter_name") or ""),
@@ -692,6 +706,34 @@ def api_preview_estimate(doc_id, chapter):
         "exists": bool(est.get("exists") or (est.get("prev") or {}).get("exists")),
         "est_rule": str(est.get("est_rule") or ""),
     }
+    result["auto_textbook_kp"] = bool(config.value_int("PREVIEW_AUTO_TEXTBOOK_KP", 1))
+    if result["auto_textbook_kp"]:
+        try:
+            result["textbook_kp"] = textbook_kp_mod.estimate(doc_id, chapter, force=False)
+        except (ValueError, OSError, sqlite3.Error) as e:
+            return {"ok": False, "error": "教材总结估算失败：" + str(e)}
+    return result
+
+
+def _book_batch_estimate(mode, doc_id, chapter):
+    if mode == "preview":
+        return api_preview_estimate(doc_id, chapter)
+    return textbook_kp_mod.estimate(doc_id, chapter, force=False)
+
+
+def _book_batch_launch(mode, doc_id, chapter, est):
+    if mode == "preview":
+        book = est.get("textbook_kp") or {}
+        return api_preview_start({"doc_id": doc_id, "chapter": chapter,
+            "auto_textbook_kp": est.get("auto_textbook_kp", False),
+            "book_signature": book.get("signature", ""), "book_max_calls": book.get("calls", 0),
+            "book_max_output_tokens": book.get("estimated_output_cap", 0)})
+    return textbook_kp_mod.start(doc_id, chapter, est["signature"], force=False,
+        max_calls=int(est.get("calls") or 0), max_output_tokens=int(est.get("estimated_output_cap") or 0))
+
+
+def _book_batch_busy():
+    return _preview_mod().is_running() or textbook_kp_mod.progress().get("active")
 
 
 def api_preview_start(payload):
@@ -709,18 +751,49 @@ def api_preview_start(payload):
         return {"ok": False, "started": False,
                 "error": "预习后端还没就绪（缺 start_background）",
                 "hint": "后端智能体完成后即可在这里生成；联调由 Lead 统一做。"}
-    try:
+    auto_book = bool(config.value_int("PREVIEW_AUTO_TEXTBOOK_KP", 1))
+    if "auto_textbook_kp" in payload and bool(payload["auto_textbook_kp"]) != auto_book:
+        return {"ok": False, "started": False, "error": "预习设置已变化，请重新估算"}
+    with _PREVIEW_JOIN_LOCK:
+        if auto_book:
+            if not payload.get("book_signature"):
+                return {"ok": False, "started": False, "error": "请先确认教材知识点的预计调用量"}
+            if textbook_kp_mod.progress().get("active"):
+                return {"ok": False, "started": False, "error": "已有教材知识点任务在进行"}
+            try:
+                est = textbook_kp_mod.estimate(doc_id, chapter, force=False)
+                if (str(payload["book_signature"]) != str(est["signature"])
+                        or int(payload.get("book_max_calls", -1)) < int(est["calls"])):
+                    return {"ok": False, "started": False, "error": "教材内容或预计调用量已变化，请重新估算"}
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                return {"ok": False, "started": False, "error": str(exc)}
         try:
-            r = fn(doc_id, chapter, force=True) if force else fn(doc_id, chapter)
-        except TypeError:
-            r = fn(doc_id, chapter)
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "started": False, "error": "启动失败：%s" % e}
+            try:
+                r = fn(doc_id, chapter, force=True) if force else fn(doc_id, chapter)
+            except TypeError:
+                r = fn(doc_id, chapter)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "started": False, "error": "启动失败：%s" % e}
+        if isinstance(r, dict) and r.get("started"):
+            # 新任务真正启动后才替换原联动状态；重复点击失败不能抹掉在跑的教材任务。
+            _PREVIEW_JOIN.clear()
+            if auto_book:
+                try:
+                    book = textbook_kp_mod.start(doc_id, chapter, str(payload["book_signature"]),
+                        force=False, max_calls=int(payload["book_max_calls"]),
+                        max_output_tokens=int(payload.get("book_max_output_tokens") or 0))
+                except Exception as exc:
+                    book = {"ok": False, "error": str(exc)}
+                snap = textbook_kp_mod.progress() if book.get("started") else {}
+                _PREVIEW_JOIN.update(doc_id=doc_id, chapter=chapter,
+                    book_started=bool(book.get("started")), started_at=snap.get("started_at"),
+                    error="" if book.get("started") else str(book.get("error") or "教材总结启动失败"))
     if not isinstance(r, dict):
         return {"ok": False, "started": False, "error": "启动失败：后端返回异常"}
     return {"ok": True, "started": bool(r.get("started")),
             "error": str(r.get("error") or ""),
-            "hint": str(r.get("hint") or "")}
+            "hint": str(r.get("hint") or ""),
+            "companion_error": _PREVIEW_JOIN.get("error", "") if r.get("started") else ""}
 
 
 def api_preview_progress():
@@ -733,8 +806,48 @@ def api_preview_progress():
         p = fn()
     except Exception as e:  # noqa: BLE001
         return {"kind": "preview", "active": False, "status": "", "error": str(e)}
-    return p if isinstance(p, dict) else {"kind": "preview", "active": False,
-                                          "status": ""}
+    if not isinstance(p, dict):
+        return {"kind": "preview", "active": False, "status": ""}
+    with _PREVIEW_JOIN_LOCK:
+        joined = dict(_PREVIEW_JOIN)
+        if not joined or int(p.get("doc_id") or 0) != joined.get("doc_id"):
+            return p
+        if joined.get("final"):
+            return dict(joined["final"])
+        chapter_match = re.search(r"\d+", str(p.get("chapter") or ""))
+        if chapter_match and int(chapter_match.group()) != int(joined["chapter"]):
+            return p
+        book = textbook_kp_mod.progress() if joined.get("book_started") else {}
+        same = (book.get("started_at") == joined.get("started_at")
+                and int(book.get("doc_id") or 0) == joined["doc_id"]
+                and int(book.get("chapter") or 0) == joined["chapter"])
+        book_active = bool(same and book.get("active"))
+        active = bool(p.get("active") or book_active)
+        err = joined.get("error") or ((str(book.get("error") or "") or
+              "教材总结尚未完成，请在教材知识点页继续整理") if same and
+              book.get("status") not in ("running", "done") else "")
+        if joined.get("book_started") and not same:
+            err = "教材总结进度已被其他任务更新，请在教材知识点页查看"
+        preview_err = ((str(p.get("error") or "") or "预习未完成")
+                       if p.get("status") not in ("running", "done", "skipped") else "")
+        err = preview_err or err
+        preview_status = str(p.get("status") or "")
+        book_status = (str(book.get("status") or "") if same else
+                       ("failed" if err else "pending"))
+        result = dict(p, active=active, linked=True,
+            preview_status=preview_status, book_status=book_status,
+            book_error=joined.get("error") or (str(book.get("error") or "") if same else ""),
+            status="running" if active else ("failed" if err else "done"),
+            label="预习与教材知识点整理",
+            percent=int(((100.0 if p.get("status") == "skipped" else float(p.get("percent") or 0))
+                         + float(book.get("percent") or 0)) / 2),
+            note=("预习：" + str(p.get("stage") or p.get("status") or "") +
+                  "；教材总结：" + (str(book.get("status") or "") if same else (err or "准备中"))),
+            error=err)
+        if not active:
+            # 保留最终结果，刷新/切页回来时仍能看到哪条管线失败。
+            _PREVIEW_JOIN["final"] = dict(result)
+        return result
 
 
 def api_preview_doc(doc_id, chapter):
@@ -3009,6 +3122,8 @@ def api_kp_build_start(payload):
     if did <= 0:
         return {'error': '缺少 doc_id'}
 
+    if _INGEST_LOCK.locked() or pool_mod.is_running():
+        return {'error': '入库正在进行，请等它结束后再单独整理'}
     if kp_build_mod.is_running():
         return {'error': '已有一个整理任务在跑；同一时间只允许一个，请等它结束'}
 
@@ -3043,17 +3158,8 @@ def api_kp_build_start(payload):
     # 而 `kp_build.start_background(doc_id: int, **kw)` 也只收 1 个位置参，
     # 旧写法（三个位置参）必然 `TypeError: start_background() takes 1 positional
     # argument but 3 were given` → 看板「开始整理」按钮 500。
-    # task-27：整理成功后顺手补做教材补充（回调异常不影响整理；惰性 import）
-    try:
-        rep = kp_build_mod.start_background(
-            did, max_cost=max_cost, force=force, out_path=str(out),
-            on_done=_teach_after_kp_build,
-        )
-    except TypeError:
-        # 老版 kp_build 不认 on_done：退回原调用，不因增强功能让整理起不来
-        rep = kp_build_mod.start_background(
-            did, max_cost=max_cost, force=force, out_path=str(out),
-        )
+    rep = kp_build_mod.start_background(
+        did, max_cost=max_cost, force=force, out_path=str(out))
     if not rep.get('started'):
         return {'error': rep.get('error') or '启动失败'}
 
@@ -3132,6 +3238,8 @@ def api_kp_build_batch_start(payload):
         return {"error": "请至少勾选一份课件"}
     if len(doc_ids) > 200:
         return {"error": "一次最多 200 份"}
+    if _INGEST_LOCK.locked() or pool_mod.is_running():
+        return {"error": "入库正在进行，请等它结束后再单独整理"}
     if kp_build_mod.is_running():
         return {"error": "已有一个单份整理任务在跑；等它结束再做批量"}
     if kp_batch_mod.is_running():
@@ -3767,13 +3875,15 @@ def api_ingest_batch_plan(payload, conn):
     if not paths:
         return {"error": "没有选择文件"}
     nf = payload.get("no_figures")
-    return pool_mod.plan_files(
+    plan = pool_mod.plan_files(
         paths,
         force=bool(payload.get("force")),
         with_figures=None if nf is None else not bool(nf),
         workers=payload.get("workers"),
         conn=conn,
     )
+    plan["auto_kp"] = bool(config.value_int("INGEST_AUTO_KP", 1))
+    return plan
 
 
 def api_ingest_batch_start(payload):
@@ -3783,6 +3893,11 @@ def api_ingest_batch_start(payload):
     paths = payload.get("paths") or []
     if not paths:
         return {"error": "没有选择文件"}
+    auto_kp = bool(config.value_int("INGEST_AUTO_KP", 1))
+    if "auto_kp" in payload and bool(payload["auto_kp"]) != auto_kp:
+        return {"error": "入库设置已变化，请重新查看并确认"}
+    if auto_kp and (kp_build_mod.is_running() or kp_batch_mod.is_running()):
+        return {"error": "已有课件知识点整理任务，请等它结束再开始联动入库"}
     nf = payload.get("no_figures")
     return pool_mod.submit_batch(
         paths,
@@ -3790,6 +3905,7 @@ def api_ingest_batch_start(payload):
         with_ocr=not bool(payload.get("no_ocr")),
         with_figures=None if nf is None else not bool(nf),
         workers=payload.get("workers"),
+        auto_kp=auto_kp,
     )
 
 
@@ -3831,7 +3947,14 @@ def api_ingest_batch_cancel(payload):
     return pool_mod.cancel(str(payload.get("batch_id") or "") or None)
 
 
-def api_ingest(paths, force, no_ocr, no_figures, db_path=None):
+def api_ingest_progress():
+    """联动整理期间使用知识点管线的阶段和百分比，避免显示成入库已完成。"""
+    if _INGEST_LOCK.locked() and kp_build_mod.is_running():
+        return kp_build_mod.progress_snapshot()
+    return progress_mod.snapshot()
+
+
+def api_ingest(paths, force, no_ocr, no_figures, db_path=None, auto_kp=None):
     """把 raw/ 下的文件入库（走 `ingest_paths`，与命令行同一条管线）。
 
     ⚠ **这是唯一会持续很久的操作，可能远超一次 HTTP 请求的合理时长。**
@@ -3847,6 +3970,9 @@ def api_ingest(paths, force, no_ocr, no_figures, db_path=None):
     Web 层在锁内串行执行，避免并发写库。
     db_path 只供测试注入，正常调用留空即用配置里的库。
     """
+    auto_kp = bool(config.value_int("INGEST_AUTO_KP", 1)) if auto_kp is None else bool(auto_kp)
+    if auto_kp and (kp_build_mod.is_running() or kp_batch_mod.is_running()):
+        return {"error": "已有课件知识点整理任务，请等它结束再开始联动入库"}
     conn = db.connect(db_path)
     db.init_db(conn)
     try:
@@ -3864,8 +3990,28 @@ def api_ingest(paths, force, no_ocr, no_figures, db_path=None):
             verbose=False,
             with_figures=not no_figures,
         )
+        knowledge_results = []
+        if auto_kp:
+            for detail in rep.details:
+                if detail.get("status") not in ("added", "updated", "skipped", "partial"):
+                    continue
+                try:
+                    result = ingest_knowledge_mod.run(conn, detail, db_path=db_path, progress_on=True)
+                except Exception as exc:
+                    result = {"status": "failed", "reason": str(exc)}
+                knowledge_results.append({"doc_id": detail.get("doc_id"), **result})
         notice = stale_notice()
         summary = rep.summary()
+        if knowledge_results:
+            done_kp = sum(x["status"] == "done" for x in knowledge_results)
+            reused_kp = sum(bool(x.get("reused")) for x in knowledge_results)
+            failed_kp = [x for x in knowledge_results if x["status"] == "failed"]
+            summary += "；课件知识点：新整理 %d 份，复用已有结果 %d 份" % (done_kp, reused_kp)
+            if failed_kp:
+                summary += "，%d 份失败：%s" % (len(failed_kp), failed_kp[0].get("reason") or "")
+            warning_kp = sum(bool(x.get("warning")) for x in knowledge_results)
+            if warning_kp:
+                summary += "；%d 份资料有提取或识图提示，请对照原课件" % warning_kp
         if notice:
             summary = f"{notice}\n{summary}"
         return {
@@ -3879,6 +4025,7 @@ def api_ingest(paths, force, no_ocr, no_figures, db_path=None):
             "unsupported": rep.unsupported,
             "chunks": rep.chunks,
             "details": [d for d in rep.details if d["status"] != "skipped"][:50],
+            "knowledge_results": knowledge_results,
         }
     finally:
         conn.close()
@@ -4241,6 +4388,75 @@ def api_delete_doc(conn, doc_id, delete_file, purge_orphans, dry_run):
         "file_removed": removed_file,
         "file_error": file_err,
     }
+
+
+def api_delete_raw_batch(conn, payload):
+    """批量删除当前学科的原文件，并清理由这些文件产生的索引和产物。"""
+    paths = payload.get("paths")
+    if not isinstance(paths, list) or not paths or len(paths) > 200:
+        return {"error": "请选择 1 至 200 个文件"}
+    if not all(isinstance(p, str) and p.strip() for p in paths) or len(set(paths)) != len(paths):
+        return {"error": "文件列表无效或存在重复项"}
+    if not payload.get("dry_run") and payload.get("confirm") is not True:
+        return {"error": "请先确认删除"}
+    if _subject_running():
+        return {"error": "当前有任务运行，请等待结束后再删除"}
+    try:
+        root = Path(config.RAW_DIR).resolve()
+        for rel in paths:
+            candidate = root
+            for component in rel.replace("\\", "/").split("/"):
+                candidate = candidate / component
+                if candidate.is_symlink():
+                    return {"error": "不能批量删除符号链接，请先检查文件路径"}
+        resolved = [(rel, _safe_raw_path(rel)) for rel in paths]
+        if any(not p.is_file() for _, p in resolved):
+            return {"error": "文件已不存在，请刷新列表"}
+        signatures = {rel: [p.stat().st_size, p.stat().st_mtime_ns] for rel, p in resolved}
+    except (ValueError, OSError) as exc:
+        return {"error": str(exc)}
+    if len({str(p).lower() for _, p in resolved}) != len(resolved):
+        return {"error": "文件列表存在重复路径"}
+    if not payload.get("dry_run") and payload.get("signatures") != signatures:
+        return {"error": "文件在确认后发生变化，请刷新并重新选择"}
+    rows = conn.execute("SELECT id, path, abs_path FROM documents").fetchall()
+    grouped = {}
+    for rel, path in resolved:
+        ids = []
+        for row in rows:
+            doc_rel = _norm_doc_path(row["path"] or "")
+            same_rel = doc_rel.casefold() == rel.replace("\\", "/").casefold()
+            try:
+                same_abs = bool(row["abs_path"]) and Path(row["abs_path"]).resolve() == path
+            except (OSError, ValueError):
+                same_abs = False
+            if same_rel or same_abs:
+                ids.append(int(row["id"]))
+        grouped[rel] = ids
+    if payload.get("dry_run"):
+        return {"ok": True, "indexed": sum(bool(v) for v in grouped.values()), "signatures": signatures}
+    errors, deleted = [], 0
+    for rel, path in resolved:
+        try:
+            ids = grouped[rel]
+            if ids:
+                result = api_delete_docs(conn, {"doc_ids": ids, "delete_file": True,
+                                               "purge_orphans": True, "confirm": True})
+                if result.get("error") or result.get("artifact_errors"):
+                    raise OSError(result.get("error") or "索引已删除，但部分整理文件清理失败")
+                file_errors = [x.get("file_error") for x in result.get("deleted", []) if x.get("file_error")]
+                if file_errors:
+                    raise OSError("; ".join(file_errors))
+                if path.exists():
+                    raise OSError("索引已删除，但原文件未删除")
+            else:
+                result = api_delete_raw(rel)
+                if result.get("error"):
+                    raise OSError(result["error"])
+            deleted += 1
+        except (OSError, ValueError) as exc:
+            errors.append({"path": rel, "error": str(exc)})
+    return {"ok": not errors, "deleted": deleted, "errors": errors}
 
 
 def api_delete_raw(rel):
@@ -5975,6 +6191,8 @@ def _subject_running() -> str:
     路径与连接。跑到一半换库，轻则产物落到别的学科，重则两个学科的数据
     互相污染——这比"切不了"严重得多，所以这里宁可拒绝。
     """
+    if textbook_batch_mod.snapshot().get("active"):
+        return "教材章节批量任务"
     try:
         if progress_mod.snapshot().get("active"):
             return "入库"
@@ -5997,7 +6215,13 @@ def _subject_running() -> str:
         if kp_batch_mod.is_running():
             return "批量整理"
     except Exception:
-        return ""
+        pass
+    if _preview_mod().is_running():
+        return "教材预习"
+    if textbook_kp_mod.progress().get("active"):
+        return "教材知识点整理"
+    if knowledge_links_ai_mod.is_running():
+        return "知识联系分析"
 
     return ""
 
@@ -6020,6 +6244,7 @@ def _reset_subject_caches():
       设计目标，切库就该零加载开销。
     """
     n = {"knowledge": 0, "lkp": 0, "slide": 0, "kp_opt": 0}
+    knowledge_links_mod.clear_cache()
     with _KNOWLEDGE_LOCK:
         n["knowledge"] = len(_KNOWLEDGE_CACHE)
         _KNOWLEDGE_CACHE.clear()
@@ -6245,6 +6470,10 @@ def api_share_estimate(payload):
         if not kf.is_file():
             continue
         know.append({'name': kf.name, 'bytes': kf.stat().st_size})
+    chapter_pattern = re.compile(r'^%d-(?:预习总结|教材知识点)-第\d+章\.json$' % doc_id)
+    for kf in (Path(tgt['log_dir']) / 'knowledge').glob('%d-*-第*章.json' % doc_id):
+        if kf.is_file() and chapter_pattern.fullmatch(kf.name):
+            know.append({'name': kf.name, 'bytes': kf.stat().st_size})
 
     pages = _share_page_files(tgt, row)
     src = _share_source_file(tgt, row)
@@ -6476,6 +6705,8 @@ def api_share_import(payload):
     on_conflict = str(payload.get("on_conflict") or "skip")
     if on_conflict not in ("skip", "duplicate", "overwrite"):
         return {"error": "未知的冲突处理方式：%s" % on_conflict}
+    if on_conflict == "overwrite":
+        return {"error": "为保护已有资料，请选择跳过或另存一份"}
     try:
         tgt = _share_target(str(payload.get("subject") or ""))
     except subjects_mod.SubjectError as e:
@@ -6581,6 +6812,16 @@ def api_share_import(payload):
         "source": res.get("source"),
     })
     return out
+
+
+def _deletion_subject_error(payload):
+    """带学科身份的删除请求必须仍处在用户选择内容的学科中。"""
+    if "expected_subject" not in payload:
+        return None  # 兼容已有的脚本接口；新看板一律提交。
+    expected = payload.get("expected_subject")
+    if not isinstance(expected, str) or not expected or expected != subjects_mod.current():
+        return {"error": "学科已切换，请刷新页面并重新选择后删除"}
+    return None
 
 
 def api_subjects():
@@ -6736,12 +6977,31 @@ class Handler(BaseHTTPRequestHandler):
 
             # ---------------- 进度 / 分享 ----------------
             if path == "/api/ingest/progress":
-                return self._json(progress_mod.snapshot())
+                return self._json(api_ingest_progress())
+            if path == "/api/ingest/options":
+                return self._json({"auto_kp": bool(config.value_int("INGEST_AUTO_KP", 1))})
+            if path == "/api/knowledge-links":
+                with _lock:
+                    link_db, link_log = Path(config.DB_PATH), Path(config.LOG_DIR)
+                    busy = _subject_running()
+                try:
+                    result = knowledge_links_mod.find_links(
+                        _int_arg(qs.get("doc_id"), 0), qs.get("kp_id", ""),
+                        db_path=link_db, log_dir=link_log,
+                        readable_versions=_KP_READABLE_VERSIONS, allow_build=not bool(busy))
+                    result["analysis"] = knowledge_links_ai_mod.settings_info()
+                    if link_db != Path(config.DB_PATH) or link_log != Path(config.LOG_DIR):
+                        return self._json_auto({"ok": False, "error": "学科已切换，请重新打开知识点"})
+                    return self._json_auto(result)
+                except (ValueError, OSError, sqlite3.Error) as e:
+                    return self._json_auto({"ok": False, "error": str(e)})
             if path == "/api/kp-build/progress":
                 return self._json(api_kp_build_progress())
             # 预习进度（task-24）：与 kp-build 同构；必须进锁之前，否则生成中读不到进度
             if path == "/api/preview/progress":
                 return self._json(api_preview_progress())
+            if path == "/api/textbook-batch/progress":
+                return self._json(textbook_batch_mod.snapshot())
             if path == "/api/textbook-kp/progress":
                 return self._json(textbook_kp_mod.progress())
             if path == "/api/textbook-kp/due":
@@ -6764,8 +7024,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json_auto({"ok": False, "error": str(e)})
             # ---------------- 复习流程（task-33，锁外：纯文件/进程内） ----------------
             if path == "/api/review/selftest":
-                return self._json_auto(api_review_selftest(
-                    _int_arg(qs.get("doc_id"), 0)))
+                with _lock:
+                    return self._json_auto(api_review_selftest(
+                        _int_arg(qs.get("doc_id"), 0)))
             if path == "/api/review/selftest/status":
                 return self._json_auto(api_review_selftest_status(
                     _int_arg(qs.get("doc_id"), 0)))
@@ -6846,6 +7107,11 @@ class Handler(BaseHTTPRequestHandler):
                     # 章节/产物状态都来自只读 DB + 产物文件，零模型调用。
                     if path == "/api/preview/options":
                         return self._json(api_preview_options(conn))
+                    if path == "/api/deck-chapter":
+                        try:
+                            return self._json(deck_chapter_mod.get(conn, _int_arg(qs.get("doc_id"), 0)))
+                        except (ValueError, OSError, sqlite3.Error) as e:
+                            return self._json({"ok": False, "error": str(e)})
                     if path == "/api/preview/chapters":
                         return self._json(api_preview_chapters(
                             conn, _int_arg(qs.get("doc_id"), 0)))
@@ -7016,22 +7282,92 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/kp-build/batch/cancel":
                 return self._json(api_kp_build_batch_cancel(payload))
             if u.path == "/api/kp-build/clear":
-                return self._json(api_kp_clear(payload))
+                with _lock:
+                    error = _deletion_subject_error(payload)
+                    if error:
+                        return self._json(error)
+                    return self._json(api_kp_clear(payload))
 
             # ---------------- 预习（task-24） ----------------
+            if u.path == "/api/textbook-batch/plan":
+                try:
+                    with _lock:
+                        return self._json_auto(textbook_batch_mod.plan(str(payload.get("mode") or ""),
+                            payload.get("doc_id"), payload.get("chapters") or [], _book_batch_estimate))
+                except (ValueError, TypeError, OSError, sqlite3.Error) as e:
+                    return self._json_auto({"ok": False, "error": str(e)})
+            if u.path == "/api/textbook-batch/start":
+                if payload.get("confirmed") is not True:
+                    return self._json_auto({"ok": False, "error": "请先确认预计调用量和费用"})
+                with _lock:
+                    return self._json_auto(textbook_batch_mod.start(payload.get("token"), _book_batch_estimate,
+                        _book_batch_launch, lambda mode: api_preview_progress() if mode == "preview" else textbook_kp_mod.progress(),
+                        _book_batch_busy))
             # 起后台线程跑 core/preview.py，HTTP 立刻返回；进度走 /api/preview/progress。
             if u.path == "/api/preview/start":
-                return self._json(api_preview_start(payload))
+                with textbook_batch_mod._lock:
+                    if textbook_batch_mod.snapshot().get("active"):
+                        return self._json({"started": False, "error": "教材批量任务进行中"})
+                    return self._json(api_preview_start(payload))
+
+            if u.path == "/api/deck-chapter":
+                with _lock:
+                    conn = _conn(readonly=True)
+                    try:
+                        result = deck_chapter_mod.save(conn, int(payload.get("doc_id") or 0),
+                            int(payload.get("book_id") or 0), int(payload.get("chapter") or 0))
+                        return self._json(result)
+                    except (ValueError, OSError, sqlite3.Error) as e:
+                        return self._json({"ok": False, "error": str(e)})
+                    finally:
+                        conn.close()
+
+            if u.path == "/api/knowledge-links/analyze":
+                if payload.get("confirmed") is not True:
+                    return self._json_auto({"ok": False, "error": "请先确认本次模型调用"})
+                with _lock:
+                    busy = _subject_running()
+                    if busy:
+                        return self._json_auto({"ok": False, "error": "正在进行" + busy + "，请等任务结束后再分析"})
+                    link_db, link_log = Path(config.DB_PATH), Path(config.LOG_DIR)
+                    ctx = knowledge_links_ai_mod.runtime_context.make_context(
+                        "knowledge_links", doc_id=_int_arg(payload.get("doc_id"), 0))
+                    if not knowledge_links_ai_mod.reserve():
+                        return self._json_auto({"ok": False, "error": "已有知识联系分析正在进行"})
+                try:
+                    data = knowledge_links_mod.find_links(
+                        _int_arg(payload.get("doc_id"), 0), str(payload.get("kp_id") or ""),
+                        db_path=link_db, log_dir=link_log,
+                        readable_versions=_KP_READABLE_VERSIONS)
+                    result = knowledge_links_ai_mod.analyze(data, payload, run_context=ctx)
+                    if link_db != Path(config.DB_PATH) or link_log != Path(config.LOG_DIR):
+                        return self._json_auto({"ok": False, "error": "学科已切换；本次分析结果不再展示"})
+                    fresh = knowledge_links_mod.find_links(
+                        _int_arg(payload.get("doc_id"), 0), str(payload.get("kp_id") or ""),
+                        db_path=link_db, log_dir=link_log,
+                        readable_versions=_KP_READABLE_VERSIONS)
+                    knowledge_links_ai_mod._select_pair(fresh, payload)
+                    return self._json_auto(result)
+                except (ValueError, OSError, sqlite3.Error) as e:
+                    return self._json_auto({"ok": False, "error": str(e)})
+                finally:
+                    knowledge_links_ai_mod.release()
 
             if u.path == "/api/textbook-kp/start":
                 if payload.get("confirmed") is not True:
                     return self._json_auto({"ok": False, "error": "请先确认预计调用量"})
                 try:
-                    result = textbook_kp_mod.start(
-                        int(payload.get("doc_id") or 0), int(payload.get("chapter") or 0),
-                        str(payload.get("signature") or ""), force=payload.get("force") is True,
-                        max_calls=int(payload.get("max_calls") or 0),
-                        max_output_tokens=int(payload.get("max_output_tokens") or 0))
+                    with _lock, textbook_batch_mod._lock:
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json_auto(error)
+                        if textbook_batch_mod.snapshot().get("active"):
+                            return self._json_auto({"ok": False, "error": "教材批量任务进行中"})
+                        result = textbook_kp_mod.start(
+                            int(payload.get("doc_id") or 0), int(payload.get("chapter") or 0),
+                            str(payload.get("signature") or ""), force=payload.get("force") is True,
+                            max_calls=int(payload.get("max_calls") or 0),
+                            max_output_tokens=int(payload.get("max_output_tokens") or 0))
                     return self._json_auto(result)
                 except (ValueError, OSError, sqlite3.Error) as e:
                     return self._json_auto({"ok": False, "error": str(e)})
@@ -7050,12 +7386,21 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- 教材补充：补做（task-27） ----------------
             # 同步、零模型、可能数秒；不持全局 _lock（build 内部只读 DB + 原子写产物）。
             if u.path == "/api/textbook-supplement/build":
-                return self._json(api_textbook_supplement_build(payload))
+                return self._json({"ok": False, "error": "该功能已停用，请手动选择课件对应的教材章节"})
+
+            if u.path == "/api/review/selftest/exclusion":
+                with _lock:
+                    try:
+                        return self._json_auto(_review_mod().update_selftest_exclusion(
+                            int(payload.get('doc_id') or 0), str(payload.get('session_id') or ''),
+                            str(payload.get('kp_id') or ''), restore=payload.get('restore') is True))
+                    except (ValueError, TypeError, OSError) as e:
+                        return self._json_auto({'ok': False, 'error': str(e), '_code': 400})
 
             # ---------------- 教材补充：单条 KP 的按需 AI 分析（task-30） ----------------
             # 同步 1 次模型调用（5~20 秒）；不持全局 _lock，避免挡住其它请求。
             if u.path == "/api/textbook-supplement/kp/build":
-                return self._json(api_textbook_supplement_kp_build(payload))
+                return self._json({"ok": False, "error": "该功能已停用，请手动选择课件对应的教材章节"})
 
             # ---------------- 复习流程（task-33）：自测提交（锁外，原子写） ----------------
             if u.path == "/api/review/selftest/submit":
@@ -7086,11 +7431,15 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/ingest":
                 config.activate("ingest")
                 with _INGEST_LOCK:
+                    auto_kp = bool(config.value_int("INGEST_AUTO_KP", 1))
+                    if "auto_kp" in payload and bool(payload["auto_kp"]) != auto_kp:
+                        return self._json({"error": "入库设置已变化，请重新确认"})
                     return self._json(api_ingest(
                         payload.get("paths") or None,
                         bool(payload.get("force")),
                         bool(payload.get("no_ocr")),
                         bool(payload.get("no_figures")),
+                        auto_kp=auto_kp,
                     ))
 
             # 教材入库专线（卡 C-0089；C-0122 从重建中恢复）：与上面**并列**、
@@ -7159,9 +7508,19 @@ class Handler(BaseHTTPRequestHandler):
                             purge_orphans=bool(payload.get("purge_orphans", True)),
                             dry_run=bool(payload.get("dry_run"))))
                     if u.path == "/api/docs/delete":
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json(error)
                         return self._json_auto(api_delete_docs(conn, payload))
                     if u.path == "/api/raw/delete":
                         return self._json(api_delete_raw(payload.get("rel", "")))
+                    if u.path == "/api/raw/delete-batch":
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json(error)
+                        if not payload.get("expected_subject"):
+                            return self._json({"error": "缺少学科信息，请刷新页面"})
+                        return self._json(api_delete_raw_batch(conn, payload))
                     # 重命名三条（卡 C-0085）：要动磁盘 + 改库 + 搬页图目录，
                     # 同样在 `_lock` 里串行；互斥闸在各函数内部（撞长任务给 409）
                     if u.path == "/api/rename/raw":
@@ -7188,10 +7547,36 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json({"ok": True, "kp_id": int(kp_id)})
                     # 删除错题：ids / only_resolved / all 三选一（见 delete_mistakes）
                     if u.path == "/api/mistake/delete":
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json(error)
                         return self._json(delete_mistakes(
                             conn, payload.get("ids") or [],
                             bool(payload.get("only_resolved")),
                             bool(payload.get("all"))))
+                    if u.path == "/api/knowledge-points/delete":
+                        from core import batch_delete
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json(error)
+                        if _subject_running():
+                            return self._json({"error": "有任务正在运行，请等待完成后再删除"})
+                        return self._json(batch_delete.knowledge_points(conn, payload))
+                    if u.path == "/api/chapter-questions":
+                        from core import chapter_question_delete
+                        if payload.get('delete') and _subject_running():
+                            return self._json({'error': '有任务正在运行，请等待完成后再删除'})
+                        return self._json(chapter_question_delete.handle(conn, payload))
+                    if u.path in ("/api/notes/delete", "/api/textbook-artifacts/delete"):
+                        from core import batch_delete
+                        error = _deletion_subject_error(payload)
+                        if error:
+                            return self._json(error)
+                        if not payload.get("dry_run") and _subject_running():
+                            return self._json({"error": "有任务正在运行，请等待完成后再删除"})
+                        result = (batch_delete.notes(payload) if u.path == "/api/notes/delete"
+                                  else batch_delete.chapters(conn, payload))
+                        return self._json(result)
                     # 记入笔记（知识点窗口 / 课件答疑）
                     if u.path == "/api/note/kp":
                         return self._json_auto(api_note_save_kp(conn, payload))

@@ -256,7 +256,7 @@ class TestPartialKeepsOldFinal(_Base):
                              for p in final.parent.glob(final.name + ".bak-*")))
 
     def test_estimate_and_max_calls_consistent_for_partial(self):
-        """估算说还需 N 次时，build 的 max_calls=N-1 必须拒绝且只打了 N-1 次。"""
+        """确认调用数不足时，在调用模型之前整体拒绝。"""
         final, pending, _ = self._paths()
         plan = self._plan(chars=80)
         n = len(plan["segments"])
@@ -265,7 +265,7 @@ class TestPartialKeepsOldFinal(_Base):
             with self.assertRaises(ValueError):
                 textbook_kp._build(plan, force=True, db_path=self.dbpath,
                                    log_dir=self.logs, max_calls=n - 1)
-        self.assertEqual(len(calls), n - 1)
+        self.assertEqual(len(calls), 0)
         est = self._estimate()
         self.assertEqual(est["calls"], n, "估算与实际需要调用次数一致")
 

@@ -231,6 +231,8 @@ function setIngestPaneHtml(p){
       + esc(setModeBannerText(onChunk)) + '</div>'
       + '</div>';
   }
+  html += setCard('入库后自动整理', take(['INGEST_AUTO_KP']),
+    {note: '开启后，课件入库结束会继续整理知识点，并产生额外模型调用和费用。'});
   html += setCard('识图（图片理解）',
     take(['DEEPSEEK_VISION_MODEL', 'FIGURE_DESC', 'FIGURE_THINKING',
           'FIGURE_REASONING_EFFORT', 'FIGURE_RENDER_DPI', 'FIGURE_MAX_CALLS_PER_DOC']),
@@ -323,6 +325,9 @@ function setNavHtml(pipes){
   if (others.length){
     h += '<div class="sn-group">其它</div>' + others.map(btn).join('');
   }
+  h += '<div class="sn-group">界面</div><button data-p="display" class="' +
+    (SET_TAB === 'display' ? 'on' : '') + '" onclick="setTab(\'display\')">' +
+    '<span class="sn-ic">◫</span><span class="sn-name">显示设置</span></button>';
   return h;
 }
 
@@ -351,10 +356,10 @@ function setRender(){
     + '<button class="set-x" onclick="closeSettings()" title="关闭（Esc）">✕</button></div>'
     + '<div class="set-body">'
     + '<div class="set-nav">' + setNavHtml(pipes) + '</div>'
-    + '<div class="set-pane" id="setpane">' + setPaneHtml(cur)
+    + '<div class="set-pane" id="setpane">' + (SET_TAB === 'display' ? kpDisplayPaneHtml() : setPaneHtml(cur))
     + '<div class="set-nomatch" id="set-nomatch" style="display:none">没有匹配项</div></div>'
     + '</div>'
-    + '<div class="set-foot">'
+    + (SET_TAB === 'display' ? '<div class="set-foot"><span class="small muted">窗口大小会自动保存在当前浏览器。</span></div>' : '<div class="set-foot">'
     + '<button class="act" id="set-save" onclick="setSave()">保存</button>'
     + '<details class="settings-foot-more"><summary>其他操作</summary><div>'
     + '<button class="ghost" onclick="setResetPane()">恢复本页默认</button>'
@@ -363,7 +368,7 @@ function setRender(){
     + '<span class="save-n zero" id="set-unsaved">无未保存改动</span>'
     + '<div class="sstat ' + SET_MSG.cls + '" id="setstat">'
     + esc(SET_MSG.text || '') + '</div>'
-    + '</div>';
+    + '</div>');
   setBind();
 }
 
@@ -379,6 +384,7 @@ function setBind(){
     pane.addEventListener('change', setCounter);
   }
   setIngestBind();
+  if (SET_TAB === 'display') kpDisplayBind();
   setCounter();
 }
 

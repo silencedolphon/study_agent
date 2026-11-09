@@ -702,17 +702,22 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
 
         # ---- 知识点产物 ----
         know_items: list[dict] = []
-        for suffix in KNOW_SUFFIXES:
-            kf = log_dir / "knowledge" / ("%d%s" % (int(doc_id), suffix))
+        knowledge_dir = log_dir / "knowledge"
+        fixed = [knowledge_dir / ("%d%s" % (int(doc_id), suffix)) for suffix in KNOW_SUFFIXES]
+        chapter_pattern = re.compile(r"^%d-(?:预习总结|教材知识点)-第\d+章\.json$" % int(doc_id))
+        chapter_files = sorted(p for p in knowledge_dir.glob("%d-*-第*章.json" % int(doc_id))
+                               if chapter_pattern.fullmatch(p.name))
+        for kf in fixed + chapter_files:
             if not kf.is_file():
                 continue
+            suffix = kf.name[len(str(int(doc_id))):]
             item = {"name": kf.name, "entry": "%s/%s" % (KNOW_DIR, kf.name),
                     "source_doc_id": int(doc_id), "suffix": suffix,
                     "bytes": kf.stat().st_size, "sha256": sha256_file(kf)}
             try:
                 obj = json.loads(kf.read_text(encoding="utf-8"))
                 meta = obj.get("meta") if isinstance(obj, dict) else None
-                meta_doc_id = (meta or {}).get("doc_id") if isinstance(meta, dict) else None
+                meta_doc_id = (meta or {}).get("doc_id") if isinstance(meta, dict) else obj.get("doc_id")
                 item["meta_doc_id"] = int(meta_doc_id) if meta_doc_id is not None else None
                 if item["meta_doc_id"] != int(doc_id):
                     warnings.append(
@@ -983,6 +988,7 @@ def _check_knowledge(zf: zipfile.ZipFile, manifest: dict,
     """校验知识点产物：文件名里的 doc_id / 文件内 meta.doc_id / manifest.source.doc_id 三者一致。"""
     src_doc_id = int(manifest["source"]["doc_id"])
     out: list[dict] = []
+    seen_names = set()
     for item in (manifest.get("knowledge") or []):
         if not isinstance(item, dict) or not item.get("entry"):
             raise ShareError("manifest.knowledge 里有条目缺 entry")
@@ -990,6 +996,9 @@ def _check_knowledge(zf: zipfile.ZipFile, manifest: dict,
         if entry not in members:
             raise ShareError("manifest 声明了知识点产物 %s，但包里没有这个文件" % entry)
         name = Path(entry).name
+        if name in seen_names:
+            raise ShareError("知识点产物重复：%s" % name)
+        seen_names.add(name)
         m = re.match(r"^(\d+)(-.+\.json)$", name)
         if not m:
             raise ShareError("知识点产物文件名不符合 <doc_id>-<名称>.json：%s" % name)
@@ -999,9 +1008,14 @@ def _check_knowledge(zf: zipfile.ZipFile, manifest: dict,
                              "拒绝导入（导入方无法判断它属于哪份课件）"
                              % (name, file_doc_id, src_doc_id))
         obj = json.loads(_Entry(zf, entry, _manifest_sha(manifest, entry)).text())
-        if not isinstance(obj, dict) or not isinstance(obj.get("meta"), dict):
+        if not isinstance(obj, dict):
+            raise ShareError("知识点产物 %s 不是 JSON 对象" % name)
+        textbook_chapter = bool(re.fullmatch(r"-教材知识点-第\d+章\.json", m.group(2)))
+        if not isinstance(obj.get("meta"), dict) and not textbook_chapter:
             raise ShareError("知识点产物 %s 缺 meta 对象" % name)
-        meta_doc_id = obj["meta"].get("doc_id")
+        meta_doc_id = obj["meta"].get("doc_id") if isinstance(obj.get("meta"), dict) else obj.get("doc_id")
+        if textbook_chapter and obj.get("doc_id") != src_doc_id:
+            raise ShareError("教材总结 %s 的 doc_id 与包不一致" % name)
         if meta_doc_id != src_doc_id:
             raise ShareError("知识点产物 %s 内 meta.doc_id=%r 与文件名/doc_id（%d）不一致，"
                              "拒绝导入（只改一处会让看板关联不上）"
@@ -1014,7 +1028,7 @@ def _check_knowledge(zf: zipfile.ZipFile, manifest: dict,
 
 # ---------------------------------------------------------------- 知识点产物重写
 
-_CHUNK_KEYS = ("chunk_id", "chunk_ids", "material_block_ids", "block_ids")
+_CHUNK_KEYS = ("chunk_id", "chunk_ids", "material_block_ids", "block_ids", "source_ids")
 
 
 def _remap_ids(obj, id_map: dict[int, int], stats: dict):
@@ -1392,7 +1406,8 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                 if isinstance(obj.get("src_id"), int):
                     nid = src_to_new.get(int(obj["src_id"]))
                 if nid is None:
-                    cands = [c for c in ord_to_new.get(int(obj.get("ord") or -1), [])
+                    ord_value = obj.get("ord")
+                    cands = [c for c in ord_to_new.get(int(ord_value) if ord_value is not None else -1, [])
                              if c not in used]
                     if not cands:
                         raise ShareError("向量找不到对应的块（src_id=%r ord=%r）："
@@ -1407,8 +1422,7 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                     _ipc(progress, "embeddings", m, n_emb["total"])
             _ipc(progress, "embeddings", m, m)
             if m != n:
-                raise ShareError("写入的向量数 %d 与块数 %d 不符：包内 chunks/embeddings 不匹配"
-                                 % (m, n))
+                warnings.append("导入了 %d 块和 %d 条向量；缺少向量的块仅支持关键词检索" % (n, m))
 
             if FIGURES in members:
                 for obj in _Entry(zf, FIGURES, _manifest_sha(manifest, FIGURES)).lines():
@@ -1434,6 +1448,8 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                 remap_stats["remapped"] += st["remapped"]
                 remap_stats["dropped"] += st["dropped"]
                 dest = kdir / ("%d%s" % (new_doc_id, k["suffix"]))
+                if dest.exists():
+                    raise ShareError("目标产物已存在，拒绝覆盖：%s" % dest)
                 dest.write_text(json.dumps(obj, ensure_ascii=False, indent=2),
                                 encoding="utf-8")
                 written.append(dest)

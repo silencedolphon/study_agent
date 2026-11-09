@@ -486,13 +486,10 @@ _FIELDS: list[dict] = [
      "type": "int", "default": 0,
      "hint": "名词解释功能（core/kp_build.py::build_terms）的输出上限。"
              "★ 0 = 无上限；与知识点总结共用本管线模型。"},
-    {"pipeline": "kp", "key": "TEACH_MAX_TOKENS",
-     "label": "教材补充答疑上限（token；0 = 无上限）",
-     "type": "int", "default": 0,
-     "hint": "教材补充里「按需 AI 分析」那条路（core/teach.py，textbook_teach 管线）"
-             "的输出上限。★ 0 = 无上限。"},
-
     # ---------------- 管线 3：入库 ----------------
+    {"pipeline": "ingest", "key": "INGEST_AUTO_KP", "label": "入库后自动整理课件知识点",
+     "type": "bool", "default": 1,
+     "hint": "课件入库完成后继续整理知识点；会产生额外模型调用和费用。可随时关闭。"},
     {"pipeline": "ingest", "key": "INGEST_MODEL", "label": "结构分析模型", "type": "str",
      "default": "deepseek-flash",
      "hint": "入库时「让模型看完整份课件、画出结构、给每页定路径」这一步用的模型。"},
@@ -594,6 +591,9 @@ _FIELDS: list[dict] = [
      "hint": "★ 2026-10-20 起**默认开启**（用户要求可用；仍可在此关闭）。"
              "关着时预习的启动入口会直接拒绝并告诉你打开这一项；"
              "开启后才会真的调模型花钱（每章 1 次调用）。"},
+    {"pipeline": "preview", "key": "PREVIEW_AUTO_TEXTBOOK_KP", "label": "预习时同时整理教材知识点",
+     "type": "bool", "default": 1,
+     "hint": "生成预习时并行整理本章教材知识点；确认框会列出额外调用量。可随时关闭。"},
     {"pipeline": "preview", "key": "PREVIEW_MODEL", "label": "模型名", "type": "str",
      "default": "deepseek-flash",
      "hint": "落位 core/preview.py::model_name()。人拍板要求 deepseek-flash；"
@@ -671,6 +671,7 @@ _PIPE_KEY_KEY = {"chat": "CHAT_API_KEY", "kp": "KP_BUILD_API_KEY",
 TOKEN_CAP_KEYS: dict[str, str] = {
     "chat": "CHAT_MAX_TOKENS",
     "courseware_kp": "KP_BUILD_MAX_TOKENS",
+    "knowledge_links": "KP_BUILD_MAX_TOKENS",
     "kp": "KP_BUILD_MAX_TOKENS",
     "terms": "TERMS_MAX_TOKENS",
     "ingest_vision": "FIGURE_MAX_TOKENS",
@@ -680,7 +681,6 @@ TOKEN_CAP_KEYS: dict[str, str] = {
     "deck": "DECK_CHAT_MAX_TOKENS",
     "preview": "PREVIEW_MAX_TOKENS",
     "textbook_kp": "TEXTBOOK_KP_MAX_TOKENS",
-    "textbook_teach": "TEACH_MAX_TOKENS",
 }
 
 

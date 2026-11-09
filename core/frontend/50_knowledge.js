@@ -6,8 +6,13 @@
 // `bindKpForm()` 两个函数**保留**（全仓库没有别的前端调用方，但接口是公开契约，
 // 删了会砸到脚本/将来的入口。）
 // 同时在「课件思维导图」栏**上面**加一栏「名词解释」（`termsCard()`）。
+let KP_PAGE_SUBJECT = '';
 async function viewKps(){
+  if (!SUBJ.loaded) await subjLoad();
+  const pageSubject = SUBJ.loaded ? SUBJ.cur : '';
   const {knowledge_points: kps} = await api('/api/kps');
+  if (!pageSubject || SUBJ.cur !== pageSubject) return;
+  KP_PAGE_SUBJECT = pageSubject;
   if (!kps.length){
     $('#view').innerHTML = `${kpBuildCard()}
       ${termsCard()}
@@ -16,9 +21,9 @@ async function viewKps(){
   }
   const rows = kps.map(k => {
     const cls = k.mastery>=.75?'ok':(k.mastery>=.4?'warn':'bad');
-    return `<tr>
+    return `<tr><td><input type="checkbox" class="kp-del-ck" value="${k.id}" aria-label="选择 ${esc(k.name)}"></td>
       <td><a href="#" onclick="openKp(${k.id});return false">${esc(k.name)}</a>
-        <div class="small muted kpsum">${esc(k.summary||'')}</div>
+        <div class="small muted kpsum">${mdToHtml(k.summary||'')}</div>
         <div class="small muted">${esc(k.subject||'')}</div></td>
       <td style="width:140px"><div class="bar"><i style="width:${pct(k.mastery)}%"></i></div>
         <span class="small muted">${pct(k.mastery)}%</span></td>
@@ -27,7 +32,9 @@ async function viewKps(){
   $('#view').innerHTML = `
     <div class="card">
       <h2>知识点 · ${kps.length} 个</h2>
-      <table><thead><tr><th>知识点</th><th>掌握度</th><th>下次复习</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="row"><label><input type="checkbox" onchange="document.querySelectorAll('.kp-del-ck').forEach(c=>c.checked=this.checked)"> 全选</label>
+      <button class="ghost" onclick="deleteSelectedKnowledge()">删除所选知识点</button></div>
+      <table><thead><tr><th>选择</th><th>知识点</th><th>掌握度</th><th>下次复习</th></tr></thead><tbody>${rows}</tbody></table>
     </div>
     ${kpBuildCard()}
     ${termsCard()}
@@ -35,6 +42,19 @@ async function viewKps(){
   bindKpBuild();
   mountTerms();
   mountMindmap();
+}
+
+async function deleteSelectedKnowledge(){
+  const expected_subject = KP_PAGE_SUBJECT;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
+  const ids = Array.from(document.querySelectorAll('.kp-del-ck:checked')).map(c=>Number(c.value));
+  if (!ids.length) return toast('请先勾选知识点');
+  if (!await confirmBox('删除所选知识点？', `将删除 ${ids.length} 条知识点及其复习记录和依赖关联，错题保留但不再关联这些知识点。此操作不可撤销。`)) return;
+  try {
+    const result = await api('/api/knowledge-points/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids,confirm:true,expected_subject})});
+    toast(`已删除 ${result.deleted} 条知识点${result.missing ? `，${result.missing} 条已不存在` : ''}`);
+    await viewKps();
+  } catch(e) { toast('删除失败：' + e.message); }
 }
 
 // ---------------- 批量整理知识点（卡 C-0038：多选课件 + 多管线并发） ----------------
@@ -404,6 +424,8 @@ async function openKpBuild(){
 // 只删 logs/knowledge/<doc_id>-末级知识点总结.json 与它的 .bak-*：
 // logs/outline/ 与数据库任何一张表都不动（后端 `api_kp_clear` 里逐条校验）。
 async function kpbClear(){
+  const expected_subject = KP_PAGE_SUBJECT;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
   const sel = kpbSelDocs();
   if (!sel.length){ toast('请先勾选至少一份课件'); return; }
   const ids = sel.map(x => x.doc_id);
@@ -420,7 +442,7 @@ async function kpbClear(){
   try {
     const r = await api('/api/kp-build/clear', {method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({doc_ids: ids, confirm: true})});
+      body: JSON.stringify({doc_ids: ids, confirm: true, expected_subject})});
     const nf = (r.not_found || []).length;
     const errs = (r.errors || []).length;
     toast(`已清除 ${r.n_deleted} 个文件（${(r.deleted||[]).length} 份课件）` +
@@ -458,7 +480,7 @@ async function kpbPurge(){
   }
   if (typeof closeModal === 'function') closeModal();
   // 与资料页同一套：先 dry_run 预览 → 弹窗选原文件留不留 → 再 confirm=true 真删
-  return openDocDelByIds(ids);
+  return openDocDelByIds(ids, KP_PAGE_SUBJECT);
 }
 
 async function kpbSubmit(docIds, opt){
@@ -591,7 +613,7 @@ function termsBodyHtml(d){
           : `<span class="small muted" style="margin-left:10px">（这份材料没给英文）</span>`}
       </div>
       <div class="termdef" style="margin-top:6px;line-height:1.65">${
-        esc(t.def || '（这条没有解释）')}</div>
+        mdToHtml(t.def || '（这条没有解释）')}</div>
       <div class="small muted" style="margin-top:6px">
         首次出现 p.${t.first_page || '?'}${
         t.first_kp_name ? ' · 知识点 ' + esc(t.first_kp_name) : ''}${
@@ -942,13 +964,13 @@ async function loadMindmapTree(){
   mmTeachBackfill(MINDMAP.docId);
 }
 
-function mmNodes(list, pkey){
+function mmNodes(list, pkey, context = MINDMAP){
   if (!list || !list.length) return '';
   return '<ul>' + list.map((n, i) => {
     // key 用"下标路径"：同一份数据每次渲染都一样，才能记住展开状态；
     // 点名字时也靠它回查节点对象（见 MINDMAP.nodes）
     const key = pkey ? pkey + '.' + i : String(i);
-    MINDMAP.nodes[key] = n;
+    context.nodes[key] = n;
     // 视觉上区分：有总结（◆ 实线）/ 末级待生成（◇ 黄虚线）/
     // 父节点页与其余节点（灰）。都用纯 CSS，不引图标库。
     const cls = n.lkp_ready ? ' has-kp'
@@ -963,7 +985,7 @@ function mmNodes(list, pkey){
       : (n.lkp_role === 'leaf'
           ? '末级节点：该建知识点，但总结待生成'
           : (n.lkp_role === 'parent_page'
-              ? (MINDMAP.downshift
+              ? (context.downshift
                   ? '父节点页：本页不单独成条，内容已下放给紧随其后的末级页知识点'
                   : '该页路径还有下级节点，按当前口径不建知识点')
               : '非末级节点：本身不含知识点，展开看下面的末级节点'));
@@ -973,8 +995,8 @@ function mmNodes(list, pkey){
       n.page ? ' · p.' + n.page : ''}</span>`;
     if (n.children && n.children.length){
       return `<li><details class="mmd" data-k="${key}"${
-        MINDMAP.open[key] ? ' open' : ''}><summary>${name}${meta}</summary>${
-        mmNodes(n.children, key)}</details></li>`;
+        context.open[key] ? ' open' : ''}><summary>${name}${meta}</summary>${
+        mmNodes(n.children, key, context)}</details></li>`;
     }
     return `<li><div class="mmleaf">${name}${meta}</div></li>`;
   }).join('') + '</ul>';
@@ -1156,7 +1178,7 @@ function renderDeckChat(){
   th.innerHTML = DKCHAT.msgs.length ? DKCHAT.msgs.map((m, i) => {
     if (m.role === 'user')
       return `<div class="msg user"><div class="who">我</div><div class="body">
-        <div class="bubble">${esc(m.content).replace(/\n/g,'<br>')}</div></div></div>`;
+        <div class="bubble">${mdToHtml(m.content)}</div></div></div>`;
     return `<div class="msg ai"><div class="who">AI</div><div class="body">
       <div class="bubble">${mdToHtml(m.content)}</div>
       ${m.ctx ? `<div class="small muted" style="margin-top:6px"

@@ -15,7 +15,7 @@ from typing import Any, Iterator, Protocol
 
 PIPELINES = frozenset({
     "chat", "deck_chat", "ingest_vision", "ingest_outline", "structures",
-    "courseware_kp", "terms", "preview", "textbook_kp", "textbook_teach",
+    "courseware_kp", "terms", "preview", "textbook_kp", "textbook_teach", "knowledge_links",
 })
 
 

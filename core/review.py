@@ -52,7 +52,7 @@ SESSION_TTL = 1800            # 自测会话 30 分钟（进程内存，过期�
 
 # 进程内会话：session_id -> {doc_id,title,created,items:[{kp_id,name,segments,answers}],...}
 _SELFTEST: dict[str, dict] = {}
-_SESS_LOCK = threading.Lock()
+_SESS_LOCK = threading.RLock()
 
 
 class ReviewError(Exception):
@@ -327,6 +327,51 @@ def _prune_sessions() -> None:
                 if now - float(v.get("created") or 0) > SESSION_TTL]:
         _SELFTEST.pop(sid, None)
 
+def _scope():
+    return (str(Path(config.DB_PATH).resolve()), str(Path(config.LOG_DIR).resolve()))
+
+def _exclusions_file(doc_id):
+    return review_dir() / ('%d-自测排除.json' % int(doc_id))
+
+def _exclusions(doc_id, path=None):
+    value = _load_json(path or _exclusions_file(doc_id)).get('ids') or []
+    return {str(x) for x in value} if isinstance(value, list) else set()
+
+def update_selftest_exclusion(doc_id, session_id, kp_id='', restore=False):
+    """排除仅影响本课件未来自测；复习、导图和原产物保持不变。"""
+    with _SESS_LOCK:
+        _prune_sessions()
+        sess = _SELFTEST.get(str(session_id))
+        if not sess or sess['doc_id'] != int(doc_id) or sess.get('scope') != _scope():
+            return {'ok': False, 'error': '自测会话已失效或学科已切换，请重新开始', '_code': 400}
+        exclusion_path = Path(sess['exclusion_path'])
+        removed = _exclusions(doc_id, exclusion_path)
+        if restore:
+            removed.clear()
+        else:
+            kp_id = str(kp_id)
+            if kp_id not in sess['kp_ids']:
+                return {'ok': False, 'error': '知识点不在本次自测中', '_code': 400}
+            removed.add(kp_id)
+        _atomic_write_json({'ids': sorted(removed)}, exclusion_path)
+        eligible = [it for it in sess['pool'] if it['kp_id'] not in removed]
+        current = [kid for kid in sess['kp_ids'] if kid not in removed]
+        target = min((max(1, math.ceil(len(eligible) / 2)) if eligible else 0)
+                     if restore else sess['target'], len(eligible))
+        for item in eligible:
+            if len(current) >= target:
+                break
+            if item['kp_id'] not in current:
+                current.append(item['kp_id'])
+        sess['kp_ids'] = current
+        if restore:
+            sess['target'] = target
+        sess['n_total'] = len(eligible)
+        sess['n_sample'] = len(current)
+        lookup = {it['kp_id']: it for it in eligible}
+        return {'ok': True, 'items': [lookup[k] for k in current],
+                'n_total': len(eligible), 'n_sample': len(current), 'n_excluded': len(removed)}
+
 
 # ---------------------------------------------------------------- ① 自测
 def start_selftest(doc_id: int, *, db_path=None, rng=None) -> dict:
@@ -344,9 +389,10 @@ def start_selftest(doc_id: int, *, db_path=None, rng=None) -> dict:
         return {"ok": False, "error": "这份课件还没有末级知识点产物（先整理知识点）",
                 "_code": 400}
     rng = rng or random.Random()
-    n_total = len(kps)
-    n_sample = max(1, min(n_total, int(math.ceil(n_total / 2.0))))
-    idx = list(range(n_total))
+    excluded = _exclusions(doc_id)
+    n_total = sum(str(kp.get('id') or '') not in excluded for kp in kps)
+    n_sample = max(1, min(n_total, int(math.ceil(n_total / 2.0)))) if n_total else 0
+    idx = list(range(len(kps)))
     rng.shuffle(idx)
     prior = _read_selftest(doc_id)
     prior_kps = prior.get("kps") if isinstance(prior.get("kps"), dict) else {}
@@ -355,11 +401,13 @@ def start_selftest(doc_id: int, *, db_path=None, rng=None) -> dict:
         v = v if isinstance(v, dict) else {}
         prior_mastered[str(kid)] = bool(v.get("mastered", v.get("familiar", False)))
     items = []
-    for i in idx[:n_sample]:
+    for i in idx:
         item = _make_item(kps[i])
         item["unfamiliar"] = (str(item["kp_id"]) in prior_mastered
                               and not prior_mastered[str(item["kp_id"])])
         items.append(item)
+    pool = items
+    items = [it for it in pool if it['kp_id'] not in excluded][:n_sample]
     sid = secrets.token_hex(8)
     title = _doc_title_for(doc_id, db_path)
     with _SESS_LOCK:
@@ -368,13 +416,16 @@ def start_selftest(doc_id: int, *, db_path=None, rng=None) -> dict:
                           "created": time.time(), "n_total": n_total,
                           "n_sample": n_sample,
                           "kp_ids": [it["kp_id"] for it in items],
+                          "scope": _scope(), "pool": pool, "target": n_sample,
+                          "output_path": str(selftest_out_file(doc_id).resolve()),
+                          "exclusion_path": str(_exclusions_file(doc_id).resolve()),
                           "artifact": str(path)}
     return {"ok": True, "doc_id": doc_id, "title": title,
             "session_id": sid, "n_total": n_total, "n_sample": n_sample,
             "ttl_seconds": SESSION_TTL,
             "kps": [{"kp_id": it["kp_id"], "name": it["name"],
                      "unfamiliar": bool(it.get("unfamiliar"))} for it in items],
-            "items": items,
+            "items": items, "n_excluded": len(excluded),
             "note": "逐个看结构路径与总结，点「已掌握/未掌握」；提交后熟悉度=已掌握/抽样"}
 
 
@@ -397,6 +448,12 @@ def _as_mastered(v) -> bool:
 
 
 def submit_selftest(doc_id: int, session_id: str, results) -> dict:
+    # 保持会话校验、结果落盘和移除会话的原子性；不阻塞全局看板锁。
+    with _SESS_LOCK:
+        return _submit_selftest_locked(doc_id, session_id, results)
+
+
+def _submit_selftest_locked(doc_id: int, session_id: str, results) -> dict:
     """提交「已掌握/未掌握」并持久化（v3）：`results={kp_id: bool}`。
 
     - `mastered=True` 表示已掌握；**抽样里没提交的 KP 按未掌握算**（不假装会）。
@@ -414,10 +471,17 @@ def submit_selftest(doc_id: int, session_id: str, results) -> dict:
                     "_code": 400}
         if int(sess.get("doc_id") or 0) != doc_id:
             return {"ok": False, "error": "自测会话与课件不匹配", "_code": 400}
+        if sess.get('scope') != _scope():
+            return {"ok": False, "error": "学科已切换，请重新开始自测", "_code": 400}
+        if not sess.get('kp_ids'):
+            return {"ok": False, "error": "没有可提交的知识点，请先恢复排除项", "_code": 400}
+        if set(sess['kp_ids']) & _exclusions(doc_id, Path(sess['exclusion_path'])):
+            return {"ok": False, "error": "其他窗口已调整排除项，请重新开始自测", "_code": 400}
         kp_ids = list(sess.get("kp_ids") or [])
         title = sess.get("title") or ""
         n_total = int(sess.get("n_total") or 0)
         n_sample = int(sess.get("n_sample") or 0)
+        output_path = Path(sess['output_path'])
     if isinstance(results, dict):
         picked = {str(k): _as_mastered(v) for k, v in results.items()}
     elif isinstance(results, (list, tuple, set)):
@@ -449,7 +513,7 @@ def submit_selftest(doc_id: int, session_id: str, results) -> dict:
                  "rule": "mastered/n_sample"},
         "kps": current,
     }
-    _atomic_write_json(payload, selftest_out_file(doc_id))
+    _atomic_write_json(payload, output_path)
     with _SESS_LOCK:
         _SELFTEST.pop(sid, None)
     return {"ok": True, "doc_id": doc_id, "familiarity": familiarity,

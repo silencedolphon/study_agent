@@ -203,7 +203,8 @@ class TestPreviewSchema(_Base):
         self.assertEqual(art["summary"]["overview"], parsed["overview"])
         self.assertEqual(art["summary"]["study_order"], parsed["study_order"])
         self.assertEqual(art["summary"]["exam_focus"], parsed["exam_focus"])
-        self.assertEqual([t["term"] for t in art["terms"]], ["半衰期"])
+        self.assertEqual(art["terms"], [])
+        self.assertTrue(all("lecture" not in section for section in subs))
         self.assertEqual(sorted(s["chunk_id"] for s in art["sources"]), [101, 102])
         # 用户消息里必须带上章级材料与大纲（1 次调用里完成小节细分）
         self.assertEqual(len(seen), 1)
@@ -363,7 +364,7 @@ class TestDryRunAndSections(_Base):
         for ph in ("{deck}", "{chapter}", "{heading_path}", "{page_label}",
                    "{n_pages}", "{sections_outline}", "{chapter_material}"):
             self.assertIn(ph, p["user"], "USER 占位符缺失：%s" % ph)
-        for kw in ("小节", "跟上", "JSON", "pages"):
+        for kw in ("小节", "主线", "JSON", "pages"):
             self.assertIn(kw, p["sys"], "SYS 未覆盖关键要求：%s" % kw)
         review = env.PROJECT / "docs" / "preview" / "提示词-预习总结-v2-2026-10-20.md"
         self.assertTrue(review.exists(), "tracked 审查副本应存在")

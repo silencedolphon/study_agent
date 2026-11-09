@@ -525,7 +525,7 @@ function reviewQueueHtml(queue){
       <td><a href="#" onclick="openKp(${x.id});return false">${esc(x.name)}</a>
         ${x.status==='new' ? '<span class="badge">新</span>'
           : (x.overdue_days>0?`<span class="badge warn">逾期${x.overdue_days}天</span>`:'')}
-        <div class="small muted">${esc(x.summary||'')}</div></td>
+        <div class="small muted">${mdToHtml(x.summary||'')}</div></td>
       <td class="small">${x.subject?esc(x.subject):'—'}</td>
       <td style="width:150px">
         <div class="bar"><i style="width:${pct(x.mastery)}%"></i></div>
@@ -646,9 +646,49 @@ function reviewSummaryHtml(kp){
   const pts = kp.points || [];
   if (!sum && !pts.length) return '';
   return `<details class="rv-sum"><summary>展开总结</summary>
-    <div class="rv-sum-body">${esc(sum || '（这条没有总结正文，下面是要点）')}${
-      pts.length ? `<ul>${pts.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}</div>
+    <div class="rv-sum-body">${mdToHtml(sum || '（这条没有总结正文，下面是要点）')}${
+      pts.length ? `<ul>${pts.map(p => `<li>${mdToHtml(p)}</li>`).join('')}</ul>` : ''}</div>
   </details>`;
+}
+
+// 自测与知识点页共用同一棵导图和弹窗，但独立保存展开状态。
+const REV_MAP = {docId: 0, subject: '', session: '', tree: null, nodes: {}, open: {}, downshift: false};
+async function revMountSelftestMap(){
+  const box = $('#rv-selftest-map');
+  if (!box || !REV.docId) return;
+  const docId = Number(REV.docId), subject = SUBJ.cur, session = String((REV.st || {}).session_id || '');
+  if (REV_MAP.docId !== docId || REV_MAP.subject !== subject || REV_MAP.session !== session){
+    Object.assign(REV_MAP, {docId, subject, session, tree: null, nodes: {}, open: {}, downshift: false});
+  }
+  if (!REV_MAP.tree){
+    box.innerHTML = '<div class="small muted">正在读取课件导图…</div>';
+    try {
+      const d = await api('/api/mindmap?doc_id=' + encodeURIComponent(docId));
+      if (REV.stage !== 'selftest' || Number(REV.docId) !== docId || String((REV.st || {}).session_id || '') !== session || SUBJ.cur !== subject || $('#rv-selftest-map') !== box) return;
+      if (!d.has_structure) { box.innerHTML = '<div class="small muted">这份课件暂无可用导图。</div>'; return; }
+      REV_MAP.tree = d.tree || [];
+      REV_MAP.downshift = !!d.lkp_downshift;
+    } catch(e){ if ($('#rv-selftest-map') === box) box.innerHTML = `<div class="small">导图读取失败：${esc(e.message)}</div>`; return; }
+  }
+  REV_MAP.nodes = {};
+  box.innerHTML = `<div class="mmtree">${mmNodes(REV_MAP.tree, '', REV_MAP)}</div>`;
+  box.querySelectorAll('details.mmd').forEach(el => {
+    el.addEventListener('toggle', () => { REV_MAP.open[el.dataset.k] = el.open; });
+  });
+  box.querySelectorAll('.mmname').forEach(el => {
+    el.onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      const node = REV_MAP.nodes[el.dataset.k];
+      if (!node) return;
+      if (node.lkp_ready){
+        evPopEl().dataset.kpPop = '1';
+        if ((node.lkp_ids || []).length > 1) mmOpenKpList(node, el, docId);
+        else mmOpenKp(node.lkp_id, node.lkp_name || node.name, el, false, docId);
+      } else if (node.children && node.children.length){
+        const details = el.closest('details'); if (details) details.open = !details.open;
+      } else { mmOpenPending(node, el); }
+    };
+  });
 }
 
 function renderReviewSelftest(){
@@ -671,6 +711,7 @@ function renderReviewSelftest(){
     return `<div class="rv-q" data-kp="${esc(kp.kp_id)}">
       ${reviewPathHtml(kp, qi)}
       <div class="rv-q-name">${esc(kp.name || kp.kp_id)}</div>
+      ${res ? '' : `<button type="button" class="ghost rv-exclude" data-kp="${esc(kp.kp_id)}">从自测排除</button>`}
       ${reviewSummaryHtml(kp)}
       ${res ? '' : `<div class="rv-master" role="group" aria-label="这条知识点是否已掌握">
         <button type="button" class="rv-mbtn ok${clsOk}" data-kp="${esc(kp.kp_id)}" data-val="1">已掌握</button>
@@ -699,9 +740,10 @@ function renderReviewSelftest(){
     ? `<button class="act" id="rv-st-flow">进入三步复习</button>
        <button class="ghost" id="rv-st-again">再测一次</button>
        <button class="ghost" id="rv-st-home">返回复习页</button>`
-    : `<button class="act" id="rv-st-submit" ${nPicked < kps.length ? 'disabled' : ''}>${
+    : `<button class="act" id="rv-st-submit" ${!kps.length || nPicked < kps.length ? 'disabled' : ''}>${
         nPicked < kps.length ? `提交自测（${nPicked}/${kps.length} 已标记）` : '提交自测'}
        </button>
+       ${d.n_excluded ? `<button class="ghost" id="rv-st-restore">恢复已排除知识点（${d.n_excluded}）</button>` : ''}
        <button class="ghost" id="rv-st-home">返回复习页</button>`;
   $('#view').innerHTML = `
     <div class="card rv-card">
@@ -709,11 +751,16 @@ function renderReviewSelftest(){
         <span class="rv-badge">随机抽 ${d.n_sample || kps.length} / ${d.n_total || kps.length} 条知识点</span></div>
       <div class="rv-st-tip">看结构路径回忆这条知识点，点「展开总结」核对；然后<b>标记自己能否复述/掌握</b>。
         不要求写字；熟悉度 = <b>已掌握条数 / 抽样条数</b>，全部标记完才能提交。</div>
-      <div class="rv-q-list">${cards}</div>
+      <div class="rv-selftest-layout">
+        <aside class="rv-selftest-map"><div class="rv-selftest-map-head"><b>课件导图</b><span class="small muted">点击知识点查看</span></div><div id="rv-selftest-map"></div></aside>
+        <div class="rv-q-list">${cards || '<div class="empty">本课件没有可抽取的知识点，请使用下方按钮恢复已排除的知识点。</div>'}</div>
+      </div>
       ${resultHtml}
       <div class="rv-nav">${actions}</div>
     </div>`;
   bindReviewSelftest();
+  revMountSelftestMap();
+  revFloatUpdate();
 }
 
 function reviewSyncSelftestButtons(){
@@ -722,10 +769,11 @@ function reviewSyncSelftestButtons(){
   const nPicked = kps.filter(k => Object.prototype.hasOwnProperty.call(picked, String(k.kp_id))).length;
   const btn = $('#rv-st-submit');
   if (btn){
-    btn.disabled = nPicked < kps.length;
+    btn.disabled = !kps.length || nPicked < kps.length;
     btn.textContent = nPicked < kps.length
       ? `提交自测（${nPicked}/${kps.length} 已标记）` : '提交自测';
   }
+  revFloatUpdate();
 }
 
 function bindReviewSelftest(){
@@ -737,6 +785,11 @@ function bindReviewSelftest(){
   if (flow) flow.onclick = () => revStartFlow(REV.docId, {step: 1});
   const submit = $('#rv-st-submit');
   if (submit) submit.onclick = () => submitReviewSelftest();
+  const restore = $('#rv-st-restore');
+  if (restore) restore.onclick = () => reviewUpdateExclusion('', true);
+  document.querySelectorAll('#view .rv-exclude').forEach(b => {
+    b.onclick = () => reviewUpdateExclusion(b.dataset.kp, false);
+  });
   document.querySelectorAll('#view .rv-master .rv-mbtn').forEach(b => {
     b.onclick = () => {
       const kp = b.dataset.kp;
@@ -750,6 +803,24 @@ function bindReviewSelftest(){
       reviewSyncSelftestButtons();
     };
   });
+}
+
+async function reviewUpdateExclusion(kpId, restore){
+  const d = REV.st;
+  if (!d || REV.result) return;
+  const msg = restore ? '恢复这份课件已排除的知识点，之后自测可以再次抽到。'
+    : '此知识点今后不会出现在这份课件的自测中；导图和原始总结仍保留。可随时恢复。';
+  if (!await confirmBox(restore ? '恢复知识点？' : '从自测排除？', msg)) return;
+  try {
+    const previousCount = (d.items || []).length;
+    const r = await api('/api/review/selftest/exclusion', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({doc_id:REV.docId, session_id:d.session_id, kp_id:kpId, restore})});
+    if (!r.ok) throw new Error(r.error || '操作失败');
+    if (!restore) delete REV.stResults[String(kpId)];
+    Object.assign(d, {items:r.items, n_total:r.n_total, n_sample:r.n_sample, n_excluded:r.n_excluded});
+    renderReviewSelftest();
+    toast(restore ? '已恢复排除的知识点' : (r.items.length >= previousCount ? '已排除并从剩余知识点补充' : '已排除；没有足够的其他知识点补充，本次题数减少'));
+  } catch(e) { toast('操作失败：' + e.message); }
 }
 
 async function submitReviewSelftest(){
@@ -1183,11 +1254,15 @@ function noteKpNamesFromTree(tree){
   return out;
 }
 
+let NOTES_PAGE_SUBJECT = '';
 async function viewNotes(){
+  if (!SUBJ.loaded) await subjLoad();
+  const pageSubject = SUBJ.loaded ? SUBJ.cur : '';
   const [{notes}, docsRes] = await Promise.all([
     api('/api/notes'),
     api('/api/docs').catch(() => ({documents: []})),
   ]);
+  if (!pageSubject || SUBJ.cur !== pageSubject) return;
   const docs = (docsRes && docsRes.documents) || [];
   const docTitle = {};
   docs.forEach(d => { docTitle[String(d.id)] = d.title || ('doc#' + d.id); });
@@ -1214,6 +1289,8 @@ async function viewNotes(){
       Object.assign(kpNames, noteKpNamesFromTree(mm.tree || []));
     } catch(e){ /* 名字拿不到不影响按 kp_id 分组 */ }
   }));
+  if (SUBJ.cur !== pageSubject) return;
+  NOTES_PAGE_SUBJECT = pageSubject;
   const docIds = [...byDoc.keys()].sort((a, b) => (a ? (b ? a - b : -1) : 1));
   const groupsHtml = docIds.map(did => {
     const list = byDoc.get(did).slice();
@@ -1248,6 +1325,8 @@ async function viewNotes(){
   $('#view').innerHTML = `<div class="card rv-card">
     <div class="nt-head"><h2>笔记 · ${notes.length} 篇</h2>
       <input class="nt-search" id="nt-q" placeholder="搜索笔记标题 / 来源 / 知识点…" autocomplete="off">
+      <button class="ghost" onclick="noteSelectVisible()">全选可见</button>
+      <button class="ghost" onclick="noteDeleteSelected()">删除选中</button>
       <button class="ghost" id="nt-go-kps">去「知识点」页</button></div>
     <div class="small muted" style="margin-bottom:10px">
       按<b>课件 → 绑定知识点</b>分组；没绑定的笔记归到「未绑定」。点标题看全文，
@@ -1263,6 +1342,7 @@ function noteRowHtml(n){
   const meta = [noteSourceText(n), n.chars ? n.chars + ' 字' : '',
                 fmtTime(n.created || n.mtime)].filter(Boolean).join(' · ');
   return `<div class="nt-note" data-search="${esc(((n.title || '') + ' ' + (noteSourceText(n) || '') + ' ' + (n.kp_id || '')).toLowerCase())}">
+    <input type="checkbox" class="nt-delete-cb" aria-label="选择笔记" value="${esc(n.file)}">
     <a href="#" data-note="${esc(n.file)}">${esc(n.title)}</a>
     <span class="nt-meta">${esc(meta)}</span>
     ${canJump ? `<span class="nt-act"><button class="ghost" data-jump="${esc(n.doc_id)}"

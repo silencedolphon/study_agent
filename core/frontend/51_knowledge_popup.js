@@ -167,7 +167,7 @@ function mmRenderKp(d, el, keepDeck){
       <div class="lkpsub" style="margin-top:0;border-top:none;padding-top:0">要点${
         pts.length ? ' ' + pts.length + ' 条' : ''}</div>
       ${pts.length
-        ? `<ul class="lkppts">${pts.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
+        ? `<ul class="lkppts">${pts.map(x => `<li>${mdToHtml(x)}</li>`).join('')}</ul>`
         : `<div class="small muted">${d.insufficient
              ? '模型判定本页材料不足以概括（' + esc(d.insufficient_reason || '') +
                '），按提示词口径不给要点。'
@@ -175,7 +175,7 @@ function mmRenderKp(d, el, keepDeck){
       <details class="kpmore" id="mmkp-more">
         <summary>总结正文 · 出处明细 · 生成链条</summary>
         <div class="lkpsum${d.summary ? '' : ' none'}">${
-          esc(d.summary || '（这条没有总结正文）')}</div>
+          mdToHtml(d.summary || '（这条没有总结正文）')}</div>
         <div class="lkpsub">出处（页 / chunk_id，点 chunk 看上下文）</div>
         ${mmLkpSrcHtml(d.sources)}
         <div class="lkpsub">这条总结是怎么来的</div>
@@ -188,6 +188,7 @@ function mmRenderKp(d, el, keepDeck){
           本条成本 CNY${(d.cost_cny || 0).toFixed(6)}${
           d.generated_at ? ' · ' + esc(d.generated_at) : ''}。</div>
       </details>
+      <div id="mmkp-links" hidden></div>
       <div class="kpslide" id="mmkp-slide" hidden>
         <div class="small muted">课件页图 · ${
           esc(d.slide_deck || '该课件在 figure_desc 下没有目录')}${
@@ -216,6 +217,7 @@ function mmRenderKp(d, el, keepDeck){
         title="给这条知识点写一条笔记（绑定 ${esc(d.kp_id || '')}）">记入笔记</button>
       <button class="ghost" id="mmkp-notes"
         title="看与这条知识点绑定的笔记">查看笔记</button>
+      <button class="ghost" id="mmkp-links-btn" title="探索其他课件中的相关知识点">知识联系</button>
       <button class="ghost" id="mmkp-search">在资料库中检索此主题</button>
       <button class="ghost" id="mmkp-deck" title="${esc(deckTitle)}">展开当页课件</button>
     </div>
@@ -260,6 +262,8 @@ function mmRenderKp(d, el, keepDeck){
   if (nAdd) nAdd.onclick = () => mmNoteEdit(d);
   const nSee = $('#mmkp-notes');
   if (nSee) nSee.onclick = () => mmNoteList(d);
+  const links = $('#mmkp-links-btn');
+  if (links) links.onclick = () => mmLinksToggle(d);
   // 联动：上一条开着课件，这一条接着开（人对着 PPT 连看是最常见的用法）
   if (keepDeck) mmToggleDeck();
   // 卡 C-0056：挂上"弹窗内怎么滚都不出窗"的两道防线（幂等，见 mmKpScrollGuard）
@@ -377,305 +381,41 @@ async function mmSidebarPaint(d, el){
   evPopPlace(el || MMPOP.anchor || pop);
 }
 
-// ---------------- 特性2：知识点小窗右侧「教材补充」栏（task-27） ----------------
-// 只做加法：小窗 = 左侧导图树 + 中间原有正文 + 右侧本学科教材的补充页图/段落。
-// 数据来自只读接口（零模型）：/api/textbook-supplement/kp（这条 KP 的补充）+
-// /api/textbook-supplement/status（有没有教材/要不要补做）。不改原知识点产物。
-// ≥1280px 常驻；<1280px 头部「📖 教材」按钮打开覆盖式抽屉。
-const MMTEACH = {cache: {}, open: false, req: 0, lastStatus: null};
+// 课件与教材章节由用户手动对应；展示已有预习和教材总结，不调用模型。
+const MMTEACH = {open: false, req: 0};
 
 async function mmTeachPaint(d, el){
   const aside = $('#mmkp-teach');
   if (!aside) return;
-  const pop = evPopEl();
-  const docId = parseInt((d && d.doc_id) || MMPOP.docId, 10) || 0;
-  const kpId = (d && d.kp_id) || '';
-  const myReq = ++MMTEACH.req;
-  aside.innerHTML = '<div class="mteach-loading">教材补充加载中…</div>';
-  if (!docId){
-    aside.innerHTML = '<div class="mteach-empty">这条知识点没有关联课件，教材补充不可用。</div>';
-    return;
-  }
-  let kpData = null, st = null;
+  const docId = Number((d && d.doc_id) || MMPOP.docId) || 0;
+  const req = ++MMTEACH.req;
+  aside.innerHTML = '<div class="mteach-loading">正在读取对应章节…</div>';
   try {
-    kpData = await api('/api/textbook-supplement/kp?doc_id=' +
-                       encodeURIComponent(docId) + '&kp_id=' + encodeURIComponent(kpId));
+    const data = await api('/api/deck-chapter?doc_id=' + encodeURIComponent(docId));
+    if (req !== MMTEACH.req || aside !== $('#mmkp-teach')) return;
+    if (data.ok === false) throw new Error(data.error || '读取失败');
+    const bind = data.binding;
+    const list = (title, items, empty) => `<div class="manual-book-section">
+      <h4>${esc(title)}</h4>${items.length ? '<ul>' + items.map(x =>
+        '<li>' + mdToHtml(String(x)) + '</li>').join('') + '</ul>' :
+        '<p class="muted small">' + esc(empty) + '</p>'}</div>`;
+    const terms = Array.isArray(data.terms) ? data.terms : [];
+    aside.innerHTML = `<div class="mteach-h"><b>📖 对应教材章节</b>
+      <button class="mteach-x" title="收起" onclick="mmTeachClose()">✕</button></div>` +
+      (bind ? `<div class="manual-book-title">${esc(bind.book_title)}<br><b>第 ${Number(bind.chapter)} 章 ${esc(bind.chapter_name)}</b></div>
+      ${data.summary_stale ? '<p class="small muted">教材总结为旧版本，可重新整理。</p>' : ''}
+      ${list('预习难点', data.difficulties || [], data.preview_available ? '本章暂无难点' : '请先生成本章预习')}
+      ${list('考试重点', data.exam_focus || [], data.preview_available ? '本章暂无考点' : '请先生成本章预习')}
+      <div class="manual-book-section"><h4>重点名词</h4>${terms.length
+        ? terms.map(t => `<details><summary><b>${esc(t.term || '')}</b>${t.en && t.en !== t.term ? ' · ' + esc(t.en) : ''}</summary>
+          <div>${mdToHtml(t.definition || '')}</div></details>`).join('')
+        : '<p class="muted small">' + (data.summary_available ? '暂无名词，可重新整理教材总结' : '请先整理本章教材知识点') + '</p>'}</div>`
+      : `<div class="mteach-empty">${esc(data.warning || '请在课件导图上方选择对应的教材章节。')}</div>`);
+    evPopPlace(el || MMPOP.anchor || evPopEl());
   } catch(e){
-    kpData = {ok: false, available: false,
-              note: '读教材补充失败：' + e.message};
+    if (req === MMTEACH.req && aside === $('#mmkp-teach'))
+      aside.innerHTML = '<div class="mteach-empty">' + esc(e.message) + '</div>';
   }
-  try {
-    st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(docId));
-  } catch(e){ st = null; }
-  // 期间用户又切了别的知识点/关了窗：这次结果作废
-  if (myReq !== MMTEACH.req) return;
-  if (evPopEl() !== pop || !document.body.contains(aside) || aside !== $('#mmkp-teach')) return;
-  if ((pop.dataset.kp || '') !== String(kpId)) return;
-  mmTeachRender(aside, kpData || {}, st || {}, d);
-}
-
-function mteachNum(v, dflt){ const n = Number(v); return isFinite(n) ? n : (dflt || 0); }
-function mteachCostTxt(v, fallback){
-  const n = mteachNum(v, 0);
-  return n > 0 ? ('≤¥' + n.toFixed(4)) : (fallback || '按实际计费');
-}
-function mteachEst(est){
-  const e = est || {};
-  return {calls: mteachNum(e.calls, 1) || 1,
-          cost: mteachNum(e.cost_cny_max, 0),
-          model: e.model || '默认模型',
-          thinking: !!e.thinking, effort: e.effort || ''};
-}
-function mteachSourceTxt(src){
-  if (src === 'ai') return {cls: 'ai', text: 'AI 定位'};
-  if (src === 'local_fallback') return {cls: 'local', text: '本地兜底'};
-  return {cls: '', text: src || '本地匹配'};
-}
-function mteachChapterLine(cm, entry){
-  const c = (cm && typeof cm === 'object') ? cm : {};
-  const ch = (entry && entry.chapter && typeof entry.chapter === 'object')
-    ? entry.chapter : {};
-  const no = mteachNum(c.chapter_no || ch.no, 0);
-  const nameRaw = String(c.chapter_name || c.name || ch.name || '');
-  const nameHasNo = /第\s*\d+\s*章/.test(nameRaw);
-  const name = nameHasNo ? nameRaw : nameRaw;
-  const page = c.page_label || (entry && entry.page_label) || '';
-  if (!no && !name && !page) return '';
-  const src = mteachSourceTxt(c.source || (entry && entry.source));
-  const cost = mteachNum(c.cost_cny, 0);
-  return `<div class="mteach-cm">
-    <span>整份课件定位：<b>${no && !nameHasNo ? ('第' + no + '章 ') : ''}${esc(name || '（未定位到章）')}</b>${page ? ' · ' + esc(page) : ''}</span>
-    <span class="mteach-cm-src ${src.cls}">${esc(src.text)}</span>
-    ${cost > 0 ? `<span class="mteach-cm-src">映射成本 ¥${cost.toFixed(4)}</span>` : ''}
-  </div>`;
-}
-function mteachPagesHtml(entry, tb, st){
-  const pages = (entry.pages || []).filter(p => parseInt(p, 10) > 0).slice(0, 3);
-  if (!pages.length) return '';
-  const tbId = mteachNum(tb.doc_id || ((st && st.supplement) || {}).textbook_doc_id, 0);
-  if (!tbId) return '';
-  return `<div class="mteach-pages">${pages.map(p => `<a class="mteach-pg"
-      href="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=150"
-      target="_blank" rel="noopener" title="打开教材 p.${p} 原尺寸">
-      <img loading="lazy" src="/api/teach-page?doc_id=${tbId}&page=${p}&dpi=110"
-        alt="教材 p.${p}" onerror="this.classList.add('bad')">
-      <span>p.${p}</span></a>`).join('')}</div>`;
-}
-function mteachLocalHtml(entry){
-  const passages = (entry.passages || []).filter(Boolean);
-  const terms = (entry.added_terms || []).map(t =>
-    (typeof t === 'string') ? t : (t.term || t.word || t.name || '')).filter(Boolean);
-  if (!passages.length && !terms.length) return '';
-  const psHtml = passages.map(p => {
-    const txt = String(p.text || '');
-    const cut = txt.length > 350 ? '…' : '';
-    const hits = (p.hit_terms || []).slice(0, 5);
-    const pg = p.page_label || (p.page_start ? ('p.' + p.page_start) : '');
-    return `<div class="mteach-ps">
-      <div class="mteach-ps-h"><span class="mteach-pgno">${esc(pg)}</span>
-        ${p.score ? `<span class="mteach-score">匹配 ${Number(p.score).toFixed(1)}</span>` : ''}</div>
-      <div class="mteach-tx">${esc(txt.slice(0, 350))}${cut}</div>
-      ${hits.length ? `<div class="mteach-hits">${hits.map(t =>
-        `<span>${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
-  }).join('');
-  const termsHtml = terms.length ? `<div class="mteach-sec">教材补充点</div>
-    <div class="mteach-terms">${terms.slice(0, 12).map(t =>
-      `<span class="mteach-term">${esc(t)}</span>`).join('')}</div>` : '';
-  return `<details class="mteach-local">
-    <summary>${passages.length} 段${terms.length ? ' · ' + terms.length + ' 个补充点' : ''}（本地匹配，点开看）</summary>
-    ${psHtml}${termsHtml}
-    <div class="mteach-foot">按教材章节切块匹配，仅供参考；不改动原知识点</div>
-  </details>`;
-}
-function mteachAiPoints(points){
-  return (points || []).filter(Boolean).map(p => {
-    if (typeof p === 'string') return `<div class="mteach-point">${esc(p)}</div>`;
-    const kind = p.kind || p.type || '';
-    const pages = Array.isArray(p.pages) ? p.pages : (p.page ? [p.page] : []);
-    return `<div class="mteach-point">${esc(String(p.text || p.content || ''))}
-      ${kind ? `<span class="mteach-kind">${esc(kind)}</span>` : ''}
-      ${pages.length ? `<span class="mteach-pages-tag">${pages.map(x => 'p.' + x).join('、')}</span>` : ''}
-    </div>`;
-  }).join('');
-}
-function mteachAiCard(entry, kpData, st, busy){
-  const ai = (entry && entry.ai && typeof entry.ai === 'object') ? entry.ai : null;
-  const est = mteachEst((kpData && kpData.estimate) || (st && st.estimate) || {});
-  const aiCfg = (st && st.ai && typeof st.ai === 'object') ? st.ai : {};
-  const enabled = aiCfg.enabled !== false;
-  if (busy){
-    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
-      <span class="mteach-ai-badge warn"><span class="mteach-spin"></span>AI 分析中…</span></div>
-      <div class="mteach-ai-est">正在让外接大模型对比课件与教材（约 1 次调用，可能 5–20 秒），请稍候。</div></div>`;
-  }
-  if (!ai || !ai.status){
-    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
-      <span class="mteach-ai-badge">未生成</span></div>
-      <div class="mteach-ai-est">让外接大模型读「教材对应小节」与「本知识点」：
-        补课件没讲到的内容、指出课件没讲清的缺口，不改动原知识点。<br>
-        预计 <b>${est.calls} 次调用</b> · 成本上界 <b>${mteachCostTxt(est.cost)}</b> · 模型 <b>${esc(est.model)}</b>
-        ${enabled ? '' : ' · <span style="color:var(--warn)">AI 未启用（检查设置中心密钥）</span>'}</div>
-      <div class="mteach-ai-act"><button class="act" id="mteach-gen"
-        ${enabled ? '' : 'disabled'}>生成 AI 补充</button></div></div>`;
-  }
-  const status = String(ai.status || '');
-  if (status === 'failed'){
-    return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充
-      <span class="mteach-ai-badge bad">生成失败</span></div>
-      <div class="mteach-ai-est">${esc(ai.error || ai.summary || 'AI 生成失败（可重试）')}
-        <br>本地「教材原文（参考）」仍可在下方查看，不受影响。</div>
-      <div class="mteach-ai-act"><button class="act" id="mteach-gen" data-force="1">重试生成</button></div></div>`;
-  }
-  const badge = status === 'no_supplement'
-    ? '<span class="mteach-ai-badge warn">AI：无需补充</span>'
-    : '<span class="mteach-ai-badge ok">AI 已生成</span>';
-  const noSupLine = status === 'no_supplement'
-    ? '<div class="mteach-ai-est">AI 判断教材对应小节没有需要补充的内容。</div>'
-    : '';
-  const points = mteachAiPoints(ai.points);
-  const gaps = (ai.gaps || []).filter(Boolean);
-  const cites = (ai.citations || []).filter(Boolean);
-  const citesHtml = cites.length ? `<details class="mteach-cites">
-    <summary>教材出处（${cites.length} 条，点开看原文）</summary>
-    ${cites.map(c => {
-      if (typeof c === 'string') return `<div class="mteach-cite">${esc(c)}</div>`;
-      const pg = c.page_label || (c.page ? ('p.' + c.page) : '');
-      return `<div class="mteach-cite">${pg ? `<b>${esc(pg)}</b> · ` : ''}${esc(String(c.text || c.quote || c.chunk_text || ''))}</div>`;
-    }).join('')}</details>` : '';
-  const foot = [ai.model ? ('模型 ' + ai.model) : '',
-                ai.cost_cny != null ? ('费用 ¥' + mteachNum(ai.cost_cny).toFixed(4)) : '',
-                ai.elapsed_s != null ? ('耗时 ' + mteachNum(ai.elapsed_s).toFixed(1) + 's') : ''
-               ].filter(Boolean).join(' · ');
-  return `<div class="mteach-ai"><div class="mteach-ai-h">AI 教材补充 ${badge}</div>
-    ${noSupLine}
-    ${ai.verdict ? `<div class="mteach-verdict">${pvText(ai.verdict)}</div>` : ''}
-    ${ai.summary ? `<div class="mteach-sum">${pvText(ai.summary)}</div>` : ''}
-    ${points ? `<div class="mteach-points">${points}</div>` : ''}
-    ${gaps.length ? `<div class="mteach-gaps"><b>课件没讲 / 没讲清</b>${gaps.map(g => '· ' + esc(String(g))).join('<br>')}</div>` : ''}
-    ${citesHtml}
-    ${foot ? `<div class="mteach-ai-foot">${esc(foot)}</div>` : ''}
-    <div class="mteach-ai-act">
-      <button class="ghost" id="mteach-gen" data-force="1">重新生成</button>
-    </div></div>`;
-}
-
-function mmTeachRender(aside, kpData, st, d){
-  MMTEACH.lastStatus = st || {};
-  MMTEACH.ctx = {aside, kpData, st, d};
-  const tb = (kpData && kpData.textbook) || {};
-  const entry = (kpData && kpData.entry) || {};
-  const books = (st && st.textbooks) || [];
-  const hasTb = !!(st && st.has_textbook) || books.length > 0;
-  const legacy = !!(st && st.legacy);
-  const sup = (st && st.supplement) || {};
-  const available = !!((kpData && kpData.available) && ((entry.passages || []).length || entry.ai));
-  const head = `<div class="mteach-h"><b>📖 教材补充</b>
-    <button class="mteach-x" title="收起教材补充" onclick="mmTeachClose()">✕</button></div>`;
-  let body = '';
-  if (available || (legacy && kpData && kpData.available)){
-    const bookTitle = tb.title || ((books[0] || {}).title) || '教材';
-    const cmLine = mteachChapterLine((st && st.chapter_map) || entry.chapter || {},
-                                     entry);
-    body = head
-      + `<div class="mteach-sub">📚 ${esc(bookTitle)}</div>`
-      + cmLine
-      + mteachPagesHtml(entry, tb, st);
-    if (legacy){
-      body += `<div class="mteach-legacy">⚠ 旧版教材补充（纯本地匹配，无 AI 章节映射）
-        <span class="small">建议先重新 AI 定位整份课件的教材章节与小节，再对单条知识点生成 AI 补充；不改动原知识点。</span>
-        <div class="mteach-ai-act"><button class="act" id="mteach-rebuild">重新 AI 定位并补做</button></div>
-      </div>`;
-    } else {
-      body += mteachAiCard(entry, kpData, st, !!MMTEACH.busy);
-    }
-    body += mteachLocalHtml(entry);
-  } else if (!hasTb){
-    body = head + `<div class="mteach-empty">本学科尚未入库教材，教材补充暂不可用。
-      <br><span class="small">把教材 PDF 放进 raw 并入库后，整理知识点时会自动补做。</span></div>`;
-  } else if (st && st.needs_backfill){
-    body = head + `<div class="mteach-empty">教材已入库，可到导图栏补做教材补充。
-      <br><span class="small">教材《${esc(((books[0] || {}).title) || '')}》已入库；
-      到「课件思维导图」栏点「补做教材补充」即可（不改动原知识点）。</span></div>
-      <div class="mteach-act"><button class="act"
-        onclick="mmTeachGotoBackfill(${parseInt(d.doc_id || 0, 10) || 0})">去导图栏补做</button></div>`;
-  } else {
-    const note = (kpData && kpData.note)
-      || (st && st.reason)
-      || '这条知识点在教材里没有匹配到可补充的段落。';
-    body = head + `<div class="mteach-empty">${em(humanize(note))}</div>`;
-  }
-  aside.innerHTML = body;
-  const gen = $('#mteach-gen');
-  if (gen) gen.onclick = () => mmTeachGenerate(gen.getAttribute('data-force') === '1');
-  const rebuild = $('#mteach-rebuild');
-  if (rebuild) rebuild.onclick = () => mmTeachLegacyRebuild();
-}
-
-async function mmTeachGenerate(force){
-  if (MMTEACH.busy) return;
-  const ctx = MMTEACH.ctx || {};
-  const d = ctx.d || {};
-  const docId = parseInt(d.doc_id || MMPOP.docId, 10) || 0;
-  const kpId = d.kp_id || '';
-  if (!docId || !kpId) return;
-  const est = mteachEst((ctx.kpData && ctx.kpData.estimate) || (ctx.st && ctx.st.estimate) || {});
-  const ok = await confirmBox(force ? '重新生成 AI 教材补充？' : '生成 AI 教材补充？',
-    `预计 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}\n\n`
-    + 'AI 只依据教材原文补课件没讲到的内容、指出没讲清的缺口；不改动原知识点。\n'
-    + '确认后才调用外接大模型。');
-  if (!ok) return;
-  MMTEACH.busy = true;
-  ctx.aside && mmTeachRender(ctx.aside, ctx.kpData, ctx.st, d);
-  try {
-    const r = await api('/api/textbook-supplement/kp/build', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({doc_id: docId, kp_id: kpId, force: !!force})});
-    if (!r || r.ok === false) throw new Error((r && r.error) || '生成失败');
-    toast('AI 教材补充已生成');
-    await mmTeachRefresh();
-  } catch(e){
-    toast('AI 教材补充失败：' + e.message);
-  } finally {
-    MMTEACH.busy = false;
-    if (MMTEACH.ctx) mmTeachRender(MMTEACH.ctx.aside, MMTEACH.ctx.kpData,
-                                   MMTEACH.ctx.st, MMTEACH.ctx.d);
-  }
-}
-
-async function mmTeachLegacyRebuild(){
-  if (MMTEACH.busy) return;
-  const ctx = MMTEACH.ctx || {};
-  const d = ctx.d || {};
-  const docId = parseInt(d.doc_id || MMPOP.docId, 10) || 0;
-  if (!docId) return;
-  const est = mteachEst((ctx.st && ctx.st.estimate) || (ctx.kpData && ctx.kpData.estimate) || {});
-  const ok = await confirmBox('重新 AI 定位教材补充？',
-    `旧版产物只有本地按章匹配，没有 AI 章节映射。\n`
-    + `这一步会先让 AI 为整份课件定位教材章节（约 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}），`
-    + '再由本地定位小节/页；不改动原知识点。\n确认后才调用外接大模型。');
-  if (!ok) return;
-  MMTEACH.busy = true;
-  ctx.aside && mmTeachRender(ctx.aside, ctx.kpData, ctx.st, d);
-  try {
-    const r = await api('/api/textbook-supplement/build', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({doc_id: docId, force: true})});
-    if (!r || r.ok === false) throw new Error((r && r.error) || '补做失败');
-    toast('AI 定位完成，已刷新教材补充');
-    await mmTeachRefresh();
-  } catch(e){
-    toast('AI 定位失败：' + e.message);
-  } finally {
-    MMTEACH.busy = false;
-    if (MMTEACH.ctx) mmTeachRender(MMTEACH.ctx.aside, MMTEACH.ctx.kpData,
-                                   MMTEACH.ctx.st, MMTEACH.ctx.d);
-  }
-}
-
-async function mmTeachRefresh(){
-  const ctx = MMTEACH.ctx;
-  if (!ctx) return;
-  await mmTeachPaint(ctx.d, MMPOP.anchor);
 }
 
 function mmTeachToggle(){
@@ -683,116 +423,70 @@ function mmTeachToggle(){
   evPopEl().classList.toggle('mm-teach-open', MMTEACH.open);
   evPopPlace(MMPOP.anchor || evPopEl());
 }
-
 function mmTeachClose(){
   MMTEACH.open = false;
   evPopEl().classList.remove('mm-teach-open');
   evPopPlace(MMPOP.anchor || evPopEl());
 }
 
-function mmTeachGotoBackfill(docId){
-  evPopClose();
-  go('kps');
-  setTimeout(() => {
-    const el = $('#mm-tree');
-    if (el) el.scrollIntoView({ block: 'center' });
-  }, 450);
-  toast('在「课件思维导图」栏点「补做教材补充」（不改动原知识点）');
-}
-
-// ---------------- 特性3：课件思维导图栏「AI 定位章节 + 补做」提醒（task-30） ----------------
-// 触发条件由后端 supplement_status 判：有 KP 产物 + 有教材 + 没补做/旧版/教材后入库。
-// 只在 #mm-tree 顶部出现；不改其它页面、不改原知识点。
-const MMBACK = {busy: false};
-
-function mteachBackfillEst(st){
-  return mteachEst((st && st.estimate)
-    || ((st && st.ai) && st.ai.estimate) || {});
-}
-function mteachReadyLine(st){
-  const cm = (st && st.chapter_map) || {};
-  const sup = (st && st.supplement) || {};
-  const secs = (cm.n_sections != null) ? mteachNum(cm.n_sections, 0) : 0;
-  const no = mteachNum(cm.chapter_no, 0);
-  const name = cm.chapter_name || '';
-  const nameHasNo = /第\s*\d+\s*章/.test(name);
-  const src = mteachSourceTxt(cm.source);
-  const cost = mteachNum(cm.cost_cny || sup.cost_cny, 0);
-  const parts = [];
-  if (no || name) parts.push(`章节：${no && !nameHasNo ? ('第' + no + '章 ') : ''}${name}`);
-  if (cm.page_label) parts.push(cm.page_label);
-  parts.push(`本地小节：${secs} 个`);
-  parts.push('可逐条生成 AI 补充');
-  return `教材补充已就绪 · ${parts.join(' · ')}` +
-    (cm.source ? `（${src.text}${cost > 0 ? ' · 映射成本 ¥' + cost.toFixed(4) : ''}）` : '');
-}
-
 async function mmTeachBackfill(docId){
   const box = $('#mm-tree');
-  if (!box) return;
-  const did = parseInt(docId || MINDMAP.docId || 0, 10) || 0;
-  if (!did) return;
-  const old = box.querySelector('.mmteach-banner, .mmteach-ready');
-  if (old) old.remove();
-  let st;
-  try { st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(did)); }
-  catch(e){ return; }
-  if (parseInt(MINDMAP.docId || 0, 10) !== did) return;   // 期间换了课件：作废
-  if (!st || st.ok === false || !st.has_artifact || !st.has_textbook) return;
-  const books = st.textbooks || [];
-  const first = books[0] || {};
-  const line = document.createElement('div');
-  const legacy = !!st.legacy;
-  if (st.needs_backfill || legacy){
-    const est = mteachBackfillEst(st);
-    const costTxt = mteachCostTxt(est.cost, '约 1 次小调用');
-    const reason = humanize(st.reason || '');
-    line.className = 'mmteach-banner';
-    line.innerHTML = `<div class="mmteach-banner-t">${legacy
-      ? `检测到<b>旧版</b>教材补充（纯本地匹配，无 AI 章节映射）：建议重新 AI 定位整份课件的章节与小节，再逐条生成 AI 补充（${esc(costTxt)}，<b>不改动原知识点</b>）。`
-      : `检测到教材《${esc(first.title || '')}》已入库，可先 AI 定位本章并补做教材补充（${esc(costTxt)}，<b>不改动原知识点</b>）。`}
-      ${reason ? `<span class="small">${esc(reason)}</span>` : ''}</div>
-      <button class="act" id="mmteach-build">${legacy ? '重新 AI 定位并补做' : 'AI 定位章节并补做'}</button>`;
-    box.insertBefore(line, box.firstChild);
-    const btn = $('#mmteach-build');
-    if (btn) btn.onclick = () => mmTeachBuild(did, btn);
-  } else if ((st.supplement || {}).exists){
-    line.className = 'mmteach-ready';
-    line.textContent = mteachReadyLine(st);
-    box.insertBefore(line, box.firstChild);
-  }
+  const did = Number(docId) || 0;
+  if (!box || !did) return;
+  try {
+    const [opts, current] = await Promise.all([
+      api('/api/preview/options'), api('/api/deck-chapter?doc_id=' + encodeURIComponent(did))
+    ]);
+    if (box !== $('#mm-tree') || Number(MINDMAP.docId) !== did) return;
+    if (current.ok === false) throw new Error(current.error || '读取失败');
+    const previous = current.binding || {};
+    const books = opts.textbooks || [];
+    const card = document.createElement('div');
+    card.className = 'manual-book-link';
+    card.innerHTML = `<div><b>对应教材章节</b><div class="small muted">手动选择后，阅读知识点时可在右侧查看本章难点、考点和重点名词。</div></div>
+      <div class="manual-book-controls"><select class="manual-book-select" aria-label="选择教材">
+      <option value="">不关联教材</option>${books.map(b => `<option value="${Number(b.doc_id)}"${Number(b.doc_id) === Number(previous.book_id) ? ' selected' : ''}>${esc(b.title)}</option>`).join('')}</select>
+      <select class="manual-chapter-select" aria-label="选择教材章节" disabled><option>请选择章节</option></select>
+      <button class="ghost manual-book-save">保存对应</button></div>
+      <div class="small muted manual-book-msg">${previous.book_id ? '已保存对应章节' : esc(current.warning || '尚未设置')}</div>`;
+    const prior = box.querySelector('.manual-book-link');
+    if (prior) prior.remove();
+    box.prepend(card);
+    const book = card.querySelector('.manual-book-select'), chapter = card.querySelector('.manual-chapter-select');
+    const msg = card.querySelector('.manual-book-msg'), save = card.querySelector('.manual-book-save');
+    let loading = 0;
+    async function loadChapters(selected){
+      const seq = ++loading, id = Number(book.value);
+      chapter.disabled = true;
+      chapter.innerHTML = '<option value="">请选择章节</option>';
+      if (!id) return;
+      try {
+        const data = await api('/api/preview/chapters?doc_id=' + encodeURIComponent(id));
+        if (seq !== loading || card !== box.querySelector('.manual-book-link')) return;
+        if (data.ok === false) throw new Error(data.error || '无法读取章节');
+        chapter.innerHTML = '<option value="">请选择章节</option>' + (data.chapters || []).map(ch =>
+          `<option value="${Number(ch.no)}"${Number(ch.no) === Number(selected) ? ' selected' : ''}>第 ${Number(ch.no)} 章 ${esc(ch.name || '')}</option>`).join('');
+        chapter.disabled = false;
+      } catch(e){ if (seq === loading) msg.textContent = e.message; }
+    }
+    book.onchange = () => loadChapters(0);
+    save.onclick = async () => {
+      const bookId = Number(book.value) || 0, ch = Number(chapter.value) || 0;
+      if (bookId && !ch) { msg.textContent = '请选择教材章节'; return; }
+      save.disabled = true;
+      try {
+        const result = await api('/api/deck-chapter', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({doc_id:did, book_id:bookId, chapter:ch})});
+        if (result.ok === false) throw new Error(result.error || '保存失败');
+        msg.textContent = bookId ? '已保存对应章节' : '已取消对应';
+        toast(msg.textContent);
+      } catch(e){ msg.textContent = e.message; }
+      finally { save.disabled = false; }
+    };
+    await loadChapters(previous.chapter || 0);
+  } catch(e){ if (Number(MINDMAP.docId) === did) toast('章节对应读取失败：' + e.message); }
 }
 
-async function mmTeachBuild(docId, btn){
-  if (MMBACK.busy) return;
-  let st = null;
-  try { st = await api('/api/textbook-supplement/status?doc_id=' + encodeURIComponent(docId)); }
-  catch(e){ st = null; }
-  const est = mteachBackfillEst(st || {});
-  const legacy = !!(st && st.legacy);
-  const ok = await confirmBox(legacy ? '重新 AI 定位教材补充？' : 'AI 定位章节并补做教材补充？',
-    `会先让 AI 为整份课件定位教材章节（约 ${est.calls} 次调用｜成本上界 ${mteachCostTxt(est.cost)}｜模型 ${est.model}），`
-    + '再由本地定位小节/页；不改动原知识点。\n同步执行约 5–15 秒，确认后才调用外接大模型。');
-  if (!ok) return;
-  MMBACK.busy = true;
-  const oldText = btn ? btn.textContent : '';
-  if (btn){ btn.disabled = true; btn.textContent = 'AI 定位中…'; }
-  try {
-    const r = await api('/api/textbook-supplement/build', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ doc_id: docId, force: legacy }),
-    });
-    if (!r || r.ok === false) throw new Error((r && r.error) || '补做失败');
-    toast('AI 定位完成：教材补充已更新');
-    MMTEACH.cache = {};
-    await mmTeachBackfill(docId);          // 重新取状态：横幅变"已就绪"
-  } catch(e){
-    toast('补做教材补充失败：' + e.message);
-    if (btn){ btn.disabled = false; btn.textContent = oldText || '补做教材补充'; }
-  } finally {
-    MMBACK.busy = false;
-  }
-}
 // ---------------- 知识点窗口的笔记（卡 C-0052） ----------------
 // 人拍板：「在点击思维导图的知识点跳出的知识点窗口增加一个『记入笔记』的按钮……
 // 该笔记与知识点窗口绑定。同时增加一个『查看笔记』的按钮……笔记页签也会出现
@@ -899,7 +593,7 @@ async function mmNoteList(d){
       <div class="why">${fmtTime(n.created || n.mtime)} · ${esc(n.file)}${
         (n.body_truncated ?? n.truncated)
           ? ' · 正文较长，这里只显示开头，全文去「笔记」页签看' : ''}</div>
-      <pre style="max-height:30vh;overflow:auto">${esc(n.body ?? n.content ?? '')}</pre>
+      <div style="max-height:30vh;overflow:auto">${mdToHtml(n.body ?? n.content ?? '')}</div>
       <div class="row" style="margin-top:6px">
         <button class="ghost" data-mmkpedit="${i}"
           title="改这篇笔记的正文（front-matter 与「## 出处」段原样保留）">编辑正文</button>
@@ -1269,7 +963,7 @@ function mmOpenNode(key, el){
 // 见卡 C-0049 §5），管线按"连续 ≤3 页"把它切成多条——它们同属一个结构节点。
 // 这里只做一件事：把这几条列出来，点哪条看哪条；**不替人挑**、也不把几条合并
 // 成一段（那会让人以为产物里就是这么写的）。
-function mmOpenKpList(n, el){
+function mmOpenKpList(n, el, docId){
   const ids = n.lkp_ids || [];
   const names = n.lkp_names || [];
   evPopEl().dataset.kp = '';    // 这一屏不是某条总结：作废在途的总结请求
@@ -1295,7 +989,7 @@ function mmOpenKpList(n, el){
   document.querySelectorAll('.mmkp-one').forEach(a => {
     a.onclick = e => {
       e.preventDefault();
-      mmOpenKp(a.dataset.kp, a.dataset.name, el, false);
+      mmOpenKp(a.dataset.kp, a.dataset.name, el, false, docId);
     };
   });
 }

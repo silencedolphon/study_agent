@@ -5,6 +5,8 @@
 **对应依赖清单**：`requirements.txt`（32 个直接依赖，版本逐一锁定）
 **许可原文**：见同目录 `THIRD-PARTY-LICENSES.txt`（约 460 KB，从本机虚拟环境中各包自带的许可文件原样复制）
 
+**前端 Markdown 组件**：`markdown-it` 15.0.3，MIT 许可，来源 <https://github.com/markdown-it/markdown-it>。许可全文附在 `core/frontend/vendor_markdown_it.js` 顶部及同目录 `vendor_markdown_it.LICENSE.txt`。
+
 ---
 
 ## 0. 这个文件是干什么的

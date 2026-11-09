@@ -273,13 +273,14 @@ function docSelPaint(){
 async function openDocDel(){
   const ids = docSelIds();
   if (!ids.length) return toast('请先勾选至少一份资料');
-  return openDocDelByIds(ids);
+  return openDocDelByIds(ids, DOCS_PAGE_SUBJECT);
 }
 
 // 弹「批量删除确认」面板。**入参是 doc_id 列表**——资料页的勾选集
 // （`openDocDel`）与「批量整理知识点」栏的勾选集（`kpbPurge`）共用这一个面板，
 // 于是同一个动作在页面里只有一套行为（预览、文案、两道闸门）。
-async function openDocDelByIds(ids){
+async function openDocDelByIds(ids, expected_subject){
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
   ids = (ids || []).map(n => parseInt(n)).filter(n => n > 0)
     .filter((v, i, a) => a.indexOf(v) === i);
   if (!ids.length) return toast('请先勾选至少一份资料');
@@ -289,7 +290,7 @@ async function openDocDelByIds(ids){
   try {
     pv = await api('/api/docs/delete', {method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({doc_ids: ids, dry_run: true})});
+      body: JSON.stringify({doc_ids: ids, dry_run: true, expected_subject})});
   } catch(e){
     DS.busy = false;
     return toast('无法获取删除预览：' + e.message);
@@ -326,12 +327,12 @@ async function openDocDelByIds(ids){
       <button class="ghost" onclick="closeModal()">取消</button>
     </div>`);
   const hb = $('#dd-hard');
-  if (hb) hb.onclick = () => docDelGo(ids, true);
+  if (hb) hb.onclick = () => docDelGo(ids, true, expected_subject);
   const sb = $('#dd-soft');
-  if (sb) sb.onclick = () => docDelGo(ids, false);
+  if (sb) sb.onclick = () => docDelGo(ids, false, expected_subject);
 }
 
-async function docDelGo(ids, withFile){
+async function docDelGo(ids, withFile, expected_subject){
   if (DS.busy) return;
   const what = withFile
     ? `这 ${ids.length} 份资料及电脑里的原文件会被永久删除，相关整理结果也会清理，无法撤销。`
@@ -347,7 +348,7 @@ async function docDelGo(ids, withFile){
     const r = await api('/api/docs/delete', {method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({doc_ids: ids, delete_file: withFile,
-                            purge_orphans: true, confirm: true})});
+                            purge_orphans: true, confirm: true, expected_subject})});
     if (r.need_confirm) return toast('操作尚未确认，请重试');
     if (r.error) return toast('删除被拒绝：' + r.error);
     const g = r.purged || {};

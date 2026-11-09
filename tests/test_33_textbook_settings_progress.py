@@ -136,13 +136,12 @@ class TestSettingsAndCaps(_Isolated):
 
     def test_pipeline_scope_caps_are_distinct(self):
         self._set(PREVIEW_MAX_TOKENS=77, KP_BUILD_MAX_TOKENS=55,
-                  TERMS_MAX_TOKENS=33, TEACH_MAX_TOKENS=22,
+                  TERMS_MAX_TOKENS=33,
                   DECK_CHAT_MAX_TOKENS=44)
         self.assertEqual(config.token_cap("preview"), 77)
         self.assertEqual(config.token_cap("courseware_kp"), 55)
         self.assertEqual(config.token_cap("kp"), 55)
         self.assertEqual(config.token_cap("terms"), 33)
-        self.assertEqual(config.token_cap("textbook_teach"), 22)
         self.assertEqual(config.token_cap("deck_chat"), 44)
 
 

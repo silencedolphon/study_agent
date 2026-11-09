@@ -1,6 +1,8 @@
 {
   "scripts": [
     "00_boot.js",
+    "05_display.js",
+    "vendor_markdown_it.js",
     "10_assistant.js",
     "20_overview.js",
     "30_review.js",
@@ -9,6 +11,7 @@
     "50_knowledge.js",
     "51_knowledge_popup.js",
     "52_textbook_knowledge.js",
+    "53_knowledge_links.js",
     "60_mistakes.js",
     "70_preview.js",
     "80_notes_search_ingest.js",

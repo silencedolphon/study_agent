@@ -1088,7 +1088,8 @@ def estimate_preview(doc_id: int, chapter, *, prompt_path=None, out_path=None,
             and int(pmeta.get("chapter_no") or 0) == no)
     cur_sha = hashlib.sha256((material + "\n" + outline).encode("utf-8")).hexdigest()
     fresh = bool(same and str((pmeta.get("inputs") or {}).get("material_sha256") or "")
-                 == cur_sha and str(pmeta.get("status") or "") == "done")
+                 == cur_sha and str(pmeta.get("prompt_sha256") or "") == prompt["sha256"]
+                 and str(pmeta.get("status") or "") == "done")
     return {
         "doc_id": int(doc_id), "ok": True, "preview_version": PREVIEW_VERSION,
         "preview_schema": PREVIEW_SCHEMA,
@@ -1535,9 +1536,8 @@ def _clean_subsections(raw, pages_all, cover_map, mat_text, warnings) -> list:
             elif str(q or "").strip():
                 self_check.append({"q": str(q).strip(), "a": ""})
         why = str(r.get("why") or r.get("position") or "").strip()
-        lecture = str(r.get("lecture") or r.get("how_teacher_teaches") or "").strip()
-        if not any([why, core, lecture, pitfalls, self_check]):
-            warnings.append("小节「%s」没有任何内容字段（why/core/lecture/…），已丢弃"
+        if not any([why, core, pitfalls, self_check]):
+            warnings.append("小节「%s」没有任何内容字段（why/core/pitfalls/…），已丢弃"
                             % title[:20])
             continue
         ids = []
@@ -1546,7 +1546,7 @@ def _clean_subsections(raw, pages_all, cover_map, mat_text, warnings) -> list:
         out.append({
             "no": len(out) + 1, "title": title, "pages": pages,
             "page_label": kp_build._pages_label(pages),
-            "why": why, "core": core, "lecture": lecture,
+            "why": why, "core": core,
             "pitfalls": pitfalls, "self_check": self_check,
             "chunk_ids": sorted(set(ids)),
             "material_block_ids": sorted(set(ids)),
@@ -1872,7 +1872,8 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                 raw.get("key_points") or raw.get("points") or [],
                 list(ch.get("pages_all") or []), dict(ch["cover"]),
                 sec.get("sections") or [], warnings)
-        terms = _clean_terms_list(raw.get("key_terms") or raw.get("terms") or [], material)
+        # 重点名词由教材知识点管线生成；预习不再生成或展示该部分。
+        terms = []
         log("  ├ 小节：模型 %d 个 → 校验后 %d 个（parser=%s，丢弃/清空见 warnings）"
             % (len(raw.get("subsections") or []), len(subs), parser))
         log("  └ 关键名词 %d 个 · 章级 overview %d 字"

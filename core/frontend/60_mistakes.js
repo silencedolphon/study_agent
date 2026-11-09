@@ -1,6 +1,11 @@
 // ---------------- 错题 ----------------
+let MISTAKES_PAGE_SUBJECT = '';
 async function viewMistakes(){
+  if (!SUBJ.loaded) await subjLoad();
+  const pageSubject = SUBJ.loaded ? SUBJ.cur : '';
   const {mistakes, stats} = await api('/api/mistakes');
+  if (!pageSubject || SUBJ.cur !== pageSubject) return;
+  MISTAKES_PAGE_SUBJECT = pageSubject;
   const reasonTxt = (stats.by_reason||[]).map(r =>
     `<span class="badge warn">${esc(r.reason)} ${r.n}</span>`).join(' ') || '—';
   const rows = mistakes.map(m => `
@@ -8,11 +13,11 @@ async function viewMistakes(){
       <td><input type="checkbox" class="mk-ck" value="${m.id}"></td>
       <td>${m.resolved?'<span class="badge ok">已解决</span>'
                       :'<span class="badge bad">未解决</span>'}</td>
-      <td>${esc(m.question||'')}
+      <td>${mdToHtml(m.question||'')}
         ${m.kp_name?`<div class="small muted">知识点：${esc(m.kp_name)}</div>`:''}</td>
       <td class="small">${esc(m.reason||'未分类')}</td>
-      <td class="small">${esc(m.my_answer||'—')}</td>
-      <td class="small">${esc(m.right_answer||'—')}</td>
+      <td class="small">${mdToHtml(m.my_answer||'—')}</td>
+      <td class="small">${mdToHtml(m.right_answer||'—')}</td>
       <td class="small muted">${fmtTime(m.created_at)}</td>
       <td><button class="text-btn" onclick="delMistakes([${m.id}])"
         style="color:var(--bad)">删除</button></td>
@@ -59,6 +64,8 @@ function delSelectedMistakes(){
 }
 
 async function delMistakes(ids, onlyResolved, all){
+  const expected_subject = MISTAKES_PAGE_SUBJECT;
+  if (!expected_subject) return toast('学科信息尚未加载，请刷新页面');
   const what = all ? '全部错题'
     : onlyResolved ? '所有已解决的错题'
     : ids && ids.length === 1 ? `错题 #${ids[0]}`
@@ -71,7 +78,7 @@ async function delMistakes(ids, onlyResolved, all){
   try {
     // 清空全部必须显式带 all:true，不能靠"没选中任何项"来推断，
     // 否则空选择会被误解成清空。
-    const body = {};
+    const body = {expected_subject};
     if (all) body.all = true;
     else if (onlyResolved) body.only_resolved = true;
     else if (ids && ids.length) body.ids = ids;

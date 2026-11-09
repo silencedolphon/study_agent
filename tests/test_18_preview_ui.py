@@ -84,8 +84,8 @@ class TestPreviewFrontend(unittest.TestCase):
             self.assertIn(cls, _PAGE, f"缺少查看器元素/样式 {cls}")
         for txt in ("章节目录", "已预习", "未预习", "生成中", "失败",
                     "预习本章", "重新预习", "查看预习", "章概览",
-                    "这一小节要解决什么", "核心概念", "老师会怎么讲", "易错点",
-                    "自测（答案默认收起）", "出处", "本章关键名词"):
+                    "这一小节要解决什么", "核心概念", "容易混淆的地方",
+                    "试着回忆", "出处"):
             self.assertIn(txt, _PAGE, f"缺少文案：{txt}")
         # 自测答案放 details（默认收起）
         self.assertIn("details class=\"pv-qa\"", _PAGE)
@@ -93,7 +93,7 @@ class TestPreviewFrontend(unittest.TestCase):
     def test_viewer_content_and_sources(self):
         for key in ("subsections", "summary", "overview", "study_order",
                     "difficulties", "prerequisites", "exam_focus",
-                    "self_check", "pitfalls", "lecture", "core"):
+                    "self_check", "pitfalls", "core"):
             self.assertIn(key, _PAGE, f"查看器没有读取字段 {key}")
         # 页/块出处 chip 复用 openChunk
         self.assertIn("openChunk(", _PAGE)

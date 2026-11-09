@@ -9,7 +9,7 @@ function bookToday(){
   const d = new Date(), pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-function bookText(value){ return esc(value || '').replace(/\n/g, '<br>'); }
+function bookText(value){ return mdToHtml(value || ''); }
 
 // task-40：进度百分比 / 已用时间（后端 progress 新增 percent/elapsed/label；
 // 老后端没有 percent 时按 done/total 现算，两种都能画进度条）。
@@ -84,6 +84,7 @@ function openTextbookReview(docId, chapter){
 }
 
 async function mountTextbookKnowledge(){
+  BOOKKP.subject = SUBJ.cur;
   const box = $('#book-kp-panel');
   if (!box) return;
   box.innerHTML = '<div class="small muted">正在读取教材…</div>';
@@ -134,35 +135,20 @@ function bookRender(){
   let content = '<div class="empty">选择章节后，可以整理知识点并进行回忆练习。</div>';
   if (!BOOKKP.chapters.length) content = '<div class="empty">这本教材尚未识别出章节，请检查教材入库结果。</div>';
   else if (points.length){
-    content = `<div class="book-kp-count">${points.length} 个知识点 · ${due} 个待回顾</div>` + points.map(point => {
-      const review = reviews[point.id], status = !review ? '未练习'
-        : (review.due <= bookToday() ? '待回顾' : '下次 ' + review.due);
-      const keys = (point.key_points || []).map(x => `<li>${bookText(x)}</li>`).join('');
-      const questions = (point.questions || []).map(q => `<div class="book-question">
-        <b>${bookText(q.question)}</b><details><summary>查看答案</summary><div>${bookText(q.answer)}</div></details>
-      </div>`).join('');
-      const sources = (point.source_ids || []).map(id => `<button class="text-btn" data-book-source="${Number(id)}">查看原文</button>`).join('');
-      return `<details class="book-point" data-point="${esc(point.id)}" ${BOOKKP.open[point.id]?'open':''}>
-        <summary><span>${esc(point.title)}</span><span class="small muted">${esc(status)}</span></summary>
-        <div class="book-point-body"><div class="book-point-actions"><button class="act"
-          data-book-window="${esc(point.id)}" title="像课件知识点窗口一样，左侧目录 + 教材页图/页码阅读">📖 窗口阅读</button></div>
-          <p>${bookText(point.summary)}</p>${keys?`<ul>${keys}</ul>`:''}
-          ${point.memory_tip?`<p><b>记忆提示：</b>${bookText(point.memory_tip)}</p>`:''}
-          ${point.pitfall?`<p><b>易错点：</b>${bookText(point.pitfall)}</p>`:''}
-          <div class="book-practice"><b>先回忆，再看答案</b>${questions}
-            <div class="row"><button class="ghost" data-book-review="again" data-point-id="${esc(point.id)}">还没记住</button>
-              <button class="ghost" data-book-review="remembered" data-point-id="${esc(point.id)}">记住了</button></div>
-          </div>
-          <div class="small muted">${point.source_scope==='segment'?'参考本段资料：':'教材出处：'}${sources}</div>
-        </div></details>`;
-    }).join('');
+    const terms = (art.terms || []).length;
+    content = `<div class="book-kp-count">${points.length} 个知识点 · ${terms} 个重点名词 · ${due} 个待回顾</div>
+      <button class="act" data-book-window="${esc(points[0].id)}">📖 打开窗口阅读</button>
+      ${terms ? '' : '<p class="small muted">这份总结暂无重点名词；重新整理后可提取。</p>'}`;
   }
   // task-40：进度条（percent/elapsed/label）+ 结束后的成功/失败状态。
   const progress = bookProgressHtml(p);
   box.innerHTML = `<div class="small muted" style="margin-bottom:10px">按章整理要点，用回忆题和间隔复习巩固记忆。</div>
     <div class="book-kp-controls"><select id="book-kp-doc" aria-label="选择教材">${docOptions}</select>
       <select id="book-kp-chapter" aria-label="选择章节" ${chapterOptions?'':'disabled'}>${chapterOptions}</select>
-      <button class="act" id="book-kp-build" ${busy || !BOOKKP.chapter?'disabled':''}>${action}</button></div>
+      <button class="act" id="book-kp-build" ${busy || !BOOKKP.chapter?'disabled':''}>${action}</button>
+      <button class="ghost" onclick="textbookBatchChoose('textbook')">批量整理</button>
+      <button class="ghost" onclick="chapterQuestionsManage('textbook')">管理本章题目</button></div>
+    <div id="textbook-batch-progress-textbook"></div>
     ${art.stale?'<div class="book-kp-error">教材内容已变化，当前显示的是旧总结；可重新整理。</div>':''}
     ${progress}${art.pending && !busy?'<div class="small muted">上次已完成的部分会在继续整理时复用。</div>':''}
     ${content}`;
@@ -177,6 +163,7 @@ function bookRender(){
     try { await bookLoadSummary(); } catch(err){ toast('读取知识点失败：' + err.message); }
   };
   $('#book-kp-build').onclick = bookStart;
+  textbookBatchWatch();
   box.querySelectorAll('.book-point').forEach(el => {
     el.ontoggle = () => { BOOKKP.open[el.dataset.point] = el.open; };
   });
@@ -461,14 +448,22 @@ function bookExcerptsHtml(point){
 function bookWindowBodyHtml(point){
   const art = BOOKKP.artifact || {};
   const pts = (point.key_points || []).map(x => `<li>${bookText(x)}</li>`).join('');
+  const questions = (point.questions || []).map(q => `<div class="book-question">
+    <div class="book-question-text">${bookText(q.question)}</div><details><summary>查看答案</summary><div>${bookText(q.answer)}</div></details></div>`).join('');
+  const terms = (art.terms || []).map(t => `<li><b>${esc(t.term || '')}</b>
+    ${t.en && t.en !== t.term ? ' · ' + esc(t.en) : ''}<div>${bookText(t.definition || '')}</div></li>`).join('');
   return `<div class="small muted" style="margin-bottom:8px">
       ${esc(art.chapter_name || ('第 ' + BOOKPOP.chapter + ' 章'))}
       ${art.title ? ' · ' + esc(art.title) : ''}
       ${point.source_scope === 'segment' ? ' · 参考本段资料' : ''}</div>
-    <p>${bookText(point.summary)}</p>
+    <div>${bookText(point.summary)}</div>
     ${pts ? `<ul class="lkppts">${pts}</ul>` : ''}
-    ${point.memory_tip ? `<p><b>记忆提示：</b>${bookText(point.memory_tip)}</p>` : ''}
-    ${point.pitfall ? `<p><b>易错点：</b>${bookText(point.pitfall)}</p>` : ''}
+    ${point.memory_tip ? `<div><b>记忆提示：</b>${bookText(point.memory_tip)}</div>` : ''}
+    ${point.pitfall ? `<div><b>易错点：</b>${bookText(point.pitfall)}</div>` : ''}
+    <details class="book-practice"><summary>先回忆，再看答案</summary>${questions}
+      <div class="row"><button class="ghost" data-book-review="again" data-point-id="${esc(point.id)}">还没记住</button>
+      <button class="ghost" data-book-review="remembered" data-point-id="${esc(point.id)}">记住了</button></div></details>
+    ${terms ? `<details class="book-practice"><summary>本章重点名词（${(art.terms || []).length}）</summary><ul>${terms}</ul></details>` : ''}
     <h3 class="bookkp-sec">教材原文与页码</h3>
     ${bookSlideHtml(point)}`;
 }
@@ -509,6 +504,9 @@ function bookWindowPaint(){
   if (body){
     body.innerHTML = bookWindowBodyHtml(point);
     body.scrollTop = oldScroll;
+    body.querySelectorAll('[data-book-review]').forEach(b => {
+      b.onclick = () => bookReview(b.dataset.pointId, b.dataset.bookReview === 'remembered');
+    });
   }
 
   const status = document.getElementById('bookkp-status');

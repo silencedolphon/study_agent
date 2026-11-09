@@ -1,26 +1,55 @@
 // ---------------- 问答助手 ----------------
-// 极简 Markdown 渲染。先转义 HTML 再生成标签，顺序不能反——
-// 反过来就会把用户/模型输出里的 <script> 放进页面。
+// 全站共用 Markdown：禁用原始 HTML，依赖 markdown-it 拒绝危险 URL。
+// 外部图片只提供点击链接，避免阅读未可信资料时自动向外发起请求。
+const STUDY_MD = window.markdownit({html:false, breaks:true, linkify:false});
+const STUDY_MD_LINK = STUDY_MD.renderer.rules.link_open ||
+  ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+STUDY_MD.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const href = tokens[idx].attrGet('href') || '';
+  if (/^(?:https?:)?\/\//i.test(href)){
+    tokens[idx].attrSet('target', '_blank');
+    tokens[idx].attrSet('rel', 'noopener noreferrer');
+  }
+  return STUDY_MD_LINK(tokens, idx, options, env, self);
+};
+const STUDY_MD_IMAGE = STUDY_MD.renderer.rules.image;
+STUDY_MD.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const src = tokens[idx].attrGet('src') || '';
+  if (/^\/(?!\/)/.test(src)) return STUDY_MD_IMAGE(tokens, idx, options, env, self);
+  const label = esc(tokens[idx].content || '查看图片');
+  return /^(?:https?:)?\/\//i.test(src)
+    ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">图片：' + label + '</a>'
+    : '<span>' + label + '</span>';
+};
 function mdToHtml(src){
-  let t = esc(src || '');
-  t = t.replace(/```([\s\S]*?)```/g, (m, c) => `<pre>${c.trim()}</pre>`);
-  t = t.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-  t = t.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-  t = t.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
-  t = t.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-  t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-  t = t.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
-  t = t.replace(/^\s*(\d+)\.\s+(.+)$/gm, '<li>$2</li>');
-  t = t.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
-  t = t.replace(/\n{2,}/g, '</p><p>');
-  t = t.replace(/\n/g, '<br>');
-  return '<p>' + t + '</p>';
+  return '<div class="markdown-body">' + STUDY_MD.render(String(src ?? '')) + '</div>';
 }
+function mdInline(src){ return STUDY_MD.renderInline(String(src ?? '')); }
 
 // 把 [1] [2][3] 变成可点击的引用角标
 function linkCites(html){
-  return html.replace(/\[(\d{1,2})\]/g,
-    '<span class="cite" data-n="$1" title="点开看这条出处">$1</span>');
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    if (node.parentElement && node.parentElement.closest('a,code,pre')) return;
+    const text = node.nodeValue || '';
+    const re = /\[(\d{1,2})\]/g;
+    let match, last = 0, found = false;
+    const frag = document.createDocumentFragment();
+    while ((match = re.exec(text))){
+      found = true;
+      frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+      const cite = document.createElement('span');
+      cite.className = 'cite'; cite.dataset.n = match[1];
+      cite.title = '点开看这条出处'; cite.textContent = match[1];
+      frag.appendChild(cite); last = re.lastIndex;
+    }
+    if (found){ frag.appendChild(document.createTextNode(text.slice(last))); node.replaceWith(frag); }
+  });
+  return tpl.innerHTML;
 }
 
 let CHAT = { msgs: [], ev: [], busy: false };
@@ -41,11 +70,11 @@ async function viewAssistant(){
   try { docs = (await api('/api/docs')).documents || []; } catch(e){}
 
   const hist = CHAT.msgs.map((m, i) => `
-    <div class="msg ${m.role}">
+    <div class="msg ${m.role === 'user' ? 'user' : 'ai'}">
       <div class="who">${m.role === 'user' ? '我' : 'AI'}</div>
       <div class="body">
         <div class="bubble">${m.role === 'user'
-          ? esc(m.content).replace(/\n/g,'<br>')
+          ? mdToHtml(m.content)
           : linkCites(mdToHtml(m.content))}</div>
       </div>
     </div>`).join('');
@@ -136,6 +165,33 @@ function evPopEl(){
   d.className = 'evpop';
   // 点小窗内部不该关掉它；点外部才关（见 evPopOutside）
   d.addEventListener('click', e => e.stopPropagation());
+  d.addEventListener('pointerdown', e => {
+    if (d.dataset.kpPop !== '1' || e.button !== 0) return;
+    const head = e.target.closest && e.target.closest('.ph');
+    if (!head || !d.contains(head) || e.target.closest('button,a,input,select,textarea,summary,[contenteditable]')) return;
+    const rect = d.getBoundingClientRect();
+    d._kpDrag = {id:e.pointerId, x:e.clientX, y:e.clientY, left:rect.left, top:rect.top};
+    d.classList.add('kp-dragging');
+    try { d.setPointerCapture(e.pointerId); } catch(err){}
+    e.preventDefault();
+  });
+  d.addEventListener('pointermove', e => {
+    const drag = d._kpDrag;
+    if (!drag || drag.id !== e.pointerId) return;
+    const de = document.documentElement;
+    const vw = de.clientWidth || window.innerWidth, vh = de.clientHeight || window.innerHeight;
+    const left = Math.max(8, Math.min(drag.left + e.clientX - drag.x, vw - d.offsetWidth - 8));
+    const top = Math.max(8, Math.min(drag.top + e.clientY - drag.y, vh - d.offsetHeight - 8));
+    d._kpPosition = {left, top};
+    d.style.left = Math.round(left) + 'px'; d.style.top = Math.round(top) + 'px';
+  });
+  const endDrag = e => {
+    if (!d._kpDrag || d._kpDrag.id !== e.pointerId) return;
+    d._kpDrag = null; d.classList.remove('kp-dragging');
+    try { if (d.hasPointerCapture(e.pointerId)) d.releasePointerCapture(e.pointerId); } catch(err){}
+  };
+  d.addEventListener('pointerup', endDrag);
+  d.addEventListener('pointercancel', endDrag);
   document.body.appendChild(d);
   EVPOP = d;
   return d;
@@ -171,6 +227,9 @@ function evPopClose(){
     // 卡 C-0042：居中标记与 resize 监听也一起作废，否则下一个出处小窗
     // 会继承"知识点弹窗"的居中身份，或者监听越挂越多。
     EVPOP.dataset.kpPop = '';
+    EVPOP._kpPosition = null;
+    EVPOP._kpDrag = null;
+    EVPOP.classList.remove('kp-dragging');
     if (EVPOP._resizeH) {
       window.removeEventListener('resize', EVPOP._resizeH);
       EVPOP._resizeH = null;
@@ -253,6 +312,10 @@ function evPopPlace(el){
   const vh = de.clientHeight || window.innerHeight;
   const availW = Math.max(120, vw - pad * 2);
   const availH = Math.max(120, vh - pad * 2);
+  const isKp = d.dataset.kpPop === '1';
+  d.style.width = isKp ? Math.min(availW, vw * KPW.width / 100) + 'px' : '';
+  d.style.height = isKp ? Math.min(availH, vh * KPW.height / 100) + 'px' : '';
+  if (isKp){ d.style.maxWidth = availW + 'px'; d.style.maxHeight = availH + 'px'; }
   let w = d.offsetWidth, h = d.offsetHeight;
   // (b) 尺寸自限：比视口还大就压到可用空间，然后重量（否则钳制区间是空的）
   if (w > availW || h > availH){
@@ -260,8 +323,13 @@ function evPopPlace(el){
     if (h > availH) d.style.maxHeight = availH + 'px';
     w = d.offsetWidth; h = d.offsetHeight;
   }
+  d.classList.toggle('kp-narrow', isKp && w < 850);
+  d.classList.toggle('kp-compact', isKp && w < 1000);
   let left, top;
-  if (!c || d.dataset.kpPop === '1'){
+  if (isKp && d._kpPosition){
+    left = d._kpPosition.left;
+    top = d._kpPosition.top;
+  } else if (!c || isKp){
     // (a) 知识点弹窗：水平垂直居中于视口（也是"没有锚点"时的默认落点）
     left = (vw - w) / 2;
     top = (vh - h) / 2;
@@ -279,6 +347,7 @@ function evPopPlace(el){
   top = Math.max(pad, Math.min(top, vh - h - pad));
   d.style.left = Math.round(left) + 'px';
   d.style.top = Math.round(top) + 'px';
+  if (isKp && d._kpPosition) d._kpPosition = {left, top};
   d.style.visibility = '';
   // ★ 大管家修复（2026-09-22）：测量完必须把 display 还原成 CSS 里的 flex。
   //   原写法停在 'block'（内联样式战胜 .evpop{display:flex}），导致
@@ -299,6 +368,14 @@ function evPopMount(el, html){
   const d = evPopEl();
   // html 可省：evPopShow 是先自己填好 innerHTML 再叫这里来定位的
   if (html !== undefined) d.innerHTML = html;
+  if (d.dataset.kpPop === '1'){
+    const head = d.querySelector('.ph');
+    if (head && !head.querySelector('.kp-drag-hint')){
+      const hint = document.createElement('span');
+      hint.className = 'kp-drag-hint'; hint.title = '按住顶部拖动窗口';
+      hint.textContent = '⋮⋮ 拖动'; head.insertBefore(hint, head.firstChild);
+    }
+  }
   evPopPlace(el);
   document.removeEventListener('click', evPopOutside, true);
   document.addEventListener('click', evPopOutside, true);
@@ -349,7 +426,7 @@ function evPopShow(el, n){
         </div>
         <button class="pclose" onclick="evPopClose()" title="关闭（Esc）">✕</button>
       </div>
-      <div class="pbody"><div class="evx" id="evpop-extra"></div><pre>${esc(e.text)}</pre></div>
+      <div class="pbody"><div class="evx" id="evpop-extra"></div>${mdToHtml(e.text)}</div>
       <div class="pf">
         <button class="ghost" onclick="evPopClose();openChunk(${e.chunk_id})">看上下文</button>
         <button class="ghost" onclick="evPopClose();openDoc(${e.doc_id})">看该资料大纲</button>
@@ -555,13 +632,15 @@ async function sendChat(){
   const uEl = document.createElement('div');
   uEl.className = 'msg user';
   uEl.innerHTML = `<div class="who">我</div><div class="body">
-    <div class="bubble">${esc(q).replace(/\n/g,'<br>')}</div></div>`;
+    <div class="bubble">${mdToHtml(q)}</div></div>`;
   const aEl = document.createElement('div');
   aEl.className = 'msg ai';
   aEl.innerHTML = `<div class="who">AI</div><div class="body">
     <div class="bubble"><span class="typing"></span></div></div>`;
   thread.appendChild(uEl);
   thread.appendChild(aEl);
+  const wrap = $('#chatwrap');
+  if (wrap) wrap.classList.remove('is-empty');
   thread.scrollTop = thread.scrollHeight;
   const bubble = aEl.querySelector('.bubble');
   // 出处数据挂在本条消息的 .body 上（见 MSG_EV），流式增量只碰 .bubble。
