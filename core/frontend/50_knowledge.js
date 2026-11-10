@@ -94,15 +94,14 @@ function bindKpBuild(){
 
 async function kpProbe(){
   const st = $('#kp-build-state');
+  let activeText = '';
   // 批量（本卡）
   try {
     const b = await api('/api/kp-build/batch/progress');
     if (b && (b.active || b.status)) {
       renderKpBatch(b);
       if (b.active) watchKpBatch();
-      if (st && b.active) {
-        st.textContent = `批量整理进行中：完成 ${b.n_done}/${b.n_total}…`;
-      }
+      if (b.active) activeText = `批量整理进行中：完成 ${b.n_done}/${b.n_total}…`;
     }
   } catch(e){}
   // 单份（卡 C-0035 的后台线程）：与批量互斥，但页面刷新后要把状态接回来
@@ -111,9 +110,11 @@ async function kpProbe(){
     if (p && (p.active || p.status)) {
       renderKpProgress(p);
       if (p.active) watchKpProgress();
-      if (st && p.active) st.textContent = '有一个单份整理任务正在跑…';
+      if (p.active) activeText = '有一个单份整理任务正在跑…';
     }
   } catch(e){}
+  // 任务结束后清掉上次留下的“正在跑”字样；失败状态仍由进度卡显示。
+  if (st) st.textContent = activeText;
 }
 
 // 状态 → 徽章文案/颜色（与后端 kp_batch 的状态机一一对应）
@@ -528,6 +529,8 @@ async function pollKpProgress(){
     const p = await api('/api/kp-build/progress');
     renderKpProgress(p);
     if (p.active) return true;
+    const st = $('#kp-build-state');
+    if (st && st.textContent === '有一个单份整理任务正在跑…') st.textContent = '';
     const box = $('#kp-build-progress');
     if (p.status === 'done') {
       toast(`整理完成：${p.kp_done || 0} 条 · 花费 CNY${(p.cost_cny || 0).toFixed(4)}｜` +
