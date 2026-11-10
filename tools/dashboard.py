@@ -1895,12 +1895,31 @@ def api_summary_kp(doc_id, kp_id, conn):
 
     n_notes = len(study.notes_for(str(kp.get("id") or ""), doc_id=doc_id))
 
+    path = [str(x) for x in (kp.get("node_path") if isinstance(kp.get("node_path"), list) else kp.get("path")) or []]
+    if path:
+        # 历史产物的 node_path 也会保存同一个错误模板标题。只修明确继承
+        # meta.deck 的根节点；产物经用户手工改名后不会覆盖其自定义标题。
+        from core.document_titles import display_titles, matches_legacy_root
+        corrected_title = display_titles(conn).get(doc_id)
+        row = conn.execute("SELECT title FROM documents WHERE id=?", (doc_id,)).fetchone()
+        old_title = str(row[0] or '') if row else ''
+        artifact_title = str(meta.get('deck') or old_title)
+        artifact_title_is_page_root = bool(re.search(r'[（(]\s*共\s*\d+', artifact_title))
+        # The source document title may already be repaired in the library while
+        # historical artifacts still carry the duplicated embedded title in
+        # both `node_path` and `meta.deck`. `corrected_title` is produced only
+        # for a proven duplicate-title/file-stem mismatch, so match the breadcrumb
+        # against that artifact title before replacing it with the file title.
+        if (corrected_title and not artifact_title_is_page_root
+                and matches_legacy_root(path[0], artifact_title, artifact_title)):
+            path[0] = corrected_title
+
     return {
         "doc_id": doc_id,
         "kp_id": str(kp.get("id") or ""),
         "name": str(kp.get("name") or ""),
         "node_name": str(kp.get("node_name") or ""),
-        "path": [str(x) for x in (kp.get("node_path") if isinstance(kp.get("node_path"), list) else kp.get("path")) or []],
+        "path": path,
         "summary": str(kp.get("summary") or ""),
         "points": [str(x) for x in (kp.get("points") or [])],
         "sources": srcs,
@@ -2154,7 +2173,7 @@ def api_mindmap(conn, doc_id):
         "SELECT id, title, kind, path, n_chunks, status FROM documents WHERE id=?",
         (doc_id,)).fetchone()
     doc = dict(row) if row else {}
-    from core.document_titles import display_titles
+    from core.document_titles import display_titles, matches_legacy_root
     corrected_title = display_titles(conn).get(doc_id)
     meta = art.get("meta") if isinstance(art.get("meta"), dict) else {}
     sm = art.get("summary") or {}
@@ -2202,8 +2221,16 @@ def api_mindmap(conn, doc_id):
         return out
 
     tree, stats = _artifact_tree(art["doc"], doc_id)
-    if corrected_title and tree and tree[0].get('name') == doc.get('title'):
-        tree[0]['name'] = corrected_title
+    if corrected_title and tree:
+        # `corrected_title` is already gated by duplicate metadata plus a unique
+        # source filename. Older summaries may retain a different copied PDF
+        # title than the current library row, so validate the generated suffix
+        # against the artifact's own deck title before repairing the display.
+        artifact_title = str(meta.get('deck') or doc.get('title') or '')
+        artifact_title_is_page_root = bool(re.search(r'[（(]\s*共\s*\d+', artifact_title))
+        if (not artifact_title_is_page_root and matches_legacy_root(
+                tree[0].get('name'), artifact_title, artifact_title)):
+            tree[0]['name'] = corrected_title
     out.update({
         "model": str(sm.get("model") or ""),
         "created_at": sm.get("created_at"),
@@ -2396,9 +2423,11 @@ def api_terms(conn, doc_id):
     except sqlite3.Error:
         row = None
 
+    from core.document_titles import display_titles
+    corrected_title = display_titles(conn).get(doc_id)
     out = {
         "doc_id": doc_id,
-        "title": (str(dict(row).get("title")) if row else "") or ("文档 %d" % doc_id),
+        "title": corrected_title or (str(dict(row).get("title")) if row else "") or ("文档 %d" % doc_id),
         "in_library": row is not None,
         "artifact_state": str(art.get("state") or _ARTIFACT_NONE),
         "n_kps": int((art.get("summary") or {}).get("n_kps") or 0),

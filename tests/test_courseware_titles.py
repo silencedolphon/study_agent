@@ -111,6 +111,60 @@ class CoursewareTitlesTest(unittest.TestCase):
             response = dashboard.api_mindmap(self.conn, 1)
         self.assertEqual(response['tree'][0]['name'], '用户改过的导图标题')
 
+    def test_truncated_page_suffix_requires_matching_original_artifact_title(self):
+        shared = '第三章 非口服给药途径药物药物的吸收'
+        self.add(5, 'raw/第10章 多室模型n.pdf', shared, metadata={'title': shared})
+        self.add(6, 'raw/第11章 多剂量给药.pdf', shared, metadata={'title': shared})
+        root = shared + '（共 44 '
+        artifact = {'state': dashboard._ARTIFACT_V2_STATE, 'doc': {}, 'summary': {},
+                    'meta': {'deck': shared}}
+        with patch.object(dashboard, '_artifact_load', return_value=artifact), \
+             patch.object(dashboard, '_lkp_index', return_value={}), \
+             patch.object(dashboard, '_artifact_tree', return_value=([{'name': root}], {})):
+            result = dashboard.api_mindmap(self.conn, 6)
+        self.assertEqual(result['tree'][0]['name'], '第11章 多剂量给药')
+        # 手工更名会把 meta.deck 同步改成用户所填的标题，不得被覆盖。
+        artifact['meta']['deck'] = root.strip()
+        with patch.object(dashboard, '_artifact_load', return_value=artifact), \
+             patch.object(dashboard, '_lkp_index', return_value={}), \
+             patch.object(dashboard, '_artifact_tree', return_value=([{'name': root}], {})):
+            result = dashboard.api_mindmap(self.conn, 6)
+        self.assertEqual(result['tree'][0]['name'], root)
+
+    def test_artifact_title_repairs_when_library_row_was_already_changed(self):
+        shared = '第三章 非口服给药途径药物药物的吸收'
+        self.add(5, 'raw/other.pdf', shared, metadata={'title': shared})
+        self.add(6, 'raw/第11章 多剂量给药.pdf', '已更新的库标题', metadata={'title': shared})
+        root = shared + '（共 44 '
+        artifact = {'state': dashboard._ARTIFACT_V2_STATE, 'doc': {}, 'summary': {},
+                    'meta': {'deck': shared}}
+        with patch('core.document_titles.display_titles', return_value={6: '第11章 多剂量给药'}), \
+             patch.object(dashboard, '_artifact_load', return_value=artifact), \
+             patch.object(dashboard, '_lkp_index', return_value={}), \
+             patch.object(dashboard, '_artifact_tree', return_value=([{'name': root}], {})):
+            result = dashboard.api_mindmap(self.conn, 6)
+        self.assertEqual(result['tree'][0]['name'], '第11章 多剂量给药')
+
+    def test_summary_breadcrumb_and_terms_repair_preserve_manual_titles(self):
+        shared = '第三章 非口服给药途径药物药物的吸收'
+        self.add(5, 'raw/第10章 多室模型n.pdf', shared, metadata={'title': shared})
+        self.add(6, 'raw/第11章 多剂量给药.pdf', shared, metadata={'title': shared})
+        root = shared + '（共 44'
+        kp = {'id': 'KP-N03-1', 'name': '多剂量', 'node_path': [root, '课程导入']}
+        idx = {'by_id': {'KP-N03-1': kp}, 'meta': {'deck': shared}}
+        with patch.object(dashboard, '_lkp_index', return_value=idx), \
+             patch.object(dashboard, '_lkp_seq', return_value=[{'id':'KP-N03-1'}]), \
+             patch.object(dashboard, '_slide_info', return_value={}), \
+             patch.object(dashboard.study, 'notes_for', return_value=[]):
+            response = dashboard.api_summary_kp(6, 'KP-N03-1', self.conn)
+            self.assertEqual(response['path'], ['第11章 多剂量给药', '课程导入'])
+            self.assertEqual(kp['node_path'][0], root)  # 不改源产物
+            idx['meta']['deck'] = '用户手动设置的标题'
+            self.assertEqual(dashboard.api_summary_kp(6, 'KP-N03-1', self.conn)['path'][0], root)
+        with patch.object(dashboard, '_artifact_load', return_value={}), \
+             patch.object(dashboard, '_terms_payload', return_value={}):
+            self.assertEqual(dashboard.api_terms(self.conn, 6)['title'], '第11章 多剂量给药')
+
     def test_regeneration_uses_repaired_title_without_changing_the_database(self):
         shared = '重复模板标题'
         self.add(1, 'raw/first.pdf', shared, metadata={'title': shared})

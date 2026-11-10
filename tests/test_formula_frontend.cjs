@@ -21,6 +21,15 @@ assert(!render('羰基 C=O；价格 $5 和 $6').includes('class="katex"'));
 assert(!render('`Fsys = Fabs * Fg * FH`').includes('class="katex"'));
 for (const raw of ['F=1−e^(−2An)', 'pH=log(Cu/Ci)', 'dC/dt=kSCs'])
   assert(render(raw).includes('class="katex"'), 'unmarked equation should render: ' + raw);
+for (const raw of ['r=(1−e^(−nkτ))/(1−e^(−kτ))', '(Xn)min=(Xn)max·e^(−kτ)',
+  'fss(n)=1−e^(−nkτ)', '−dX/dt=kX^n', 'fss=Cn/Css=1−e^(−nkτ)',
+  'n=0', 'pH=7.4', 't=τ', 'k=0.693/30', 'V = X/C = X0/C0']) {
+  const html = render(raw);
+  assert(html.includes('class="katex"'), 'recent legacy equation should render: ' + raw);
+  assert(!html.includes('katex-error'), 'rendered expression must be valid LaTeX: ' + raw);
+}
+assert(render('V = X/C = X0/C0').includes('V=X/C = X0/C0'),
+  'chained equality should stay in one formula');
 assert(/<msup><mi>e<\/mi><mrow>.*?<mn>2<\/mn>.*?<\/mrow><\/msup>/.test(render('F=1−e^(−2An)')),
   'a parenthesized exponent must remain grouped in MathML');
 for (const raw of ['C=O', '2026-11-10', '$5 = 1-2', 'https://example.com/?x=1-2',

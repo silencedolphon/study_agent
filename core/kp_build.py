@@ -2359,7 +2359,19 @@ def load_kp_prompts_v2(path):
     # 运行时补充全局展示约定，不更改用户自定义提示词文件或原文件哈希。
     result["sys"] += "\n\n" + MATH_FORMAT_INSTRUCTION
     result["chars"] += len(MATH_FORMAT_INSTRUCTION) + 2
+    # 文件哈希不足以标识真正发送的系统指令：附加规则变化时禁止复用旧结论。
+    effective = json.dumps([result["sys"], result["user"]], ensure_ascii=False,
+                           separators=(",", ":")).encode("utf-8")
+    result["effective_sha256"] = hashlib.sha256(effective).hexdigest()
     return result
+
+
+def _knowledge_prompt_compatible(prev_meta: dict, current: dict) -> bool:
+    """旧产物没有有效指纹时保守视为不兼容，不隐式重做或覆盖。"""
+    prompts = prev_meta.get("prompts") or {}
+    prior = (prompts.get("knowledge") or {}) if isinstance(prompts, dict) else {}
+    return isinstance(prior, dict) and bool(prior.get("effective_sha256")) and (
+        prior.get("effective_sha256") == current.get("effective_sha256"))
 
 
 def doc_title_v2(doc_id: int, db_path: str | os.PathLike | None = None) -> str:
@@ -4645,7 +4657,8 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
     n_plan = int(prev_struct.get("n_leaves") or 0) if reuse_ok else 0
 
     done = set()
-    if reuse_ok:
+    knowledge_compatible = _knowledge_prompt_compatible(prev_meta, kp_prompt)
+    if reuse_ok and knowledge_compatible:
         for r in prev.get("knowledge_points") or []:
             if not isinstance(r, dict):
                 continue
@@ -4737,6 +4750,7 @@ def estimate_v2(doc_id, *, prompt_path, struct_prompt_path, db_path):
         # 「开始整理」就 `ValueError: invalid literal for int() with base 10: 'KP-N03-1'`。
         "already_done_pages": sorted(done),
         "already_out": out.exists(),
+        "resume_requires_force": bool(prev.get("knowledge_points") and not knowledge_compatible),
         "out_path": str(out),
         "prompt_path": str(prompt_path),
         "prompt_sha256": kp_prompt["sha256"],
@@ -4907,6 +4921,7 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
             'knowledge': {
                 'path': kp_prompt['path'],
                 'sha256': kp_prompt['sha256'],
+                'effective_sha256': kp_prompt.get('effective_sha256', ''),
                 'chars': kp_prompt['chars'],
             },
         },
@@ -5094,6 +5109,17 @@ def build_v2(
     prev = {} if force else prev_raw
     prev_meta = prev_raw.get("meta") if isinstance(prev_raw.get("meta"), dict) else {}
 
+    # Existing summaries remain readable and untouched; a normal resume must not
+    # silently reuse an obsolete prompt or start a potentially expensive rebuild.
+    if (not force and prev and prev.get("knowledge_points")
+            and not _knowledge_prompt_compatible(prev_meta, kp_prompt)):
+        error = ("已有知识点使用旧版或无法确认的公式提示规则；为避免重复付费和覆盖，"
+                 "已保留原成果并停止续跑。如需按新规则重新生成，请明确选择强制重建。")
+        if progress_on:
+            progress.end("failed", error=error)
+        return {"ok": False, "error": error, "doc_id": int(doc_id),
+                "requires_force": True, "existing_preserved": True}
+
     # 账本继承：产物里已有的调用记录（带 run 轮次）原样接过来，本轮记为下一轮。
     calls = []
     for _c in (prev_meta.get("calls") or []):
@@ -5123,6 +5149,7 @@ def build_v2(
              or prev_struct.get("input_signature") == structure_input_signature(ch))
         and str((prev_prompts.get("structure") or {}).get("sha256") or "") == st_prompt["sha256"]
         and str((prev_prompts.get("knowledge") or {}).get("sha256") or "") == kp_prompt["sha256"]
+        and _knowledge_prompt_compatible(prev_meta, kp_prompt)
     )
 
     if reuse:

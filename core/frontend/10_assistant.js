@@ -16,9 +16,14 @@ const LEGACY_FORMULAS = [
   [/dC\/dt\s*=\s*DS\/h\s*[·⋅]\s*\(Cs\s*[−-]\s*C\)\s*=\s*kS\(Cs\s*[−-]\s*C\)/g, '\\frac{dC}{dt} = \\frac{DS}{h}(C_s-C)=kS(C_s-C)'],
   [/\bt1\/2\b/g, 't_{1/2}'], [/\bCmax\b/g, 'C_{\\max}'],
 ];
-// 兼容旧总结中的高置信度、无分隔符等式。只接受 ASCII 变量、数字和明确
-// 运算符，不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
-const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([A-Za-z][A-Za-z0-9]{0,7}(?:\/[A-Za-z][A-Za-z0-9]{0,7})?)\s*=\s*([A-Za-z0-9]+(?:[()+*/^−×·-][A-Za-z0-9()+*/^−×·-]*)*)/g;
+// 兼容旧总结中的高置信度、无分隔符等式。仅处理边界清晰的表达式，
+// 不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
+const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω(−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=-]+)*)/g;
+const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'epsilon',
+  'θ':'theta','λ':'lambda','μ':'mu','ν':'nu','ξ':'xi','π':'pi','ρ':'rho',
+  'σ':'sigma','τ':'tau','φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
+  'Γ':'Gamma','Δ':'Delta','Θ':'Theta','Λ':'Lambda','Ξ':'Xi','Π':'Pi',
+  'Σ':'Sigma','Φ':'Phi','Ψ':'Psi','Ω':'Omega'};
 STUDY_MD.renderer.rules.text = (tokens, idx) => {
   const raw = tokens[idx].content;
   const matches = [];
@@ -39,11 +44,17 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
       // 不吞掉外层中文括注的右括号。
       while (rhs.endsWith(')') && (rhs.match(/\)/g) || []).length > (rhs.match(/\(/g) || []).length)
         rhs = rhs.slice(0, -1);
-      if (!rhs || (!m[1].includes('/') && !/[()+*/^−×·-]/.test(rhs))) continue;
+      while (rhs.endsWith('.')) rhs = rhs.slice(0, -1);
+      const simpleMathValue = /^(?:\d+(?:\.\d+)?|[α-ωΑ-Ω])$/.test(rhs);
+      if (!rhs || (!simpleMathValue && !m[1].includes('/') && !/[()+*/^−×·=-]/.test(rhs))) continue;
       if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length) continue;
+      // 不接受无法安全转换的嵌套指数或未映射希腊字符，保留原文。
+      if (/[α-ωΑ-Ω]/.test(m[0].replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '' : ch))) continue;
       const safe = s => s.replace(/−/g, '-').replace(/\^\(([^()]*)\)/g, '^{$1}')
         .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
-        .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1');
+        .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1')
+        .replace(/[α-ωΑ-Ω]/g, ch => '\\' + GREEK_MATH[ch] + ' ');
+      if (/\^\(/.test(safe(rhs))) continue;
       matches.push({start: m.index, end: m.index + m[0].length - (m[2].length - rhs.length),
         latex: safe(m[1]) + '=' + safe(rhs)});
     }

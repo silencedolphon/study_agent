@@ -74,6 +74,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-NetTCPConnection
 if not errorlevel 1 (
     echo.
     echo   Port %PORT% is already in use. The dashboard is probably already running.
+    echo   If you just updated the project, this running instance may still use old code.
+    echo   Close the existing dashboard first, then run this launcher again to load updates.
     echo   Opening: http://127.0.0.1:%PORT%/
     echo.
     echo   To run a second instance on another port:

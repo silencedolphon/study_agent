@@ -1,8 +1,24 @@
 """Display repair for legacy courseware with duplicated embedded metadata titles."""
 from collections import Counter
 import json
+import re
 import sqlite3
 from pathlib import PurePosixPath
+
+
+def matches_legacy_root(name, original_title, artifact_deck, *, require_deck=False):
+    """Match only a known inherited title (possibly with a generated page suffix)."""
+    name = str(name or '').strip()
+    old = str(original_title or '').strip()
+    deck = str(artifact_deck or '').strip()
+    if not name or not old or (require_deck and deck != old) or (deck and deck != old):
+        return False
+    if name == old:
+        return True
+    if deck != old or not name.startswith(old):
+        return False
+    suffix = name[len(old):]
+    return bool(re.fullmatch(r'[（(]\s*共\s*\d+\s*(?:页\s*)?[）)]?\s*', suffix))
 
 
 def display_titles(conn):
