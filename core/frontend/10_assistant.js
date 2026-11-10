@@ -2,6 +2,62 @@
 // 全站共用 Markdown：禁用原始 HTML，依赖 markdown-it 拒绝危险 URL。
 // 外部图片只提供点击链接，避免阅读未可信资料时自动向外发起请求。
 const STUDY_MD = window.markdownit({html:false, breaks:true, linkify:false});
+// 数学公式作为 Markdown 语法解析，代码块和代码行不受影响。禁用 KaTeX 的
+// trust 扩展，阻止公式中注入链接、HTML 或外部资源。
+STUDY_MD.use(texmath, {engine: window.katex, delimiters: ['dollars', 'brackets'],
+  katexOptions: {trust: false, throwOnError: false, strict: 'ignore', maxExpand: 1000}});
+// 兼容旧版成果中少数明确的药动学记法；只处理 Markdown 文本 token，
+// 不碰代码、链接地址或已标注的数学公式，也不猜测 C=O 等化学结构。
+const LEGACY_FORMULAS = [
+  [/Fsys\s*=\s*Fabs\s*[*×]\s*Fg\s*[*×]\s*FH/g, 'F_{\\mathrm{sys}} = F_{\\mathrm{abs}} \\times F_{g} \\times F_{H}'],
+  [/\bF\s*=\s*fa\s*[×*]\s*fg\s*[×*]\s*fh\s*[×*]\s*fl\b/g, 'F = f_a \\times f_g \\times f_h \\times f_l'],
+  [/pKa\s*[−-]\s*pH\s*=\s*log\(Cu\s*\/\s*Ci\)/g, '\\mathrm{p}K_a - \\mathrm{pH} = \\log(C_u/C_i)'],
+  [/pKa\s*[−-]\s*pH\s*=\s*log\(Ci\s*\/\s*Cu\)/g, '\\mathrm{p}K_a - \\mathrm{pH} = \\log(C_i/C_u)'],
+  [/dC\/dt\s*=\s*DS\/h\s*[·⋅]\s*\(Cs\s*[−-]\s*C\)\s*=\s*kS\(Cs\s*[−-]\s*C\)/g, '\\frac{dC}{dt} = \\frac{DS}{h}(C_s-C)=kS(C_s-C)'],
+  [/\bt1\/2\b/g, 't_{1/2}'], [/\bCmax\b/g, 'C_{\\max}'],
+];
+// 兼容旧总结中的高置信度、无分隔符等式。只接受 ASCII 变量、数字和明确
+// 运算符，不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
+const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([A-Za-z][A-Za-z0-9]{0,7}(?:\/[A-Za-z][A-Za-z0-9]{0,7})?)\s*=\s*([A-Za-z0-9]+(?:[()+*/^−×·-][A-Za-z0-9()+*/^−×·-]*)*)/g;
+STUDY_MD.renderer.rules.text = (tokens, idx) => {
+  const raw = tokens[idx].content;
+  const matches = [];
+  for (const [pattern, latex] of LEGACY_FORMULAS) {
+    pattern.lastIndex = 0;
+    for (const m of raw.matchAll(pattern)) matches.push({start: m.index, end: m.index + m[0].length, latex});
+  }
+  let linkDepth = 0;
+  for (let i = 0; i < idx; i++) {
+    if (tokens[i].type === 'link_open') linkDepth++;
+    if (tokens[i].type === 'link_close') linkDepth--;
+  }
+  if (!linkDepth) {
+    LEGACY_EQUATION.lastIndex = 0;
+    for (const m of raw.matchAll(LEGACY_EQUATION)) {
+      if (/https?:\/\/\S*$/i.test(raw.slice(0, m.index))) continue;
+      let rhs = m[2];
+      // 不吞掉外层中文括注的右括号。
+      while (rhs.endsWith(')') && (rhs.match(/\)/g) || []).length > (rhs.match(/\(/g) || []).length)
+        rhs = rhs.slice(0, -1);
+      if (!rhs || (!m[1].includes('/') && !/[()+*/^−×·-]/.test(rhs))) continue;
+      if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length) continue;
+      const safe = s => s.replace(/−/g, '-').replace(/\^\(([^()]*)\)/g, '^{$1}')
+        .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
+        .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1');
+      matches.push({start: m.index, end: m.index + m[0].length - (m[2].length - rhs.length),
+        latex: safe(m[1]) + '=' + safe(rhs)});
+    }
+  }
+  matches.sort((a, b) => a.start - b.start || b.end - a.end);
+  let html = '', last = 0;
+  for (const m of matches) {
+    if (m.start < last) continue;
+    html += STUDY_MD.utils.escapeHtml(raw.slice(last, m.start));
+    html += window.katex.renderToString(m.latex, {trust: false, throwOnError: false, maxExpand: 1000});
+    last = m.end;
+  }
+  return html + STUDY_MD.utils.escapeHtml(raw.slice(last));
+};
 const STUDY_MD_LINK = STUDY_MD.renderer.rules.link_open ||
   ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
 STUDY_MD.renderer.rules.link_open = (tokens, idx, options, env, self) => {

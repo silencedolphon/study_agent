@@ -7,6 +7,8 @@
 
 **前端 Markdown 组件**：`markdown-it` 15.0.3，MIT 许可，来源 <https://github.com/markdown-it/markdown-it>。许可全文附在 `core/frontend/vendor_markdown_it.js` 顶部及同目录 `vendor_markdown_it.LICENSE.txt`。
 
+**前端公式组件**：`KaTeX` 0.16.22（MIT，<https://github.com/KaTeX/KaTeX>）及 `markdown-it-texmath` 1.0.0（MIT，<https://github.com/goessner/markdown-it-texmath>）；许可全文分别见 `core/frontend/vendor_katex.LICENSE.txt` 和 `core/frontend/vendor_texmath.LICENSE.txt`。
+
 ---
 
 ## 0. 这个文件是干什么的

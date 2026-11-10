@@ -33,7 +33,7 @@ class TestTextbookPopup(unittest.TestCase):
         for probe in (
             "book-point", "data-book-source", "data-book-review",
             "还没记住", "记住了", "data-book-window",
-            "📖 窗口阅读", "bookOpenWindow(",
+            "📖 打开窗口阅读", "bookOpenWindow(",
         ):
             self.assertIn(probe, self.js, f"内联入口/复习被破坏：{probe}")
 

@@ -371,6 +371,13 @@ def _title_of(path: Path, res: extract.ExtractResult) -> str:
     return max(cands, key=_score_title)
 
 
+def _document_title(path: Path, res: extract.ExtractResult, kind: str, is_textbook: bool) -> str:
+    """课件按自身文件名命名，避免多个文件继承相同模板标题。"""
+    if not is_textbook and kind in ("pdf", "pptx"):
+        return _clean_title(path.stem) or path.stem
+    return _title_of(path, res)
+
+
 def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
                 with_ocr: bool = True, verbose: bool = False,
                 with_figures: bool | None = None,
@@ -389,6 +396,8 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     打错一个字母就悄悄按课件入库、把按章切块的事瞒下来，是最不该有的失败方式。
     """
     path = path.resolve()
+    # 后续可能把原文件转换或切成 *_slides.pdf，展示标题仍应取用户提供的文件名。
+    original_path = path
     _mode = (mode or "").strip().lower()
     if _mode not in ("", TEXTBOOK_MODE):
         return {"path": _rel(path), "status": "failed",
@@ -618,7 +627,9 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
             return _tag({"path": rel, "status": status,
                          "reason": "; ".join(res.warnings) or "未提取到任何文本"})
 
-    title = _title_of(path, res)
+    # 课件的 PDF 元数据常继承自同一 PowerPoint 模板，不能作为不同文件的
+    # 名称；始终使用各自的原始文件名，教材专线仍沿用原有标题识别。
+    title = _document_title(path if is_textbook else original_path, res, kind, is_textbook)
     n_pages = _page_count(res)
 
     # 先确保 `documents` 里有一行：识图（写 figure_desc）与全局分析都要 doc_id，

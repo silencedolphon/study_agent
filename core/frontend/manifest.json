@@ -3,6 +3,8 @@
     "00_boot.js",
     "05_display.js",
     "vendor_markdown_it.js",
+    "vendor_katex.js",
+    "vendor_texmath.js",
     "10_assistant.js",
     "20_overview.js",
     "30_review.js",

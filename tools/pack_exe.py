@@ -347,13 +347,18 @@ def stage_assets(*, minimal: bool) -> tuple[list[str], list[str]]:
     if not manifest.is_file():
         raise AuditError("缺少看板页面清单：%s" % manifest)
     scripts = json.loads(manifest.read_text(encoding="utf-8"))["scripts"]
-    for name in ("index.html", "style.css", "manifest.json", *scripts):
+    for name in ("index.html", "style.css", "vendor_katex.css", "vendor_katex.LICENSE.txt",
+                 "vendor_texmath.LICENSE.txt", "manifest.json", *scripts):
         src = frontend_src / name
         if not src.is_file():
             raise AuditError("缺少看板页面资源：%s" % src)
         dst = frontend_dst / name
         shutil.copy2(src, dst)
         picked.append(dst)
+    fonts_src = frontend_src / "katex_fonts"
+    if not fonts_src.is_dir():
+        raise AuditError("缺少公式字体：%s" % fonts_src)
+    shutil.copytree(fonts_src, frontend_dst / "katex_fonts", dirs_exist_ok=True)
     add_data.append("%s;core/frontend" % frontend_dst)
     notes.append("core/frontend：HTML、CSS 与 %d 份 JavaScript 资源" % len(scripts))
 

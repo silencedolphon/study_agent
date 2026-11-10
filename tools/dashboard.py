@@ -225,8 +225,9 @@ def _load_index_html() -> str:
     """Read the page assets once; the response stays a self-contained HTML page."""
     html = (_FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
     css = (_FRONTEND_DIR / "style.css").read_text(encoding="utf-8")
+    css += "\n" + (_FRONTEND_DIR / "vendor_katex.css").read_text(encoding="utf-8").replace('url(fonts/', 'url(/assets/katex/')
     scripts = json.loads((_FRONTEND_DIR / "manifest.json").read_text(encoding="utf-8"))["scripts"]
-    js = "".join((_FRONTEND_DIR / name).read_text(encoding="utf-8") for name in scripts)
+    js = "\n;\n".join((_FRONTEND_DIR / name).read_text(encoding="utf-8") for name in scripts)
     return html.replace("{{STUDY_AGENT_CSS}}", css, 1).replace(
         "{{STUDY_AGENT_JS}}", js, 1)
 
@@ -1463,11 +1464,13 @@ def _artifact_doc_list(conn):
     （未整理 / 刚被清除）在页签上根本看不见——人拍完清除，页面应当当场告诉他
     "这份回到未整理了"，而不是让这份课件从下拉框里凭空消失。
     """
+    from core.document_titles import display_titles
     try:
         rows = conn.execute("SELECT id, title, kind FROM documents").fetchall()
     except sqlite3.Error:
         rows = []
     docs = {int(r["id"]): dict(r) for r in rows}
+    corrected = display_titles(conn)
     idx = _lkp_load_dir()
     dids = sorted(set(docs) | set(idx))
     items = []
@@ -1478,7 +1481,7 @@ def _artifact_doc_list(conn):
         sm = rec.get("summary") or {}
         item = {
             "doc_id": did,
-            "title": d.get("title") or ("文档 %d" % did),
+            "title": corrected.get(did) or d.get("title") or ("文档 %d" % did),
             "kind": d.get("kind") or "",
             "in_library": did in docs,
             "artifact_state": state,
@@ -2151,6 +2154,8 @@ def api_mindmap(conn, doc_id):
         "SELECT id, title, kind, path, n_chunks, status FROM documents WHERE id=?",
         (doc_id,)).fetchone()
     doc = dict(row) if row else {}
+    from core.document_titles import display_titles
+    corrected_title = display_titles(conn).get(doc_id)
     meta = art.get("meta") if isinstance(art.get("meta"), dict) else {}
     sm = art.get("summary") or {}
     state = str(art.get("state") or _ARTIFACT_NONE)
@@ -2159,7 +2164,7 @@ def api_mindmap(conn, doc_id):
 
     out = {
         "doc_id": doc_id,
-        "title": doc.get("title") or ("文档 %d" % doc_id),
+        "title": corrected_title or doc.get("title") or ("文档 %d" % doc_id),
         "kind": doc.get("kind") or "",
         "in_library": row is not None,
         "data_source": "artifact",
@@ -2197,6 +2202,8 @@ def api_mindmap(conn, doc_id):
         return out
 
     tree, stats = _artifact_tree(art["doc"], doc_id)
+    if corrected_title and tree and tree[0].get('name') == doc.get('title'):
+        tree[0]['name'] = corrected_title
     out.update({
         "model": str(sm.get("model") or ""),
         "created_at": sm.get("created_at"),
@@ -5256,7 +5263,16 @@ def api_rename_doc_title(conn, payload):
         return _rename_error("新标题与原标题相同，没有要改的", {"doc_id": doc_id})
 
     try:
-        conn.execute("UPDATE documents SET title=? WHERE id=?", (clean, doc_id))
+        current = conn.execute("SELECT extra FROM documents WHERE id=?", (doc_id,)).fetchone()
+        try:
+            extra = json.loads(current['extra'] or '{}') if current else {}
+        except (ValueError, TypeError):
+            extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+        extra['title_manually_renamed'] = True
+        conn.execute("UPDATE documents SET title=?, extra=? WHERE id=?",
+                     (clean, json.dumps(extra, ensure_ascii=False), doc_id))
         conn.commit()
     except sqlite3.Error as e:
         return _rename_error(
@@ -6974,6 +6990,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, INDEX_HTML.encode("utf-8"),
                            "text/html; charset=utf-8")
                 return None
+
+            # Only bundled KaTeX fonts; no arbitrary filesystem paths.
+            if path.startswith('/assets/katex/'):
+                name = path[len('/assets/katex/'):]
+                if not re.fullmatch(r'KaTeX_[A-Za-z0-9_-]+\.(?:woff2|woff|ttf)', name):
+                    return self._json({'error': 'not found'}, 404)
+                file = _FRONTEND_DIR / 'katex_fonts' / name
+                if not file.is_file():
+                    return self._json({'error': 'not found'}, 404)
+                mime = {'woff2': 'font/woff2', 'woff': 'font/woff', 'ttf': 'font/ttf'}[name.rsplit('.', 1)[-1]]
+                return self._send(200, file.read_bytes(), mime)
 
             # ---------------- 进度 / 分享 ----------------
             if path == "/api/ingest/progress":

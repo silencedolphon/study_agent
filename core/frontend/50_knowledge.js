@@ -990,7 +990,7 @@ function mmNodes(list, pkey, context = MINDMAP){
                   : '该页路径还有下级节点，按当前口径不建知识点')
               : '非末级节点：本身不含知识点，展开看下面的末级节点'));
     const name = `<span class="mmname${cls}" data-k="${key}"
-      data-name="${esc(n.name)}" title="${esc(tip)}">${esc(n.name)}</span>`;
+      data-name="${esc(n.name)}" title="${esc(tip)}">${mdInline(n.name)}</span>`;
     const meta = `<span class="small muted"> ${n.n_pages} 页${
       n.page ? ' · p.' + n.page : ''}</span>`;
     if (n.children && n.children.length){

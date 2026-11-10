@@ -20,6 +20,8 @@ const ctx = {console, localStorage:{getItem:k=>store.get(k) ?? null,
 ctx.window = ctx;
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(front, 'vendor_markdown_it.js'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(front, 'vendor_katex.js'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(front, 'vendor_texmath.js'), 'utf8'), ctx);
 vm.runInContext(fs.readFileSync(path.join(front, '05_display.js'), 'utf8'), ctx);
 vm.runInContext(`const esc = s => String(s??'').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));`, ctx);

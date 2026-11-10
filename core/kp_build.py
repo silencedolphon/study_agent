@@ -2344,16 +2344,26 @@ def load_struct_prompts(path: str | os.PathLike | None = None) -> dict:
                                 ("PROMPT-STRUCT-MERGE-USER", "merge_user")])
 
 
+MATH_FORMAT_INSTRUCTION = r"""
+公式格式要求：材料中出现的数学、物理或化学公式，尽量用标准 LaTeX 表示。
+正文中的短公式使用 $...$，需要独立展示的公式使用 $$...$$。只为确实是公式的内容加数学定界符，普通文字、金额、代码和网址保持原样；不要凭空补充公式或改变原义。输出仍须是合法 JSON：JSON 字符串里的 LaTeX 反斜杠必须转义为双反斜杠，例如 "$\\frac{a}{b}$"。
+""".strip()
+
+
 def load_kp_prompts_v2(path):
     p = _prompt_path_v2(KP_PROMPT_NAME_V2, path)
-    return _load_md_prompts(p, [
+    result = _load_md_prompts(p, [
         ("PROMPT-SYS", "sys"),
         ("PROMPT-USER", "user"),
     ])
+    # 运行时补充全局展示约定，不更改用户自定义提示词文件或原文件哈希。
+    result["sys"] += "\n\n" + MATH_FORMAT_INSTRUCTION
+    result["chars"] += len(MATH_FORMAT_INSTRUCTION) + 2
+    return result
 
 
 def doc_title_v2(doc_id: int, db_path: str | os.PathLike | None = None) -> str:
-    """v2 的课件名：**只查库里的 `documents.title`**（不读 outline）。
+    """v2 的课件名：读取本课件的标题，兼容历史重复元数据（不读 outline）。
 
     ⚠ 卡 C-0049 实测踩到过：v1 的 `doc_title()` 会先读 `logs/outline/<id>.json` 取
     `deck` 兜底——v2 若直接复用它，就仍然依赖入库结构（离线守卫反证当场抓到）。
@@ -2363,10 +2373,13 @@ def doc_title_v2(doc_id: int, db_path: str | os.PathLike | None = None) -> str:
     title = ""
     try:
         conn = sqlite3.connect("file:" + db.as_posix() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
         try:
             row = conn.execute("SELECT title FROM documents WHERE id=?",
                                (int(doc_id),)).fetchone()
-            title = str(row[0] or "").strip() if row else ""
+            from core.document_titles import display_titles
+            title = display_titles(conn).get(int(doc_id)) or (
+                str(row["title"] or "").strip() if row else "")
         finally:
             conn.close()
     except Exception:  # noqa: BLE001

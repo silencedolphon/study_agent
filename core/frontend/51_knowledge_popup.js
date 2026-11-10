@@ -140,7 +140,7 @@ function mmRenderKp(d, el, keepDeck){
       <div class="mmkp-main">
     <div class="ph">
       <div class="src">
-        <div class="loc">${esc(d.name || d.kp_id || '')}
+        <div class="loc">${mdInline(d.name || d.kp_id || '')}
           <span class="badge">${esc(d.kp_id || '')}</span>
           <span class="small muted">末级知识点 · 第 ${esc(d.level || '?')} 层</span></div>
         <div class="hdg">${esc((d.path || []).join(' › ') || d.node_name || '')}</div>

@@ -482,7 +482,7 @@ function bookWindowPaint(){
   const oldScroll = body ? body.scrollTop : 0;
 
   const loc = document.getElementById('bookkp-loc');
-  if (loc) loc.innerHTML = `${esc(point.title)} <span class="badge">教材知识点</span>`;
+  if (loc) loc.innerHTML = `${mdInline(point.title)} <span class="badge">教材知识点</span>`;
   const hdg = document.getElementById('bookkp-hdg');
   if (hdg) hdg.textContent = `${art.chapter_name || ('第 ' + BOOKPOP.chapter + ' 章')}${
     art.title ? ' · ' + art.title : ''} · doc#${BOOKPOP.docId}`;
@@ -495,7 +495,7 @@ function bookWindowPaint(){
         const ps = BOOKPOP.pages[p.id];
         const lab = ps === undefined ? '' : bookPageLabel(ps);
         return `<li><a href="#" class="mms-node mms-kp bookkp-dir${i === BOOKPOP.idx ? ' on' : ''}"
-          data-bookkp-idx="${i}" title="${esc(p.title || '')}">${i + 1}. ${esc(p.title || p.id || '')}${
+          data-bookkp-idx="${i}" title="${esc(p.title || '')}">${i + 1}. ${mdInline(p.title || p.id || '')}${
           lab ? `<span class="mms-pg">${esc(lab)}</span>` : ''}</a></li>`;
       }).join('')}</ul>`;
     side.scrollTop = oldSide;
