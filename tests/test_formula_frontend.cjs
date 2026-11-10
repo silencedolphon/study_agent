@@ -25,7 +25,7 @@ for (const raw of ['F=1−e^(−2An)', 'pH=log(Cu/Ci)', 'dC/dt=kSCs'])
 for (const raw of ['r=(1−e^(−nkτ))/(1−e^(−kτ))', '(Xn)min=(Xn)max·e^(−kτ)',
   'fss(n)=1−e^(−nkτ)', '−dX/dt=kX^n', 'fss=Cn/Css=1−e^(−nkτ)',
   'n=0', 'pH=7.4', 't=τ', 'k=0.693/30', 'V = X/C = X0/C0',
-  'R=1/[1−e^(−kτ)]']) {
+  'R=1/[1−e^(−kτ)]', 'X0*＝X0/(1−e^(−kτ))', 'k＝0.693/t1/2']) {
   const html = render(raw);
   assert(html.includes('class="katex"'), 'recent legacy equation should render: ' + raw);
   assert(!html.includes('katex-error'), 'rendered expression must be valid LaTeX: ' + raw);
@@ -36,6 +36,10 @@ assert(tex('X0*=X0/(1-e^(-kτ))') === 'X_{0}^{\\star}=\\frac{X_{0}}{1-e^{-k\\tau
   'loading-dose formula should render with a proper fraction and indices');
 assert(tex('k=0.693/t1/2') === 'k=\\frac{0.693}{t_{1/2}}',
   'half-life denominator should remain a subscript inside the fraction');
+assert(tex('X0*＝X0/(1−e^(−kτ))') === 'X_{0}^{\\star}=\\frac{X_{0}}{1-e^{-k\\tau }}',
+  'full-width equals in legacy Render data must still render as LaTeX fractions');
+assert(tex('k＝0.693/t1/2') === 'k=\\frac{0.693}{t_{1/2}}',
+  'full-width equals must not bypass formula parsing');
 assert(tex('R=1/[1−e^(−kτ)]') === 'R=\\frac{1}{[1-e^{-k\\tau }]}',
   'square-bracketed accumulation-factor equation should remain complete as a fraction');
 assert(/<msup><mi>e<\/mi><mrow>.*?<mn>2<\/mn>.*?<\/mrow><\/msup>/.test(render('F=1−e^(−2An)')),
