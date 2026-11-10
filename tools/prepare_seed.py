@@ -130,7 +130,13 @@ def prepare(target: Path | None = None) -> bool:
         print('Checksum verified; extracting and importing...', flush=True)
         extract_verified(archive, extracted)
         from import_library_snapshot import import_snapshot
-        count = import_snapshot(extracted, target)
+        # The published release is a full source bundle rooted at study_agent/;
+        # data-only snapshots remain supported at the extraction root.
+        wrapped = extracted / 'study_agent'
+        snapshot_root = wrapped if wrapped.is_dir() and (
+            (wrapped / 'index' / 'study.db').is_file() or (wrapped / 'subjects').is_dir()
+        ) else extracted
+        count = import_snapshot(snapshot_root, target)
         print(f'Learning-data initialization completed: {count}', flush=True)
     return True
 
