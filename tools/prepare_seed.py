@@ -16,8 +16,8 @@ import zipfile
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SEED_URL = ('https://github.com/silencedolphon/study_agent/releases/download/'
             'learning-data-20261110/study-agent-learning-data-20261110.zip')
-SEED_SHA256 = '90849a58c578ca0d13515eab41dc992c727cdfb0ce7dc1794c0801ed8355292f'
-SEED_SIZE = 1534147557
+SEED_SHA256 = 'f3a32fe489223d5fb795caa596ca57ec198208fddd42bd06163948fc47d3ccc8'
+SEED_SIZE = 1402654621
 MAX_EXTRACTED_SIZE = 4 * 1024 ** 3
 MAX_FILE_SIZE = 1024 ** 3
 MAX_ENTRIES = 100_000
