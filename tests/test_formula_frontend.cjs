@@ -14,6 +14,17 @@ for (const src of [String.raw`行内 $E=mc^2$ 文本`, String.raw`\(\frac{a}{b}\
                    String.raw`$$\frac{a}{b}$$`, String.raw`\[x^2\]`]) {
   assert(render(src).includes('class="katex"'), 'math should render: ' + src);
 }
+assert(tex(String.raw`公式为：\[\frac{dX}{dt}=kX\]，其余正文`) === '\\frac{dX}{dt}=kX',
+  'multiline bracket-delimited math embedded in a prose paragraph should render');
+assert(tex(String.raw`裸 TeX：\frac{a+b}{c}`) === '\\frac{a+b}{c}',
+  'bare LaTeX fractions in older outputs should render');
+assert(tex(String.raw`裸 TeX：\sqrt[3]{x}`) === '\\sqrt[3]{x}',
+  'bare LaTeX roots in older outputs should render');
+assert(!render(String.raw`代码：` + '`' + String.raw`\frac{a}{b}` + '`').includes('class="katex"'),
+  'bare LaTeX inside inline code is not math');
+const unicodeDerivative = '𝑑𝑋𝐶\n𝑑𝑡=𝑘21𝑋𝑝−𝑘12𝑋𝐶−𝑘10𝑋𝐶';
+assert(tex(unicodeDerivative).startsWith('\\frac{dXC}{dt}=k21Xp'),
+  'Unicode OCR math and stacked derivative layout should be normalized into LaTeX');
 assert(!render('`$x$`').includes('class="katex"'), 'code is not math');
 for (const raw of ['Fsys = Fabs * Fg * FH', 'F = fa × fg × fh × fl',
   'pKa−pH=log(Cu/Ci)', 'dC/dt = DS/h·(Cs−C) = kS(Cs−C)', 't1/2 超过 50 h'])
@@ -48,6 +59,8 @@ for (const raw of ['C=O', '2026-11-10', '$5 = 1-2', 'https://example.com/?x=1-2'
                    '[x=1-2](https://example.com)', '`pH=log(Cu/Ci)`'])
   assert(!render(raw).includes('class="katex"'), 'non-math must remain unchanged: ' + raw);
 assert(render('**重要**：普通文本').includes('<strong>重要</strong>'));
+assert(/\.katex\{font-size:2em!important\}/.test(fs.readFileSync(path.join(root, 'style.css'), 'utf8')),
+  'formula font size should be twice the surrounding text size');
 assert(!render(String.raw`$\href{javascript:alert(1)}{click}$`).includes('href="javascript:'));
 assert(!render('<img src=x onerror=alert(1)>').includes('<img'));
 console.log('Markdown + LaTeX rendering tests passed');

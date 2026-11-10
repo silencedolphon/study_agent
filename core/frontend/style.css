@@ -1195,7 +1195,7 @@ button.ghost:hover{background:var(--panel2)}
 .markdown-body table{display:block;width:max-content;max-width:100%;overflow-x:auto;margin:.7em 0;border:1px solid var(--line)}
 .markdown-body th,.markdown-body td{white-space:normal;border:1px solid var(--line);padding:6px 9px}
 .markdown-body img{max-width:100%;height:auto}.note-body,.lkpsum,.rv-sum-body{white-space:normal}
-.katex{font-size:1.4em!important}
+.katex{font-size:2em!important}
 
 /* 知识点窗口：标题栏拖动，尺寸较窄时将侧栏切换为抽屉。 */
 .evpop[data-kp-pop="1"] .ph{cursor:grab;touch-action:none;user-select:none}

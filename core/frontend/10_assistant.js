@@ -24,6 +24,99 @@ const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'eps
   'σ':'sigma','τ':'tau','φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
   'Γ':'Gamma','Δ':'Delta','Θ':'Theta','Λ':'Lambda','Ξ':'Xi','Π':'Pi',
   'Σ':'Sigma','Φ':'Phi','Ψ':'Psi','Ω':'Omega'};
+// OCR/PowerPoint text layers may encode formula letters with Unicode mathematical
+// alphabets (𝑑𝑋𝑡), even when the surrounding formula is otherwise plain text.
+// Normalize only those mathematical alphabet code points and retain source offsets
+// so the renderer can replace the exact original span without changing prose.
+function normalizeMathAlphabet(source) {
+  let text = '';
+  const starts = [], ends = [];
+  for (let i = 0; i < source.length;) {
+    const start = i;
+    const cp = String.fromCodePoint(source.codePointAt(i));
+    i += cp.length;
+    const n = cp.codePointAt(0);
+    const value = (n >= 0x1D400 && n <= 0x1D7FF) ? cp.normalize('NFKC') : cp;
+    text += value;
+    for (let j = 0; j < value.length; j++) { starts.push(start); ends.push(i); }
+  }
+  return {text, starts, ends};
+}
+function legacyMathTex(source) {
+  return legacyDivisionFraction(source.replace(/−/g, '-')
+    .replace(/\bt1\/2\b/g, 't_{1/2}')
+    .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\*/g, '$1_{$2}^{\\star}')
+    .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\b/g, '$1_{$2}')
+    .replace(/\^\(([^()]*)\)/g, '^{$1}')
+    .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
+    .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1')
+    .replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '\\' + GREEK_MATH[ch] + ' ' : ch));
+}
+function balancedTexGroup(source, start, open = '{', close = '}') {
+  if (source[start] !== open) return -1;
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    if (source[i] === '\\') { i++; continue; }
+    if (source[i] === open) depth++;
+    else if (source[i] === close && --depth === 0) return i + 1;
+  }
+  return -1;
+}
+function rawLatexMatches(source) {
+  const out = [];
+  // Some older summaries contain bare TeX commands without $...$ delimiters.
+  // Render complete high-confidence commands while leaving nearby prose alone.
+  const command = /\\(?:frac|dfrac|tfrac|binom|sqrt)\b/g;
+  let m;
+  while ((m = command.exec(source))) {
+    let p = command.lastIndex;
+    if (/\\sqrt$/.test(m[0])) {
+      while (/\s/.test(source[p] || '')) p++;
+      if (source[p] === '[') {
+        const degreeEnd = balancedTexGroup(source, p, '[', ']');
+        if (degreeEnd < 0) continue;
+        p = degreeEnd;
+        while (/\s/.test(source[p] || '')) p++;
+      }
+      const radicandEnd = balancedTexGroup(source, p);
+      if (radicandEnd < 0) continue;
+      out.push({start: m.index, end: radicandEnd, latex: source.slice(m.index, radicandEnd)});
+      command.lastIndex = radicandEnd;
+      continue;
+    }
+    const first = balancedTexGroup(source, p);
+    if (first < 0) continue;
+    p = first;
+    while (/\s/.test(source[p] || '')) p++;
+    const second = balancedTexGroup(source, p);
+    if (second < 0) continue;
+    const latex = source.slice(m.index, second).replace(/^\\dfrac/, '\\frac').replace(/^\\tfrac/, '\\frac');
+    out.push({start: m.index, end: second, latex});
+    command.lastIndex = second;
+  }
+  return out;
+}
+function renderInlineMath(latex) {
+  return window.katex.renderToString(latex, {trust: false, throwOnError: false,
+    strict: 'ignore', maxExpand: 1000});
+}
+function pushStudyMathToken(state, latex) {
+  const token = state.push('study_math_inline', '', 0);
+  token.content = latex;
+}
+// Parse bracket-delimited equations before Markdown treats `\[` as an escaped
+// literal bracket. This also handles equations spanning lines in a paragraph.
+STUDY_MD.inline.ruler.before('escape', 'study_math_brackets', (state, silent) => {
+  const start = state.pos;
+  if (state.src.slice(start, start + 2) !== '\\[') return false;
+  const close = state.src.indexOf('\\]', start + 2);
+  if (close < 0) return false;
+  if (!silent) pushStudyMathToken(state, state.src.slice(start + 2, close));
+  state.pos = close + 2;
+  return true;
+});
+STUDY_MD.renderer.rules.study_math_inline = (tokens, idx) => renderInlineMath(tokens[idx].content);
+STUDY_MD.renderer.rules.study_math_skip = () => '';
 function legacyMatchingGroupStart(s, end) {
   const openerFor = {'}':'{', ')':'(', ']':'['};
   const stack = [openerFor[s[end - 1]]];
@@ -86,7 +179,26 @@ function legacyDivisionFraction(s) {
 }
 STUDY_MD.renderer.rules.text = (tokens, idx) => {
   const raw = tokens[idx].content;
+  // markdown-it emits an OCR-stacked derivative as text / softbreak / text.
+  // Join only the clear numerator + `dt=...` shape, then suppress those tokens.
+  if (tokens[idx + 1]?.type === 'softbreak' && tokens[idx + 2]?.type === 'text') {
+    const numerator = normalizeMathAlphabet(raw).text.trim();
+    const rhsText = normalizeMathAlphabet(tokens[idx + 2].content).text;
+    const top = /^([dD][A-Z][A-Za-z0-9]{0,12})$/.exec(numerator);
+    const bottom = /^dt[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω()+*/^−×·=., \t-]+)$/.exec(rhsText);
+    if (top && bottom) {
+      tokens[idx + 1].type = 'study_math_skip';
+      tokens[idx + 2].type = 'study_math_skip';
+      return renderInlineMath(`\\frac{${top[1]}}{dt}=${legacyMathTex(bottom[1].trim())}`);
+    }
+  }
   const matches = [];
+  // `\[...\]` is normally a block delimiter. If OCR or a summary places it
+  // inside a prose paragraph, markdown-it leaves it as text; render that span
+  // explicitly so valid source LaTeX does not appear literally on the page.
+  const bracketMath = /\\\[([\s\S]*?)\\\]/g;
+  for (const m of raw.matchAll(bracketMath))
+    matches.push({start: m.index, end: m.index + m[0].length, latex: m[1]});
   for (const [pattern, latex] of LEGACY_FORMULAS) {
     pattern.lastIndex = 0;
     for (const m of raw.matchAll(pattern)) matches.push({start: m.index, end: m.index + m[0].length, latex});
@@ -97,9 +209,29 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
     if (tokens[i].type === 'link_close') linkDepth--;
   }
   if (!linkDepth) {
+    const normalized = normalizeMathAlphabet(raw);
+    const toSourceRange = (start, end) => ({
+      start: normalized.starts[start] ?? start,
+      end: normalized.ends[end - 1] ?? end,
+    });
+    for (const m of rawLatexMatches(raw)) matches.push(m);
+
+    // OCR may flatten a displayed derivative into two lines, with numerator on
+    // the first line and `dt=...` on the second. This narrowly recognizes that
+    // layout and restores the fraction bar without inferring other semantics.
+    const stackedDerivative = /(^|[^A-Za-z0-9])([dD][A-Z][A-Za-z0-9]{0,12})[ \t]*\r?\n[ \t]*(dt)[ \t]*=[ \t]*([^\r\n]+)/g;
+    for (const m of normalized.text.matchAll(stackedDerivative)) {
+      const normStart = m.index + m[1].length;
+      const normEnd = m.index + m[0].length;
+      const span = toSourceRange(normStart, normEnd);
+      matches.push({start: span.start, end: span.end,
+        latex: `\\frac{${m[2]}}{${m[3]}}=${legacyMathTex(m[4].trim())}`});
+    }
+
     LEGACY_EQUATION.lastIndex = 0;
-    for (const m of raw.matchAll(LEGACY_EQUATION)) {
-      if (/https?:\/\/\S*$/i.test(raw.slice(0, m.index))) continue;
+    for (const m of normalized.text.matchAll(LEGACY_EQUATION)) {
+      const span = toSourceRange(m.index, m.index + m[0].length);
+      if (/https?:\/\/\S*$/i.test(raw.slice(0, span.start))) continue;
       let rhs = m[2];
       // 不吞掉外层中文括注的右括号。
       while (rhs.endsWith(')') && (rhs.match(/\)/g) || []).length > (rhs.match(/\(/g) || []).length)
@@ -110,16 +242,11 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
       if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length) continue;
       // 不接受无法安全转换的嵌套指数或未映射希腊字符，保留原文。
       if (/[α-ωΑ-Ω]/.test(m[0].replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '' : ch))) continue;
-      const safe = s => legacyDivisionFraction(s.replace(/−/g, '-')
-        .replace(/\bt1\/2\b/g, 't_{1/2}')
-        .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\*/g, '$1_{$2}^{\\star}')
-        .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\b/g, '$1_{$2}')
-        .replace(/\^\(([^()]*)\)/g, '^{$1}')
-        .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
-        .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1')
-        .replace(/[α-ωΑ-Ω]/g, ch => '\\' + GREEK_MATH[ch] + ' '));
+      const safe = legacyMathTex;
       if (/\^\(/.test(safe(rhs))) continue;
-      matches.push({start: m.index, end: m.index + m[0].length - (m[2].length - rhs.length),
+      const normTrimEnd = m.index + m[0].length - (m[2].length - rhs.length);
+      const sourceSpan = toSourceRange(m.index, normTrimEnd);
+      matches.push({start: sourceSpan.start, end: sourceSpan.end,
         latex: safe(m[1]) + '=' + safe(rhs)});
     }
   }
@@ -128,7 +255,7 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
   for (const m of matches) {
     if (m.start < last) continue;
     html += STUDY_MD.utils.escapeHtml(raw.slice(last, m.start));
-    html += window.katex.renderToString(m.latex, {trust: false, throwOnError: false, maxExpand: 1000});
+    html += renderInlineMath(m.latex);
     last = m.end;
   }
   return html + STUDY_MD.utils.escapeHtml(raw.slice(last));

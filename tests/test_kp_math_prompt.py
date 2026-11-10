@@ -18,6 +18,8 @@ class MathPromptTest(unittest.TestCase):
             result = kp_build.load_kp_prompts_v2(path)
             self.assertIn(kp_build.MATH_FORMAT_INSTRUCTION, result['sys'])
             self.assertIn('每一个除法都必须写成 LaTeX 分式', result['sys'])
+            self.assertIn('不得输出没有数学定界符的裸公式', result['sys'])
+            self.assertIn('输出 JSON 前逐字段检查', result['sys'])
             self.assertIn(r'\\frac{分子}{分母}', result['sys'])
             self.assertEqual(path.read_text(encoding='utf-8'), content)
             self.assertEqual(result['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
