@@ -18,12 +18,72 @@ const LEGACY_FORMULAS = [
 ];
 // 兼容旧总结中的高置信度、无分隔符等式。仅处理边界清晰的表达式，
 // 不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
-const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω(\[\]−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]+)*)/g;
+const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)\*?(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω(\[\]−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]+)*)/g;
 const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'epsilon',
   'θ':'theta','λ':'lambda','μ':'mu','ν':'nu','ξ':'xi','π':'pi','ρ':'rho',
   'σ':'sigma','τ':'tau','φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
   'Γ':'Gamma','Δ':'Delta','Θ':'Theta','Λ':'Lambda','Ξ':'Xi','Π':'Pi',
   'Σ':'Sigma','Φ':'Phi','Ψ':'Psi','Ω':'Omega'};
+function legacyMatchingGroupStart(s, end) {
+  const openerFor = {'}':'{', ')':'(', ']':'['};
+  const stack = [openerFor[s[end - 1]]];
+  for (let i = end - 2; i >= 0; i--) {
+    const ch = s[i];
+    if (openerFor[ch]) stack.push(openerFor[ch]);
+    else if (ch === stack[stack.length - 1]) {
+      stack.pop();
+      if (!stack.length) return i;
+    }
+  }
+  return -1;
+}
+function legacyMatchingGroupEnd(s, start) {
+  const closerFor = {'{':'}', '(':')', '[':']'};
+  const stack = [closerFor[s[start]]];
+  for (let i = start + 1; i < s.length; i++) {
+    const ch = s[i];
+    if (closerFor[ch]) stack.push(closerFor[ch]);
+    else if (ch === stack[stack.length - 1]) {
+      stack.pop();
+      if (!stack.length) return i + 1;
+    }
+  }
+  return -1;
+}
+function legacyDivisionFraction(s) {
+  // Convert unmarked division into a fraction; keep t_{1/2}'s subscript slash.
+  for (let i = 0, braces = 0; i < s.length; i++) {
+    if (s[i] === '{') braces++;
+    else if (s[i] === '}') braces = Math.max(0, braces - 1);
+    else if (s[i] === '/' && braces === 0) {
+      let leftEnd = i;
+      while (leftEnd > 0 && /\s/.test(s[leftEnd - 1])) leftEnd--;
+      const atom = /(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*$/;
+      const atomMatch = s.slice(0, leftEnd).match(atom);
+      let leftStart = atomMatch ? leftEnd - atomMatch[0].length : -1;
+      if (leftStart < 0 && /[)\]}]$/.test(s.slice(0, leftEnd)))
+        leftStart = legacyMatchingGroupStart(s, leftEnd);
+      let rightStart = i + 1;
+      while (rightStart < s.length && /\s/.test(s[rightStart])) rightStart++;
+      let rightEnd = -1;
+      if (/[([{]/.test(s[rightStart] || '')) rightEnd = legacyMatchingGroupEnd(s, rightStart);
+      else {
+        const rhs = /^(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*/.exec(s.slice(rightStart));
+        if (rhs) rightEnd = rightStart + rhs[0].length;
+      }
+      if (leftStart >= 0 && rightEnd > rightStart) {
+        const unwrap = value => value[0] === '(' && legacyMatchingGroupEnd(value, 0) === value.length
+          ? value.slice(1, -1) : value;
+        const numerator = unwrap(s.slice(leftStart, leftEnd).trim());
+        const denominator = unwrap(s.slice(rightStart, rightEnd).trim());
+        s = s.slice(0, leftStart) + `\\frac{${numerator}}{${denominator}}` + s.slice(rightEnd);
+        i = Math.max(-1, leftStart - 1);
+        braces = 0;
+      }
+    }
+  }
+  return s;
+}
 STUDY_MD.renderer.rules.text = (tokens, idx) => {
   const raw = tokens[idx].content;
   const matches = [];
@@ -48,13 +108,16 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
       const simpleMathValue = /^(?:\d+(?:\.\d+)?|[α-ωΑ-Ω])$/.test(rhs);
       if (!rhs || (!simpleMathValue && !m[1].includes('/') && !/[()+*/^−×·=-]/.test(rhs))) continue;
       if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length) continue;
-      if ((rhs.match(/\]/g) || []).length !== (rhs.match(/\[/g) || []).length) continue;
       // 不接受无法安全转换的嵌套指数或未映射希腊字符，保留原文。
       if (/[α-ωΑ-Ω]/.test(m[0].replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '' : ch))) continue;
-      const safe = s => s.replace(/−/g, '-').replace(/\^\(([^()]*)\)/g, '^{$1}')
+      const safe = s => legacyDivisionFraction(s.replace(/−/g, '-')
+        .replace(/\bt1\/2\b/g, 't_{1/2}')
+        .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\*/g, '$1_{$2}^{\\star}')
+        .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\b/g, '$1_{$2}')
+        .replace(/\^\(([^()]*)\)/g, '^{$1}')
         .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
         .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1')
-        .replace(/[α-ωΑ-Ω]/g, ch => '\\' + GREEK_MATH[ch] + ' ');
+        .replace(/[α-ωΑ-Ω]/g, ch => '\\' + GREEK_MATH[ch] + ' '));
       if (/\^\(/.test(safe(rhs))) continue;
       matches.push({start: m.index, end: m.index + m[0].length - (m[2].length - rhs.length),
         latex: safe(m[1]) + '=' + safe(rhs)});

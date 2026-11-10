@@ -17,6 +17,8 @@ class MathPromptTest(unittest.TestCase):
             path.write_bytes(content.encode('utf-8'))
             result = kp_build.load_kp_prompts_v2(path)
             self.assertIn(kp_build.MATH_FORMAT_INSTRUCTION, result['sys'])
+            self.assertIn('每一个除法都必须写成 LaTeX 分式', result['sys'])
+            self.assertIn(r'\\frac{分子}{分母}', result['sys'])
             self.assertEqual(path.read_text(encoding='utf-8'), content)
             self.assertEqual(result['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
             self.assertEqual(result['chars'], len(result['sys']) + len(result['user']))
