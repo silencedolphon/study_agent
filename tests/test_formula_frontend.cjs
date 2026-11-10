@@ -23,8 +23,29 @@ assert(tex(String.raw`裸 TeX：\sqrt[3]{x}`) === '\\sqrt[3]{x}',
 assert(!render(String.raw`代码：` + '`' + String.raw`\frac{a}{b}` + '`').includes('class="katex"'),
   'bare LaTeX inside inline code is not math');
 const unicodeDerivative = '𝑑𝑋𝐶\n𝑑𝑡=𝑘21𝑋𝑝−𝑘12𝑋𝐶−𝑘10𝑋𝐶';
-assert(tex(unicodeDerivative).startsWith('\\frac{dXC}{dt}=k21Xp'),
+assert(tex(unicodeDerivative).startsWith('\\frac{dXC}{dt}=k_{21}Xp'),
   'Unicode OCR math and stacked derivative layout should be normalized into LaTeX');
+assert(tex('通式为 C=C0e^(-kt)+[k0/(kV)](1-e^(-kt))，随后下降') ===
+  'C=C_{0}e^{-kt}+[\\frac{k_{0}}{kV}](1-e^{-kt})',
+  'a long equation containing square-bracket groups must be captured before Markdown turns it into a link');
+assert(tex('lg(Css-C)=−kt/2.303+lg Css').includes('\\frac{kt}{2.303}'),
+  'log-linear equations with nested variables and divisions should render completely');
+assert(tex('C_T=k0/(kV)') === 'C_{T}=\\frac{k_{0}}{kV}',
+  'subscript equations from plain text should be recognized');
+assert(tex('Cl_bile=(dX_bile/dt)/C=(C_bile Q_bile)/C').includes('\\frac{\\frac{dX_{bile}}{dt}}{C}'),
+  'equations with named subscripts and nested fractions should render');
+assert(tex('t′=4h') === 't^{\\prime}=4h', 'prime variables with units should render');
+assert(tex('dC/dt') === '\\frac{dC}{dt}', 'standalone derivative fractions should render');
+assert(tex('RT/(N·6πηr)').includes('\\frac{RT}{N\\cdot 6\\pi \\eta r}'),
+  'standalone Greek-symbol expressions should be emitted as LaTeX');
+assert(tex('3D/r²') === '\\frac{3D}{r^{2}}', 'Unicode superscripts in fractions should render');
+assert(tex('初始浓度C₀与稳态浓度Css') === 'C_{0}',
+  'standalone subscript variables in prose should render as LaTeX');
+assert(tex('Cmax') === 'C_{\\max}', 'common pharmacokinetic symbols should keep their subscripts');
+assert(!render('Kcal/min、g/d、μg/ml、cm/sec').includes('class="katex"'),
+  'units should not be converted into oversized formulas');
+assert(!render('oil/water 分配系数').includes('class="katex"'),
+  'ordinary slash prose should remain plain text');
 assert(!render('`$x$`').includes('class="katex"'), 'code is not math');
 for (const raw of ['Fsys = Fabs * Fg * FH', 'F = fa × fg × fh × fl',
   'pKa−pH=log(Cu/Ci)', 'dC/dt = DS/h·(Cs−C) = kS(Cs−C)', 't1/2 超过 50 h'])

@@ -19,9 +19,13 @@ const LEGACY_FORMULAS = [
 // 兼容旧总结中的高置信度、无分隔符等式。仅处理边界清晰的表达式，
 // 不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
 const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)\*?(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*[=＝][ \t]*([A-Za-z0-9α-ωΑ-Ω(\[\]−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]+)*)/g;
+// Broader, character-limited matcher for common OCR output like C_T, Cl_bile,
+// lg(Css-C), and chained equalities with nested fractions.
+const LEGACY_COMPLEX_EQUATION = /(?<![A-Za-z0-9_/.\$])([A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_[A-Za-z0-9α-ωΑ-Ω]+|[′'])*(?:\([^=，。；;\r\n]{1,48}\))?(?:[ \t]*[-−][ \t]*[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_[A-Za-z0-9α-ωΑ-Ω]+|[′'])*)?)[ \t]*[=＝][ \t]*([^，。；;\r\n]+)/g;
 const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'epsilon',
-  'θ':'theta','λ':'lambda','μ':'mu','ν':'nu','ξ':'xi','π':'pi','ρ':'rho',
-  'σ':'sigma','τ':'tau','φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
+  'ζ':'zeta','η':'eta','θ':'theta','ι':'iota','κ':'kappa','λ':'lambda','μ':'mu',
+  'ν':'nu','ξ':'xi','ο':'omicron','π':'pi','ρ':'rho','σ':'sigma','ς':'varsigma',
+  'τ':'tau','υ':'upsilon','φ':'phi','ϕ':'varphi','χ':'chi','ψ':'psi','ω':'omega',
   'Γ':'Gamma','Δ':'Delta','Θ':'Theta','Λ':'Lambda','Ξ':'Xi','Π':'Pi',
   'Σ':'Sigma','Φ':'Phi','Ψ':'Psi','Ω':'Omega'};
 // OCR/PowerPoint text layers may encode formula letters with Unicode mathematical
@@ -31,12 +35,17 @@ const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'eps
 function normalizeMathAlphabet(source) {
   let text = '';
   const starts = [], ends = [];
+  const superscripts = {'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
+  const subscripts = {'₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9',
+    'ₐ':'a','ₑ':'e','ₕ':'h','ᵢ':'i','ⱼ':'j','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₒ':'o','ₚ':'p','ᵣ':'r','ₛ':'s','ₜ':'t','ᵤ':'u','ᵥ':'v','ₓ':'x'};
   for (let i = 0; i < source.length;) {
     const start = i;
     const cp = String.fromCodePoint(source.codePointAt(i));
     i += cp.length;
     const n = cp.codePointAt(0);
-    const value = (n >= 0x1D400 && n <= 0x1D7FF) ? cp.normalize('NFKC') : cp;
+    const value = (n >= 0x1D400 && n <= 0x1D7FF) ? cp.normalize('NFKC')
+      : (superscripts[cp] ? `^{${superscripts[cp]}}`
+        : (subscripts[cp] ? `_{${subscripts[cp]}}` : cp));
     text += value;
     for (let j = 0; j < value.length; j++) { starts.push(start); ends.push(i); }
   }
@@ -45,12 +54,33 @@ function normalizeMathAlphabet(source) {
 function legacyMathTex(source) {
   return legacyDivisionFraction(source.replace(/−/g, '-')
     .replace(/\bt1\/2\b/g, 't_{1/2}')
+    .replace(/\bCmax\b/g, 'C_{\\max}').replace(/\bCmin\b/g, 'C_{\\min}')
+    .replace(/\bCss\b/g, 'C_{ss}').replace(/\bPeff\b/g, 'P_{eff}')
+    .replace(/\bTsi\b/g, 'T_{si}').replace(/\bTabs\b/g, 'T_{abs}')
     .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\*/g, '$1_{$2}^{\\star}')
+    .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)(?=[A-Za-zα-ωΑ-Ω])/g, '$1_{$2}')
     .replace(/\b([A-Za-zα-ωΑ-Ω]+)(\d+)\b/g, '$1_{$2}')
+    .replace(/\b([A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*)_([A-Za-z0-9α-ωΑ-Ω]+)/g, '$1_{$2}')
+    .replace(/\b([A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_\{[^{}]+\})?)[′']/g, '$1^{\\prime}')
     .replace(/\^\(([^()]*)\)/g, '^{$1}')
     .replace(/×/g, '\\times ').replace(/·/g, '\\cdot ')
-    .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|exp)\b/g, '\\$1')
+    .replace(/\*/g, '\\cdot ').replace(/\b(log|ln|lg|exp)\b/g, '\\$1')
     .replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '\\' + GREEK_MATH[ch] + ' ' : ch));
+}
+function legacyComplexParts(match) {
+  const lhs = match[1].trim();
+  const rawRight = match[2];
+  const rawRightEnd = rawRight.trimEnd();
+  const rhs = rawRightEnd.replace(/\.+$/, '').trim();
+  const trimEnd = rawRight.length - rawRightEnd.replace(/\.+$/, '').length;
+  const allowed = /^[A-Za-z0-9α-ωΑ-Ω_{}^′'()\[\]+*\/·×.,= \t−-]+$/;
+  if (!rhs || !allowed.test(lhs + rhs)) return null;
+  const simpleValue = /^(?:\d+(?:\.\d+)?\s*[A-Za-z]{1,4}|[α-ωΑ-Ω])$/.test(rhs);
+  if (!simpleValue && !/[=+*/^−×·-]/.test(rhs)) return null;
+  if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length ||
+      (rhs.match(/\]/g) || []).length !== (rhs.match(/\[/g) || []).length) return null;
+  if (lhs === 'C' && rhs === 'O') return null;
+  return {lhs, rhs, trimEnd, latex: `${legacyMathTex(lhs)}=${legacyMathTex(rhs)}`};
 }
 function balancedTexGroup(source, start, open = '{', close = '}') {
   if (source[start] !== open) return -1;
@@ -151,7 +181,7 @@ function legacyDivisionFraction(s) {
     else if (s[i] === '/' && braces === 0) {
       let leftEnd = i;
       while (leftEnd > 0 && /\s/.test(s[leftEnd - 1])) leftEnd--;
-      const atom = /(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*$/;
+      const atom = /(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_\{[^{}]*\}|_[A-Za-z0-9α-ωΑ-Ω]+)?|\d+(?:\.\d+)?[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*$/;
       const atomMatch = s.slice(0, leftEnd).match(atom);
       let leftStart = atomMatch ? leftEnd - atomMatch[0].length : -1;
       if (leftStart < 0 && /[)\]}]$/.test(s.slice(0, leftEnd)))
@@ -161,7 +191,7 @@ function legacyDivisionFraction(s) {
       let rightEnd = -1;
       if (/[([{]/.test(s[rightStart] || '')) rightEnd = legacyMatchingGroupEnd(s, rightStart);
       else {
-        const rhs = /^(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*/.exec(s.slice(rightStart));
+        const rhs = /^(?:\\[A-Za-z]+|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_\{[^{}]*\}|_[A-Za-z0-9α-ωΑ-Ω]+)?|\d+(?:\.\d+)?[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*|\d+(?:\.\d+)?)(?:[_^]\{[^{}]*\})*/.exec(s.slice(rightStart));
         if (rhs) rightEnd = rightStart + rhs[0].length;
       }
       if (leftStart >= 0 && rightEnd > rightStart) {
@@ -228,6 +258,17 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
         latex: `\\frac{${m[2]}}{${m[3]}}=${legacyMathTex(m[4].trim())}`});
     }
 
+    LEGACY_COMPLEX_EQUATION.lastIndex = 0;
+    for (const m of normalized.text.matchAll(LEGACY_COMPLEX_EQUATION)) {
+      const parts = legacyComplexParts(m);
+      if (!parts) continue;
+      const prefixSpan = toSourceRange(m.index, m.index + 1);
+      if (/https?:\/\/\S*$/i.test(raw.slice(0, prefixSpan.start))) continue;
+      const sourceSpan = toSourceRange(m.index, m.index + m[0].length - parts.trimEnd);
+      matches.push({start: sourceSpan.start, end: sourceSpan.end,
+        latex: parts.latex});
+    }
+
     LEGACY_EQUATION.lastIndex = 0;
     for (const m of normalized.text.matchAll(LEGACY_EQUATION)) {
       const span = toSourceRange(m.index, m.index + m[0].length);
@@ -279,10 +320,97 @@ STUDY_MD.renderer.rules.image = (tokens, idx, options, env, self) => {
     ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">图片：' + label + '</a>'
     : '<span>' + label + '</span>';
 };
-function mdToHtml(src){
-  return '<div class="markdown-body">' + STUDY_MD.render(String(src ?? '')) + '</div>';
+function normalizeBareFormulaText(source) {
+  const normalized = normalizeMathAlphabet(source);
+  const replacements = [];
+  const add = (start, end, latex) => {
+    const sourceStart = normalized.starts[start] ?? start;
+    const sourceEnd = normalized.ends[end - 1] ?? end;
+    replacements.push({start:sourceStart, end:sourceEnd, latex});
+  };
+  LEGACY_COMPLEX_EQUATION.lastIndex = 0;
+  for (const m of normalized.text.matchAll(LEGACY_COMPLEX_EQUATION)) {
+    const parts = legacyComplexParts(m);
+    if (!parts || /https?:\/\/\S*$/i.test(source.slice(0, m.index))) continue;
+    const endAt = m.index + m[0].length - parts.trimEnd;
+    add(m.index, endAt, parts.latex);
+  }
+  const partition = /\bK[oO]\/w\b/g;
+  for (const m of normalized.text.matchAll(partition)) add(m.index, m.index + m[0].length, 'K_{o/w}');
+
+  // Bare fractions and powers occur by themselves in older summaries, outside
+  // an equality. Skip units, dates, URLs and common prose ratios.
+  if (!/[=＝]/.test(normalized.text)) {
+    const chars = String.raw`A-Za-z0-9α-ωΑ-Ω_{}^().·πημ+\-`;
+    const fraction = new RegExp(`(?<![A-Za-z0-9_$/.])([${chars}]+\\/[${chars}]+(?:\\/[${chars}]+)*)`, 'g');
+    for (const m of normalized.text.matchAll(fraction)) {
+    const expr = m[1].trim();
+    const lower = expr.toLowerCase();
+    if (/^(?:oil\/water|and\/or|or\/and|kcal\/min|g\/d|mg\/(?:ml|l|h|kg)|μ?g\/(?:ml|l)|cm\/sec|ml\/h|l\/h)$/.test(lower)) continue;
+    if (!/[A-Zα-ωΑ-Ω0-9_{}^π]/.test(expr) && expr.split('/').some(part => part.trim().length > 1)) continue;
+    if (/^\d{4}\/\d{1,2}(?:\/\d{1,2})?$/.test(expr)) continue;
+    if ((expr.match(/\)/g) || []).length !== (expr.match(/\(/g) || []).length ||
+        (expr.match(/\]/g) || []).length !== (expr.match(/\[/g) || []).length) continue;
+      add(m.index, m.index + m[0].length, legacyMathTex(expr));
+    }
+    const power = /(?<![A-Za-z0-9_$])([A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω_{}]*\^\{[^{}\r\n]{1,40}\}|[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω_{}]*\^\([^()\r\n]{1,40}\))/g;
+    for (const m of normalized.text.matchAll(power))
+      add(m.index, m.index + m[0].length, legacyMathTex(m[0]));
+    const scripted = /(?<![A-Za-z0-9_$])([A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]*(?:_\{[A-Za-z0-9α-ωΑ-Ω-]+\}|_[A-Za-z0-9α-ωΑ-Ω]+|\^\{[^{}\r\n]+\})+)/g;
+    for (const m of normalized.text.matchAll(scripted))
+      add(m.index, m.index + m[0].length, legacyMathTex(m[0]));
+  }
+
+  // Unmarked TeX commands should be protected from Markdown link/emphasis rules.
+  for (const m of rawLatexMatches(normalized.text))
+    add(m.start, m.end, m.latex);
+  replacements.sort((a, b) => a.start - b.start || b.end - a.end);
+  let out = '', last = 0;
+  for (const m of replacements) {
+    if (m.start < last) continue;
+    out += source.slice(last, m.start) + '$' + m.latex.trim() + '$';
+    last = m.end;
+  }
+  return out + source.slice(last);
 }
-function mdInline(src){ return STUDY_MD.renderInline(String(src ?? '')); }
+function normalizeBareFormulaMarkdown(source) {
+  const lines = String(source ?? '').split('\n');
+  let inFence = false, inBracketMath = false;
+  const codeFence = /^\s*(`{3,}|~{3,})/;
+  const protectedInline = /(`+[\s\S]*?\1|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$(?:\\.|[^$])*?\$|\[[^\]]*\]\(https?:\/\/[^)]*\)|https?:\/\/\S+)/g;
+  const outLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (codeFence.test(line)) { inFence = !inFence; outLines.push(line); continue; }
+    if (inFence) { outLines.push(line); continue; }
+    if (inBracketMath) {
+      if (line.includes('\\]')) inBracketMath = false;
+      outLines.push(line); continue;
+    }
+    if (line.includes('\\[') && !line.includes('\\]')) { inBracketMath = true; outLines.push(line); continue; }
+    if (i + 1 < lines.length) {
+      const top = /^([dD][A-Z][A-Za-z0-9]{0,12})$/.exec(normalizeMathAlphabet(line).text.trim());
+      const bottom = /^dt[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω()+*/^−×·=., \t-]+)$/.exec(normalizeMathAlphabet(lines[i + 1]).text.trim());
+      if (top && bottom) {
+        outLines.push('$\\frac{' + top[1] + '}{dt}=' + legacyMathTex(bottom[1].trim()).trim() + '$');
+        i++;
+        continue;
+      }
+    }
+    protectedInline.lastIndex = 0;
+    let out = '', last = 0, m;
+    while ((m = protectedInline.exec(line))) {
+      out += normalizeBareFormulaText(line.slice(last, m.index)) + m[0];
+      last = m.index + m[0].length;
+    }
+    outLines.push(out + normalizeBareFormulaText(line.slice(last)));
+  }
+  return outLines.join('\n');
+}
+function mdToHtml(src){
+  return '<div class="markdown-body">' + STUDY_MD.render(normalizeBareFormulaMarkdown(src)) + '</div>';
+}
+function mdInline(src){ return STUDY_MD.renderInline(normalizeBareFormulaMarkdown(src)); }
 
 // 把 [1] [2][3] 变成可点击的引用角标
 function linkCites(html){
