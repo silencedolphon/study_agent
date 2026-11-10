@@ -18,7 +18,7 @@ const LEGACY_FORMULAS = [
 ];
 // 兼容旧总结中的高置信度、无分隔符等式。仅处理边界清晰的表达式，
 // 不推断下标或单位；纯化学双键、金额、URL、普通文本均不转换。
-const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω(−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=-]+)*)/g;
+const LEGACY_EQUATION = /(?<![A-Za-z0-9_/.\$])([−-]?(?:[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12}(?:\([A-Za-z0-9α-ωΑ-Ω]+\))?|\([A-Za-z0-9α-ωΑ-Ω]+\)[A-Za-z0-9α-ωΑ-Ω]*)(?:\/[A-Za-zα-ωΑ-Ω][A-Za-z0-9α-ωΑ-Ω]{0,12})?)[ \t]*=[ \t]*([A-Za-z0-9α-ωΑ-Ω(\[\]−-][A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]*(?:[ \t]*[=+*/^−×·-][ \t]*[A-Za-z0-9α-ωΑ-Ω.()+*/^−×·=\[\]-]+)*)/g;
 const GREEK_MATH = {'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'epsilon',
   'θ':'theta','λ':'lambda','μ':'mu','ν':'nu','ξ':'xi','π':'pi','ρ':'rho',
   'σ':'sigma','τ':'tau','φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
@@ -48,6 +48,7 @@ STUDY_MD.renderer.rules.text = (tokens, idx) => {
       const simpleMathValue = /^(?:\d+(?:\.\d+)?|[α-ωΑ-Ω])$/.test(rhs);
       if (!rhs || (!simpleMathValue && !m[1].includes('/') && !/[()+*/^−×·=-]/.test(rhs))) continue;
       if ((rhs.match(/\)/g) || []).length !== (rhs.match(/\(/g) || []).length) continue;
+      if ((rhs.match(/\]/g) || []).length !== (rhs.match(/\[/g) || []).length) continue;
       // 不接受无法安全转换的嵌套指数或未映射希腊字符，保留原文。
       if (/[α-ωΑ-Ω]/.test(m[0].replace(/[α-ωΑ-Ω]/g, ch => GREEK_MATH[ch] ? '' : ch))) continue;
       const safe = s => s.replace(/−/g, '-').replace(/\^\(([^()]*)\)/g, '^{$1}')
