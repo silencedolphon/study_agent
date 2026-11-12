@@ -343,7 +343,8 @@ function setRender(){
   if (!box) return;
   if (!SET){
     box.innerHTML = '<div class="set-head"><div><h2>⚙ 设置中心</h2></div>'
-      + '<button class="set-x" onclick="closeSettings()" title="关闭">✕</button></div>'
+      + '<div class="set-head-actions"><button class="ghost" onclick="startUserGuide()" title="查看网站主要功能和操作说明">新手指引</button>'
+      + '<button class="set-x" onclick="closeSettings()" title="关闭">✕</button></div></div>'
       + '<div class="set-pane"><div class="empty">'
       + esc(SET_MSG.text || '读取中…') + '</div></div>';
     return;
@@ -353,7 +354,8 @@ function setRender(){
   box.innerHTML =
     '<div class="set-head"><div><h2>设置</h2>'
     + '<div class="ssub">更改后点击保存；密钥留空会保留原值。</div></div>'
-    + '<button class="set-x" onclick="closeSettings()" title="关闭（Esc）">✕</button></div>'
+    + '<div class="set-head-actions"><button class="ghost" onclick="startUserGuide()" title="查看网站主要功能和操作说明">新手指引</button>'
+    + '<button class="set-x" onclick="closeSettings()" title="关闭（Esc）">✕</button></div></div>'
     + '<div class="set-body">'
     + '<div class="set-nav">' + setNavHtml(pipes) + '</div>'
     + '<div class="set-pane" id="setpane">' + (SET_TAB === 'display' ? kpDisplayPaneHtml() : setPaneHtml(cur))

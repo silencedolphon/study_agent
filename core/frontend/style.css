@@ -1132,6 +1132,32 @@ button.ghost:hover{background:var(--panel2)}
   min-width:160px;background:var(--panel);border:1px solid var(--line);
   border-radius:10px;padding:6px;box-shadow:0 14px 30px rgba(0,0,0,.35)}
 .settings-foot-more button{display:block;width:100%;text-align:left;border:0}
+.set-head-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.set-head-actions .ghost{min-height:32px;padding:5px 10px}
+
+/* 可从设置中心随时打开的新手引导 */
+.guide-layer{display:none;position:fixed;inset:0;z-index:10000;pointer-events:none}
+.guide-layer.on{display:block}
+.guide-shade{position:fixed;background:rgba(4,6,10,.72);pointer-events:auto}
+.guide-hole{display:none;position:fixed;border:2px solid var(--accent);border-radius:10px;
+  box-shadow:0 0 0 2px rgba(128,173,248,.2);pointer-events:auto}
+.guide-card{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:min(460px,calc(100vw - 28px));
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+  box-shadow:0 18px 55px rgba(0,0,0,.5);pointer-events:auto;max-height:calc(100vh - 36px);overflow:auto}
+.guide-card.top{top:18px;bottom:auto}
+.guide-card.center{top:50%;bottom:auto;transform:translate(-50%,-50%)}
+.guide-count{font-size:12px;color:var(--dim);margin-bottom:6px}
+.guide-card h2{font-size:17px;margin:0 0 7px}
+.guide-card p{color:var(--dim);font-size:13px;line-height:1.7;margin:0}
+.guide-card .guide-missing{margin-top:8px;font-size:12px}
+.guide-actions{display:flex;align-items:center;gap:8px;margin-top:16px}
+.guide-actions .guide-spacer{flex:1}
+@media(max-width:560px){
+  .guide-card{padding:15px 16px}
+  .guide-card h2{font-size:16px}
+  .set-head-actions{gap:5px}
+  .set-head-actions .ghost{font-size:12px;padding:4px 7px}
+}
 #dc-card.dc-empty #dc-controls,#dc-card.dc-empty .calhead,
 #dc-card.dc-empty .calgrid,#dc-card.dc-empty .legend{display:none}
 #dc-card.dc-empty #dc-note{margin-top:4px!important}

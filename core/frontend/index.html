@@ -38,6 +38,14 @@
 <!-- 设置中心（卡 C-0059）：独立容器，不复用 #modal —— 它有自己的左栏导航、
      固定底栏与提示词编辑器，混用会把别的卡的弹窗逻辑搅在一起。 -->
 <div class="modal set-modal" id="setmodal"><div class="setbox" id="setbox"></div></div>
+<div class="guide-layer" id="guide-layer" aria-hidden="true">
+  <div class="guide-shade" id="guide-shade-top"></div>
+  <div class="guide-shade" id="guide-shade-left"></div>
+  <div class="guide-shade" id="guide-shade-right"></div>
+  <div class="guide-shade" id="guide-shade-bottom"></div>
+  <div class="guide-hole" id="guide-hole"></div>
+  <section class="guide-card" id="guide-card" role="dialog" aria-modal="true" aria-labelledby="guide-title" aria-live="polite"></section>
+</div>
 
 <script>{{STUDY_AGENT_JS}}</script>
 </body>
