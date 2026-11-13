@@ -5,7 +5,7 @@
 // 删的只是**页签上的入口**：后端 `POST /api/kp`（库内知识点 CRUD）与 `kpForm()` /
 // `bindKpForm()` 两个函数**保留**（全仓库没有别的前端调用方，但接口是公开契约，
 // 删了会砸到脚本/将来的入口。）
-// 同时在「课件思维导图」栏**上面**加一栏「名词解释」（`termsCard()`）。
+// 「名词解释」（`termsCard()`）与学习导图、整理入口同页展示。
 let KP_PAGE_SUBJECT = '';
 async function viewKps(){
   if (!SUBJ.loaded) await subjLoad();
@@ -14,9 +14,9 @@ async function viewKps(){
   if (!pageSubject || SUBJ.cur !== pageSubject) return;
   KP_PAGE_SUBJECT = pageSubject;
   if (!kps.length){
-    $('#view').innerHTML = `${kpBuildCard()}
-      ${termsCard()}
-      ${mindmapCard()}`;
+    $('#view').innerHTML = `${mindmapCard()}
+      ${kpBuildCard()}
+      ${termsCard()}`;
     bindKpBuild(); mountTerms(); mountMindmap(); return;
   }
   const rows = kps.map(k => {
@@ -30,15 +30,15 @@ async function viewKps(){
       <td class="small muted">${k.due_at?fmtTime(k.due_at):'未排期'}</td>
     </tr>`;}).join('');
   $('#view').innerHTML = `
+    ${mindmapCard()}
+    ${kpBuildCard()}
+    ${termsCard()}
     <div class="card">
       <h2>知识点 · ${kps.length} 个</h2>
       <div class="row"><label><input type="checkbox" onchange="document.querySelectorAll('.kp-del-ck').forEach(c=>c.checked=this.checked)"> 全选</label>
       <button class="ghost" onclick="deleteSelectedKnowledge()">删除所选知识点</button></div>
       <table><thead><tr><th>选择</th><th>知识点</th><th>掌握度</th><th>下次复习</th></tr></thead><tbody>${rows}</tbody></table>
-    </div>
-    ${kpBuildCard()}
-    ${termsCard()}
-    ${mindmapCard()}`;
+    </div>`;
   bindKpBuild();
   mountTerms();
   mountMindmap();
@@ -79,7 +79,7 @@ function kpBuildCard(){
     <div id="kp-batch-progress"></div>
     <div id="kp-build-progress"></div>
     <div class="row">
-      <button class="act" id="kp-build-open">选择课件</button>
+      <button class="act" id="kp-build-open">整理课件知识点</button>
       <span class="small muted" id="kp-build-state"></span>
     </div>
   </div>`;
@@ -744,7 +744,7 @@ function mindmapCard(){
     <div class="row" style="margin-top:12px;justify-content:flex-end">
       <span class="small muted" id="mm-enroll-hint"></span>
       <button class="ghost" id="mm-enroll">加入复习日历</button>
-      <button class="act" id="mm-ai">课件问答</button>
+      <button class="ghost" id="mm-ai">课件问答</button>
     </div>
     </div>
     <div id="book-kp-panel" ${MINDMAP.mode==='textbook'?'':'hidden'}></div>
@@ -794,21 +794,24 @@ async function mountMindmap(){
       d.in_library?'':'（已不在库）'}</option>`;
   };
   box.innerHTML = `
-    <div class="row" style="margin-bottom:10px">
+    <div class="mm-doc-controls">
       <select id="mm-doc" style="flex:1;min-width:260px">
         ${docs.map(mmOpt).join('')}
       </select>
-      <details class="row-actions"><summary aria-label="更多思维导图操作" title="更多操作">⋯</summary>
+      <button type="button" class="ghost mm-tree-toggle" id="mm-tree-toggle"
+        aria-expanded="false" aria-label="展开全部知识点导图" title="展开全部知识点导图">
+        <span class="mm-tree-toggle-icon" aria-hidden="true">⌄</span>
+        <span class="mm-tree-toggle-label">展开导图</span>
+      </button>
+      <details class="row-actions"><summary aria-label="重命名资料或导图" title="重命名">⋯</summary>
         <div class="row-actions-menu">
           <button class="ghost" id="mm-ren-deck" title="更改资料标题">修改资料标题</button>
           <button class="ghost" id="mm-ren-art" title="更改思维导图标题">修改导图标题</button>
-          <button class="ghost" id="mm-expand">展开全部</button>
-          <button class="ghost" id="mm-collapse">折叠全部</button>
         </div></details>
     </div>
     <div id="mm-tree"><div class="small muted">加载中…</div></div>`;
   // 卡 C-0085：两个改名按钮都作用于**当前选中的这份课件**（MINDMAP.docId）——
-  // 与下拉框、展开/折叠同一屏，不需要先跳到资料页。
+  // 与下拉框、导图展开开关同一屏，不需要先跳到资料页。
   const rd = $('#mm-ren-deck');
   if (rd) rd.onclick = () => {
     const it = (MINDMAP.docs || []).find(x => x.doc_id === MINDMAP.docId);
@@ -826,8 +829,13 @@ async function mountMindmap(){
     mmEnrollPaint(docs.find(d => d.doc_id === MINDMAP.docId));   // 卡 C-0061
     loadMindmapTree();
   };
-  $('#mm-expand').onclick = () => mmToggleAll(true);
-  $('#mm-collapse').onclick = () => mmToggleAll(false);
+  const treeToggle = $('#mm-tree-toggle');
+  if (treeToggle) treeToggle.onclick = () => {
+    const nodes = [...document.querySelectorAll('#mm-tree details.mmd')];
+    if (!nodes.length) return;
+    mmToggleAll(!nodes.every(d => d.open));
+  };
+  mmSyncTreeToggle();
   await loadMindmapTree();
 }
 
@@ -901,6 +909,7 @@ async function deckEnrollClick(){
 async function loadMindmapTree(){
   const t = $('#mm-tree'); if (!t) return;
   t.innerHTML = '<div class="small muted">加载中…</div>';
+  mmSyncTreeToggle();
   let d;
   try { d = await api('/api/mindmap?doc_id=' + MINDMAP.docId); }
   catch(e){ t.innerHTML = `<div class="empty">读取失败：${esc(e.message)}</div>`; return; }
@@ -914,7 +923,7 @@ async function loadMindmapTree(){
     t.innerHTML = `<div class="empty">
       <span class="badge warn">${esc(astTag)}</span>
       <div style="margin-top:8px">该课件还没有整理过知识点。<br>
-        <span class="small">点击本页上方「选择课件」开始整理。</span></div>
+        <span class="small">点击本页下方「整理课件知识点」开始整理。</span></div>
       ${d.lkp_total ? `<div class="small muted" style="margin-top:8px">
         部分内容需要重新整理。</div>` : ''}</div>`;
     return;
@@ -1017,12 +1026,37 @@ function bindMindmapTree(){
     };
   });
   t.querySelectorAll('details.mmd').forEach(d => {
-    d.addEventListener('toggle', () => { MINDMAP.open[d.dataset.k] = d.open; });
+    d.addEventListener('toggle', () => {
+      MINDMAP.open[d.dataset.k] = d.open;
+      mmSyncTreeToggle();
+    });
   });
+  mmSyncTreeToggle();
 }
 
 function mmToggleAll(open){
-  document.querySelectorAll('#mm-tree details.mmd').forEach(d => { d.open = open; });
+  document.querySelectorAll('#mm-tree details.mmd').forEach(d => {
+    d.open = open;
+    MINDMAP.open[d.dataset.k] = open;
+  });
+  mmSyncTreeToggle();
+}
+
+function mmSyncTreeToggle(){
+  const btn = $('#mm-tree-toggle'); if (!btn) return;
+  const nodes = [...document.querySelectorAll('#mm-tree details.mmd')];
+  const expanded = nodes.length > 0 && nodes.every(d => d.open);
+  const usable = nodes.length > 0;
+  btn.disabled = !usable;
+  btn.setAttribute('aria-expanded', String(expanded));
+  btn.setAttribute('aria-label', usable
+    ? (expanded ? '收起全部知识点导图' : '展开全部知识点导图')
+    : '当前导图没有可展开的层级');
+  btn.title = usable
+    ? (expanded ? '收起全部知识点导图' : '展开全部知识点导图')
+    : '当前导图没有可展开的层级';
+  const label = btn.querySelector('.mm-tree-toggle-label');
+  if (label) label.textContent = usable ? (expanded ? '收起导图' : '展开导图') : '无可展开层级';
 }
 
 // ---------------- 从笔记跳回知识点窗口（卡 C-0052） ----------------

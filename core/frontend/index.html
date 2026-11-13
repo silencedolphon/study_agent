@@ -7,9 +7,14 @@
 <style>{{STUDY_AGENT_CSS}}</style>
 </head>
 <body>
+<aside class="study-sidebar">
+  <div class="study-brand"><span class="study-brand-mark">册</span><div><strong>学习看板</strong><small>STUDY SPACE</small></div></div>
+  <div class="study-nav-label">学习</div>
+  <nav id="nav" aria-label="学习功能"></nav>
+  <button class="ghost" id="set-btn" title="设置"><span>⚙</span><span>设置与新手指引</span></button>
+</aside>
 <header>
-  <h1>学习看板</h1>
-  <nav id="nav"></nav>
+  <div class="study-breadcrumb">学习空间</div>
   <span style="flex:1"></span>
   <input id="q" aria-label="搜索资料" placeholder="搜索资料">
   <!-- 学科切换器（卡 C-0039）：顶栏最右侧，刻意放在搜索框**之后**。
@@ -21,11 +26,6 @@
     </button>
     <div class="subjmenu" id="subj-menu"></div>
   </div>
-  <!-- 设置中心（卡 C-0059）：需求 6 要的「页面右上角设置栏」。刻意放在学科
-       切换器**之后**（全页最右）；点开是模态窗而不是新页签，视线不离开当前页。 -->
-  <button class="ghost" id="set-btn" title="设置">
-    <span>⚙</span><span>设置</span>
-  </button>
 </header>
 <main>
   <!-- 首次运行引导（卡 C-0071）：空库三步 / 未配密钥。由 loadFirstrun() 填充；

@@ -542,7 +542,8 @@ async function reviewCoursewaresHtml(items, err){
       <h2>课件复习</h2>
       <div class="rv-empty">${err ? '读取失败：' + esc(err) : '还没有可复习的课件。'}
         <br><span class="small">先到「知识点」页整理一份课件。</span>
-        ${err ? `<br><button class="ghost" id="rv-cw-retry">重试</button>` : ''}</div></div>`;
+        <div class="row" style="margin-top:10px"><button class="ghost" onclick="go('kps')">前往知识点</button>
+        ${err ? `<button class="ghost" id="rv-cw-retry">重试</button>` : ''}</div></div></div>`;
   }
   const cards = items.map(it => {
     const stt = it.selftest || {};

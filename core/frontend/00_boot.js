@@ -33,20 +33,18 @@ const VIEWS = {
   assistant:{label:'问答',  render: viewAssistant},
   overview: {label:'总览',  render: viewOverview},
   review:   {label:'复习',  render: viewReview},
-  preview:  {label:'预习',  render: viewPreview},
+  preview:  {label:'教材预习',  render: viewPreview},
   docs:     {label:'资料',  render: viewDocs},
   kps:      {label:'知识点', render: viewKps},
   mistakes: {label:'错题',  render: viewMistakes},
   notes:    {label:'笔记',  render: viewNotes},
 };
 
-const PRIMARY_VIEWS = ['assistant', 'kps', 'review', 'docs'];
+const PRIMARY_VIEWS = ['kps', 'review', 'preview', 'assistant', 'docs', 'notes', 'mistakes', 'overview'];
 function renderNav(active){
-  const link = k => `<button data-v="${k}" class="${k===active?'on':''}">${VIEWS[k].label}</button>`;
-  const more = Object.keys(VIEWS).filter(k => !PRIMARY_VIEWS.includes(k));
-  $('#nav').innerHTML = PRIMARY_VIEWS.map(link).join('')
-    + `<details class="nav-more" id="nav-more"><summary class="${more.includes(active)?'on':''}">更多</summary>
-      <div class="nav-more-pop">${more.map(link).join('')}</div></details>`;
+  const icons = {kps:'▤', review:'◷', preview:'▧', assistant:'✎', docs:'▱', notes:'▥', mistakes:'◯', overview:'▦'};
+  const link = k => `<button data-v="${k}" class="${k===active?'on':''}" ${k===active?'aria-current="page"':''}><span class="study-nav-icon" aria-hidden="true">${icons[k]}</span>${VIEWS[k].label}</button>`;
+  $('#nav').innerHTML = PRIMARY_VIEWS.map(link).join('');
   $('#nav').querySelectorAll('button[data-v]').forEach(b =>
     b.onclick = () => go(b.dataset.v));
 }
