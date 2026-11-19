@@ -2,7 +2,7 @@
 
 **软件**：study_agent（学习看板）　**著作权人**：潜声海豚 `<2227663973@qq.com>`
 **本文件版本**：v1.0　**生成日期**：2026-10-09
-**对应依赖清单**：`requirements.txt`（32 个直接依赖，版本逐一锁定）
+**对应依赖清单**：`requirements.txt`（33 个直接依赖，版本逐一锁定）
 **许可原文**：见同目录 `THIRD-PARTY-LICENSES.txt`（约 460 KB，从本机虚拟环境中各包自带的许可文件原样复制）
 
 **前端 Markdown 组件**：`markdown-it` 15.0.3，MIT 许可，来源 <https://github.com/markdown-it/markdown-it>。许可全文附在 `core/frontend/vendor_markdown_it.js` 顶部及同目录 `vendor_markdown_it.LICENSE.txt`。
@@ -72,7 +72,7 @@ AGPL-3.0 是**强 copyleft**，比 GPL 更严：
 
 ---
 
-## 2. 全部 32 个直接依赖
+## 2. 全部 33 个直接依赖
 
 「证据」列的含义见第 5 节。所有组件均**已确认许可类型**，无「未核实」项（未能核实的资产另见第 3 节）。
 
@@ -109,7 +109,8 @@ AGPL-3.0 是**强 copyleft**，比 GPL 更严：
 | 29 | tokenizers | 0.23.2 | Apache-2.0 | <https://github.com/huggingface/tokenizers> | B |
 | 30 | tqdm | 4.70.1 | MPL-2.0（主体）AND MIT（部分文件） | <https://github.com/tqdm/tqdm> | A |
 | 31 | typing_extensions | 4.16.0 | PSF-2.0 | <https://github.com/python/typing_extensions> | A |
-| 32 | xlsxwriter | 3.2.9 | BSD-2-Clause | <https://github.com/johnmcnamara/XlsxWriter> | A |
+| 32 | wordninja | 2.0.0 | MIT | <https://github.com/keredson/wordninja> | B |
+| 33 | xlsxwriter | 3.2.9 | BSD-2-Clause | <https://github.com/johnmcnamara/XlsxWriter> | A |
 
 **统计**：宽松许可（MIT / BSD / Apache-2.0 / PSF / Zlib / CC0 / 0BSD）30 个；
 弱 copyleft（MPL-2.0，文件级）2 个（certifi、tqdm）；**强 copyleft 1 个（pymupdf，AGPL-3.0）**。
@@ -166,10 +167,10 @@ exe 除了 Python 包，还会带以下内容。**逐个列出**，并如实标�
 
 **核实方法（可复现，全部离线 + 公开页面，未使用任何付费服务）**：
 
-1. 读取 `requirements.txt` 的 32 个锁定版本；
+1. 读取 `requirements.txt` 的 33 个锁定版本；
 2. 逐个读取 `venv\Lib\site-packages\<包>-<版本>.dist-info\METADATA`；
 3. 逐个读取该 dist-info 下的 `LICENSE*` / `COPYING*` / `LICENCE*` / `NOTICE*` 与 `licenses/` 子目录；
-4. 对步骤 3 取不到原文的 4 个包（flatbuffers、onnxruntime、rapidocr-onnxruntime、tokenizers），
+4. 对步骤 3 取不到原文的包（flatbuffers、onnxruntime、rapidocr-onnxruntime、tokenizers、wordninja），
    查上游官方来源：`https://api.github.com/repos/<owner>/<repo>`（`license.spdx_id`）
    或仓库根目录的 `LICENSE`；
 5. PyMuPDF 另查官方许可页 <https://pymupdf.io/licensing>；
@@ -194,3 +195,31 @@ exe 除了 Python 包，还会带以下内容。**逐个列出**，并如实标�
 ---
 
 *本文件由卡 C-0075 生成；清单与版本以 `requirements.txt` 为准，许可原文以 `THIRD-PARTY-LICENSES.txt` 为准。*
+
+---
+
+## 7. wordninja（MIT）许可原文
+
+来源：<https://github.com/keredson/wordninja/blob/master/LICENSE>
+
+MIT License
+
+Copyright (c) 2017 Derek Anderson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

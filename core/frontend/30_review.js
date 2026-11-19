@@ -1212,7 +1212,7 @@ async function refreshTermsPreview(){
   }
   box.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
       <span class="small muted">教材第${esc(ch.no || '?')}章有 ${cand} 个候选名词 · ${esc(srcLabel)}</span>
-      <button class="ghost" id="term-preview-build">更新名词解释</button>
+      <button class="ghost" id="term-preview-build">按预习名词整理</button>
     </div>`;
   const b = $('#term-preview-build');
   if (b) b.onclick = () => buildTermsPreview(did);
@@ -1235,7 +1235,7 @@ async function buildTermsPreview(docId){
     await loadTerms();
   } catch(e){
     toast('名词整理失败：' + e.message);
-    if (b){ b.disabled = false; b.textContent = '更新名词解释'; }
+    if (b){ b.disabled = false; b.textContent = '按预习名词整理'; }
   }
 }
 // ---------------- 笔记页签：按课件 → 绑定 KP 分组 ----------------

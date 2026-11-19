@@ -3,24 +3,25 @@
 # 允许个人安装与使用；禁止反向工程、修改、再分发、商业使用及声称原创。
 # 本软件不含源码，按「现状」提供；详见 NOTICE.txt。     
 # File-ID: SA-21-3f81c9d2   (project study_agent; keep this line)
-r"""课件分享包：导出（入库数据 + 向量 + 知识点产物）与导入（零 API 调用重建）。
+r"""课件分享包：导出（入库数据 + 向量 + 知识点产物）与导入（零远程 AI 调用重建）。
 
 ## 这是什么
 
 一份课件在库里 = `documents` 一行 + `chunks` N 行 + `embeddings` N 行 +
 `figure_desc` M 行 + `logs/knowledge/<doc_id>-末级知识点总结.json`（可能还有
 `<doc_id>-名词解释.json`）。把它打成一个 zip 交给别人，对方**不用重新抽取、
-不用重新切块、不用重新嵌入、不用重新跑 AI 总结**，就能得到同样的库内容与知识点。
+不用重新切块、不用重新嵌入课件块向量、不用重新跑 AI 总结**，就能得到同样的库内容与知识点。
+知识点摘要会额外用本地嵌入模型写入独立向量表，便于后续语义检索。
 
 ⇒ 一次付费的成果可以被 N 个人复用（摊平 API 费用），也让"用更贵的模型做一次总结"
 在多人之间摊薄成本。
 
-## 红线：导入侧零模型调用
+## 红线：导入侧零远程 AI 调用
 
-本模块**不导入** `core.embed` / `core.kp_build` / `core.chat`，也不发起任何网络请求
-（标准库只用到 zipfile/json/sqlite3/…）。导入路径上没有任何一次嵌入或对话调用，
-因此在调用它的进程里既不会加载 ONNX 模型、也不会产生费用。
-唯一的"模型相关"动作是**比对模型名与维度**（纯字符串/整数比较），不一致就拒绝。
+分享包导入不调用远程 LLM，也不发起网络请求。若包里带知识点总结，提交数据库后会
+尝试用接收方已有的本地 ONNX 嵌入模型建立知识点专属索引；这是本地 CPU 工作，不产生
+API 费用。若本地模型不可用，资料导入仍成功，并在返回的 warnings 中说明向量索引失败。
+课件块向量仍直接从包导入，并校验模型名与维度；不会自动重算块向量。
 
 ## 包格式（单课件一个 zip，条目名一律用 `/` 分隔）
 
@@ -137,7 +138,9 @@ SHARE_DIRNAME = "share"
 # 依据：实测一份带页图+原文件的包 = 3~30 MB（有机化学 18 份里最大 28 MB 页图 + 8 MB 原文件）。
 # 上限取的是"正常包绝对碰不到、zip 炸弹一定撞死"的量级。
 MAX_ENTRIES = 4000                 # 条目数上限（一份课件的页图最多 ~100 张 + 4 个数据文件）
-MAX_ENTRY_UNCOMPRESSED = 512 * 1024 ** 2   # 单条目解压上限 512 MB
+# 原始教材/扫描课件 PDF 可超过 512 MiB；仅放宽 original/ 原件条目到 1 GiB。
+MAX_ENTRY_UNCOMPRESSED = 1024 ** 3          # original/ 单条目解压上限 1 GiB
+MAX_OTHER_ENTRY_UNCOMPRESSED = 512 * 1024 ** 2  # 其余条目仍限制为 512 MiB
 MAX_TOTAL_UNCOMPRESSED = 2 * 1024 ** 3     # 总解压上限 2 GB
 MAX_COMPRESS_RATIO = 200           # 单条目压缩比上限（正常 zip 的 png 约 1.0，jsonl 约 5~20）
 MAX_META_BYTES = 8 * 1024 ** 2     # manifest/doc.json 上限
@@ -273,9 +276,12 @@ def _scan_zip(zf: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
         if i.filename in out:
             raise ShareError("包里有两个同名条目（%s）：拒绝导入（会被覆盖成不可预期的内容）"
                              % i.filename)
-        if i.file_size > MAX_ENTRY_UNCOMPRESSED:
+        entry_limit = (MAX_ENTRY_UNCOMPRESSED
+                       if i.filename.startswith(ORIG_DIR + "/")
+                       else MAX_OTHER_ENTRY_UNCOMPRESSED)
+        if i.file_size > entry_limit:
             raise ShareError("条目 %s 解压后 %d 字节，超过单条目上限 %d 字节，拒绝导入"
-                             % (i.filename, i.file_size, MAX_ENTRY_UNCOMPRESSED))
+                             % (i.filename, i.file_size, entry_limit))
         if i.compress_size > 0 and i.file_size / max(i.compress_size, 1) > MAX_COMPRESS_RATIO:
             raise ShareError(
                 "条目 %s 压缩比 %.0f 倍，超过上限 %d 倍，判定为 zip 炸弹，拒绝导入"
@@ -1503,6 +1509,35 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
     finally:
         conn.close()
 
+    # 知识点摘要进入独立向量表。这个附加步骤只用本地 ONNX，不调远程 API；
+    # 若接收方没有嵌入模型，课件和分享包仍已成功导入，给出可见告警即可。
+    kp_vector_result = {"status": "no_artifact", "doc_id": int(new_doc_id),
+                        "indexed": 0, "embedded": 0}
+    kp_artifacts = [item for item in k_out
+                    if str(item.get("new_file") or "").endswith(KP_SUFFIX)]
+    if kp_artifacts:
+        try:
+            from . import kp_vector
+            results = [kp_vector.sync_artifact(
+                int(new_doc_id), item["new_path"], db_path=dbp)
+                for item in kp_artifacts]
+            kp_vector_result = {
+                "status": "ok" if all(r.get("status") == "ok" for r in results) else "partial",
+                "doc_id": int(new_doc_id),
+                "indexed": sum(int(r.get("indexed") or 0) for r in results),
+                "embedded": sum(int(r.get("embedded") or 0) for r in results),
+                "artifacts": results,
+            }
+            if kp_vector_result["status"] != "ok":
+                warnings.append("分享包已导入，但部分知识点没有进入专属向量库：%s"
+                                % kp_vector_result)
+        except Exception as e:  # noqa: BLE001 - do not undo a successful package import
+            kp_vector_result = {"status": "failed", "doc_id": int(new_doc_id),
+                                "indexed": 0, "embedded": 0,
+                                "error": "%s: %s" % (type(e).__name__, e)}
+            warnings.append("分享包已导入，但知识点专属向量索引失败：%s"
+                            % kp_vector_result["error"])
+
     return {
         "status": "imported", "doc_id": new_doc_id, "title": doc["title"],
         "zip": str(zp), "package_sha256": pkg_sha,
@@ -1511,6 +1546,7 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                    "knowledge": len(k_out), "pages": n_pages},
         "source": info["source"], "embedding": {"model": pm, "dim": pd},
         "knowledge": k_out, "remap": remap_stats,
+        "knowledge_vector": kp_vector_result,
         "fts": fts, "warnings": warnings,
         "model_calls": 0, "cost_cny": 0.0,
     }

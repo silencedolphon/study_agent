@@ -96,6 +96,28 @@ CREATE TABLE IF NOT EXISTS embeddings (
     vec       BLOB NOT NULL
 );
 
+-- 知识点专属向量：与 chunks/embeddings 分开，沿用同一模型与 float32 BLOB 格式。
+-- 一条知识点对应一个向量，doc_id + kp_uid 保证重跑/分享包导入时幂等。
+CREATE TABLE IF NOT EXISTS knowledge_point_embeddings (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id       INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    kp_uid       TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    summary      TEXT NOT NULL,
+    search_text  TEXT NOT NULL,
+    pages        TEXT NOT NULL DEFAULT '[]',
+    content_hash TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    dim          INTEGER NOT NULL,
+    vec          BLOB NOT NULL,
+    source_file  TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL,
+    UNIQUE(doc_id, kp_uid)
+);
+CREATE INDEX IF NOT EXISTS idx_kpe_doc ON knowledge_point_embeddings(doc_id);
+CREATE INDEX IF NOT EXISTS idx_kpe_model_dim ON knowledge_point_embeddings(model, dim);
+
 -- ---------------- 学习层 ----------------
 -- 知识点：掌握度与依赖关系挂在这里
 CREATE TABLE IF NOT EXISTS knowledge_points (

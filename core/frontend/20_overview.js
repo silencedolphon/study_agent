@@ -31,6 +31,8 @@ async function viewOverview(){
   const mistakes = Array.isArray(mistakeRes.mistakes) ? mistakeRes.mistakes : [];
   const notes = Array.isArray(noteRes.notes) ? noteRes.notes.slice() : [];
   const coursewares = reviewRes.ok === false ? [] : (Array.isArray(reviewRes.items) ? reviewRes.items : []);
+  const coursewareKpTotal = coursewares.reduce((sum, x) => sum + (Number(x.n_kps) || 0), 0);
+  const coursewareKpDocs = coursewares.filter(x => (Number(x.n_kps) || 0) > 0).length;
   const textbooks = Array.isArray(previewRes.textbooks) ? previewRes.textbooks : [];
   const bookDue = Array.isArray(bookDueRes.chapters) ? bookDueRes.chapters : [];
   const coursewareError = reviewRes._overviewError || reviewRes.error || '';
@@ -129,7 +131,8 @@ async function viewOverview(){
   $('#view').innerHTML = `
     <div class="grid ov-stats">
       ${summaryCard('资料', doc.total || 0, `约 ${((doc.chars||0)/10000).toFixed(1)} 万字`, 'docs')}
-      ${summaryCard('知识点', k.total || 0, `未学 ${k.new||0} · 已复习 ${Math.max(0,(k.total||0)-(k.new||0))}`, 'kps')}
+      ${summaryCard('课件知识点', coursewareError ? '—' : coursewareKpTotal,
+        coursewareError ? '课件知识点数量暂不可用' : `来自 ${coursewareKpDocs} 份已整理课件`, 'kps')}
       ${summaryCard('今日待复习', k.due || 0, `今日已复习 ${k.reviews_today||0} 次`, 'review')}
       ${summaryCard('未解决错题', m.open || 0, `累计 ${m.total||0} 道`, 'mistakes')}
       ${summaryCard('笔记', d.notes || 0, '最近记录可在下方打开', 'notes')}

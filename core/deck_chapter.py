@@ -6,9 +6,56 @@ import os
 import threading
 from pathlib import Path
 
-from . import config, preview, textbook_kp
+from . import config, english_terms, preview, textbook_kp
 
 _LOCK = threading.RLock()
+
+
+def _attach_term_source_ranges(conn, book_id, terms):
+    """Attach textbook page ranges from each term's source chunk IDs."""
+    wanted = set()
+    for term in terms:
+        if not isinstance(term, dict):
+            continue
+        for source_id in (term.get("source_ids") or []):
+            try:
+                wanted.add(int(source_id))
+            except (TypeError, ValueError):
+                continue
+    refs = {}
+    if wanted:
+        ids = sorted(wanted)
+        for offset in range(0, len(ids), 400):
+            batch = ids[offset:offset + 400]
+            marks = ",".join("?" for _ in batch)
+            rows = conn.execute(
+                "SELECT id, source_ref FROM chunks WHERE doc_id=? AND id IN (%s)" % marks,
+                (int(book_id), *batch),
+            ).fetchall()
+            for row in rows:
+                refs[int(row["id"])] = str(row["source_ref"] or "")
+
+    for term in terms:
+        if not isinstance(term, dict):
+            continue
+        term["en"] = english_terms.segment_english(term.get("en") or "")
+        spans = []
+        for source_id in (term.get("source_ids") or []):
+            try:
+                ref = refs.get(int(source_id), "")
+            except (TypeError, ValueError):
+                continue
+            span = textbook_kp._ref_span(ref)
+            if span:
+                spans.append(span)
+        merged = []
+        for start, end in sorted(set(spans)):
+            if merged and start <= merged[-1][1] + 1:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        term["source_ranges"] = [[start, end] for start, end in merged]
+    return terms
 
 
 def _path(log_dir=None):
@@ -73,7 +120,7 @@ def get(conn, doc_id, *, log_dir=None, db_path=None):
         raise ValueError("请选择课件")
     with _LOCK:
         entry = _read(_path(log_dir)).get(str(deck["id"]))
-    empty = {"ok": True, "binding": None, "difficulties": [], "exam_focus": [], "terms": []}
+    empty = {"ok": True, "binding": None, "exam_focus": [], "terms": []}
     if not isinstance(entry, dict) or entry.get("deck_path") != deck["path"]:
         return empty
     try:
@@ -92,12 +139,12 @@ def get(conn, doc_id, *, log_dir=None, db_path=None):
     # 两种产物可独立生成，不存在时展示空状态。它们都是按当前学科保存的文件。
     pre = preview.read_preview_artifact(book["id"], chapter)
     summary = ((pre.get("artifact") or {}).get("summary") or {}) if pre.get("ok") else {}
-    result["difficulties"] = summary.get("difficulties") or []
     result["exam_focus"] = summary.get("exam_focus") or []
     result["preview_available"] = bool(pre.get("ok"))
     try:
         artifact = textbook_kp.read_summary(book["id"], chapter, log_dir=log_dir, db_path=db_path)
-        result["terms"] = artifact.get("terms") or []
+        result["terms"] = _attach_term_source_ranges(
+            conn, book["id"], artifact.get("terms") or [])
         result["summary_available"] = bool(artifact.get("exists"))
         result["summary_stale"] = bool(artifact.get("stale"))
     except (ValueError, OSError):

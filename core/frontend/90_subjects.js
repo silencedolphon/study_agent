@@ -251,7 +251,16 @@ function toast(msg){
 }
 $('#modal').onclick = e => { if (e.target.id==='modal') closeModal(); };
 document.addEventListener('keydown', e => {
-  if (e.key==='Escape') closeModal();
+  if (e.key==='Escape'){
+    const overlay = $('#modal');
+    // 只关闭最上层的通用编辑模态框，并阻止后续监听器把 Escape
+    // 继续传给后面的知识点浮窗；浮窗应等编辑框关闭后再单独关闭。
+    if (overlay && overlay.classList.contains('on')){
+      closeModal();
+      e.stopImmediatePropagation();
+      return;
+    }
+  }
   if (e.key==='/' && document.activeElement!==$('#q')){ e.preventDefault(); $('#q').focus(); }
 });
 $('#q').addEventListener('keydown', e => {

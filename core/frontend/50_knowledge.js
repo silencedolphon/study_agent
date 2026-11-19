@@ -576,7 +576,25 @@ function watchKpProgress(){
 //   后端给 `terms_state` + 一句人话（`message`），这里原样显示成空态——
 //   **不是报错、不是空白**（18 份 v2 产物逐份试过，见验证脚本）。
 // ⚠ 课件清单与思维导图栏**同源**（后端两个接口都走 `_artifact_doc_list`）。
-const TERMS = {docId: 0, open: true, n: 0, data: null};
+const TERMS = {docId: 0, open: true, n: 0, data: null,
+  externalOptions: null, externalTimer: 0, externalJob: null};
+const TERMS_FILTER_THRESHOLD_KEY = 'study_agent:textbook-terms-filter-threshold:v1';
+
+function termsFilterSavedThreshold(){
+  try {
+    const raw = localStorage.getItem(TERMS_FILTER_THRESHOLD_KEY);
+    if (raw == null || !String(raw).trim()) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+  } catch(e){ return null; }
+}
+
+function termsFilterSaveThreshold(value){
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 1) return;
+  try { localStorage.setItem(TERMS_FILTER_THRESHOLD_KEY, String(number)); }
+  catch(e){ /* 浏览器禁用本地存储时仍可在当前页面筛选 */ }
+}
 
 function termsCard(){
   return `<div class="card" style="margin-top:14px">
@@ -586,6 +604,15 @@ function termsCard(){
       <select id="term-doc" style="flex:1;min-width:260px"></select>
       <button class="text-btn" id="term-unfold">展开</button>
     </div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <button class="ghost" id="term-add">增加名词</button>
+      <button class="ghost" id="term-import">导入外部名词资料</button>
+      <input id="term-import-files" type="file" multiple hidden
+        accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.csv,.json,.tex,.yaml,.yml,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif">
+    </div>
+    <div id="term-external-info" class="small muted" style="margin:6px 0"></div>
+    <div id="term-external-status" class="small muted" style="margin:6px 0"></div>
+    <div id="term-kp-filter" class="small muted" style="margin:8px 0 12px"></div>
     <div id="term-preview" class="small muted" style="margin:8px 0"></div>
     <div id="term-box"><div class="small muted">加载中…</div></div>
   </div>`;
@@ -602,26 +629,39 @@ function termsBodyHtml(d){
     return `<div class="small muted">共 <b>${ts.length}</b> 个名词解释（已收起）——
       点上面的【展开】查看。</div>`;
   }
-  const rows = ts.map(t => {
+  const rows = ts.map((t, index) => {
     const kp = t.first_kp_id || '';
     const name = t.first_kp_name || t.term || kp;
     return `<li style="margin:0 0 10px;padding:10px 12px;
         border:1px solid var(--line);border-radius:var(--radius)">
       <div>
-        <a href="#" class="termname" data-kp="${esc(kp)}" data-kpname="${esc(name)}"
-          title="点开「${esc(name)}」（${esc(kp || '—')}）——这个名词第一次出现的知识点"
-          style="font-weight:600;text-decoration:none">${esc(t.term)}</a>${
+        ${kp ? `<a href="#" class="termname" data-kp="${esc(kp)}" data-kpname="${esc(name)}"
+          title="点开「${esc(name)}」（${esc(kp)}）——这个名词第一次出现的知识点"
+          style="font-weight:600;text-decoration:none">${esc(t.term)}</a>`
+          : `<span style="font-weight:600">${esc(t.term)}</span>`}${
         t.en ? `<span class="termen" style="margin-left:10px;color:var(--accent);
-            opacity:.9">${esc(t.en)}</span>`
+            opacity:.9;overflow-wrap:anywhere">${esc(t.en)}</span>`
           : `<span class="small muted" style="margin-left:10px">（这份材料没给英文）</span>`}
       </div>
       <div class="termdef" style="margin-top:6px;line-height:1.65">${
         mdToHtml(t.def || '（这条没有解释）')}</div>
       <div class="small muted" style="margin-top:6px">
-        首次出现 p.${t.first_page || '?'}${
+        首次出现 ${kp && Number(t.first_page) > 0
+          ? `<a href="#" class="termname" data-kp="${esc(kp)}" data-kpname="${esc(name)}"
+              title="查看课件第 ${Number(t.first_page)} 页关联的知识点">课件第 ${Number(t.first_page)} 页</a>`
+          : `课件第 ${Number(t.first_page) > 0 ? Number(t.first_page) : '?'} 页`}${
         t.first_kp_name ? ' · 知识点 ' + esc(t.first_kp_name) : ''}${
         (t.kp_ids || []).length > 1
-          ? ` · 共出现在 ${t.kp_ids.length} 条知识点里` : ''}
+          ? ` · 共出现在 ${t.kp_ids.length} 条知识点里` : ''}${
+        t.relevance_score != null && t.relevance_score !== ''
+          ? ` · 关联度 ${Number(t.relevance_score).toFixed(3)}` : ''}
+      </div>
+      ${(t.external_sources || []).length ? `<div class="small muted" style="margin-top:4px">外部来源：${
+        (t.external_sources || []).map(s => esc(s.file || '外部资料') +
+          ((s.refs || []).length ? ' · ' + esc((s.refs || []).join('、')) : '')).join('；')}</div>` : ''}
+      <div class="row" style="justify-content:flex-end;gap:6px;margin-top:7px">
+        <button class="text-btn term-edit" data-index="${index}">修改</button>
+        <button class="text-btn term-delete" data-index="${index}" style="color:var(--bad)">删除</button>
       </div>
     </li>`;
   }).join('');
@@ -650,6 +690,150 @@ function renderTerms(){
       mmOpenKp(el.dataset.kp, el.dataset.kpname, el, false, TERMS.docId);
     };
   });
+  box.querySelectorAll('.term-edit').forEach(el => el.onclick = () => {
+    const index = Number(el.dataset.index), term = (d.terms || [])[index];
+    if (term) termEditorOpen('courseware', {doc_id: TERMS.docId}, index, term);
+  });
+  box.querySelectorAll('.term-delete').forEach(el => el.onclick = () => {
+    const index = Number(el.dataset.index), term = (d.terms || [])[index];
+    if (term) termDelete('courseware', {doc_id: TERMS.docId}, index, term);
+  });
+}
+
+function termEditorOpen(target, context, index, term){
+  const t = term || {};
+  modal(`<h2>${index >= 0 ? '修改名词' : '增加名词'}</h2>
+    <div class="row" style="gap:10px;margin:14px 0">
+      <label style="flex:1">名词<input id="term-edit-name" maxlength="200" value="${esc(t.term || '')}"
+        placeholder="中文名词" style="width:100%;margin-top:5px"></label>
+      <label style="flex:1">英文（可留空）<input id="term-edit-en" maxlength="300" value="${esc(t.en || '')}"
+        placeholder="English term" style="width:100%;margin-top:5px"></label>
+    </div>
+    <label>释义<textarea id="term-edit-definition" rows="7" maxlength="12000"
+      placeholder="输入名词释义" style="width:100%;margin-top:5px;resize:vertical">${esc(t.def || t.definition || '')}</textarea></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="act" id="term-edit-save">保存</button><button class="ghost" id="term-edit-cancel">取消</button>
+    </div>`);
+  $('#term-edit-cancel').onclick = closeModal;
+  $('#term-edit-save').onclick = async () => {
+    const body = {...context, target, action: index >= 0 ? 'update' : 'add',
+      term: $('#term-edit-name').value, en: $('#term-edit-en').value,
+      definition: $('#term-edit-definition').value};
+    if (index >= 0){ body.index = index; body.expected_term = String(t.term || ''); }
+    const button = $('#term-edit-save'); button.disabled = true; button.textContent = '保存中…';
+    try {
+      const result = await api('/api/terms/manage', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      if (!result || result.ok === false) throw new Error((result && result.error) || '保存失败');
+      closeModal();
+      toast(result.synced ? '名词已保存，并同步到另一处' : '名词已保存');
+      await refreshManagedTermViews(context);
+    } catch(e){
+      toast('保存失败：' + e.message);
+      const current = $('#term-edit-save'); if (current){ current.disabled = false; current.textContent = '保存'; }
+    }
+  };
+}
+
+async function refreshManagedTermViews(context){
+  const did = Number((context || {}).doc_id || 0);
+  if (did && Number(TERMS.docId) === did) await loadTerms();
+  if (did && typeof MMPOP !== 'undefined' && Number(MMPOP.docId) === did)
+    await mmTeachPaint(MMPOP.kp, MMPOP.anchor);
+}
+
+async function termDelete(target, context, index, term){
+  const ok = await confirmBox('彻底删除名词？',
+    `将删除「${term.term || ''}」及其释义。此操作不会创建备份，删除后无法从当前产物恢复。`);
+  if (!ok) return;
+  try {
+    const result = await api('/api/terms/manage', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...context, target, action:'delete', index,
+        expected_term:String(term.term || '')})});
+    if (!result || result.ok === false) throw new Error((result && result.error) || '删除失败');
+    toast(result.synced ? '名词已删除，并同步到另一处' : '名词已删除');
+    await refreshManagedTermViews(context);
+  } catch(e){ toast('删除失败：' + e.message); }
+}
+
+function renderExternalTermsStatus(job){
+  const box = $('#term-external-status');
+  if (!box) return;
+  TERMS.externalJob = job || null;
+  const button = $('#term-import');
+  if (job && job.active){
+    box.innerHTML = `外部名词整理：${esc(job.stage || '处理中')} · ${Number(job.done || 0)}/${Number(job.total || 0)} 段 · ${Number(job.elapsed_s || 0)} 秒 · 当前费用 ¥${Number(job.cost_cny || 0).toFixed(4)}`;
+    if (button){ button.disabled = true; button.textContent = '外部资料整理中…'; }
+    return;
+  }
+  if (button){
+    button.disabled = !(TERMS.externalOptions && TERMS.externalOptions.ready);
+    button.textContent = '导入外部名词资料';
+  }
+  if (job && ['done','partial','failed'].includes(job.status)){
+    const color = job.status === 'failed' ? 'var(--bad)' : 'var(--muted)';
+    box.innerHTML = `<span style="color:${color}">上次外部整理：${esc(job.status === 'done' ? '完成' : job.status === 'partial' ? '部分完成' : '失败')} · ${Number(job.n_terms || 0)} 个名词 · ${Number(job.calls || 0)} 次模型调用 · ¥${Number(job.cost_cny || 0).toFixed(4)}${job.error ? '<br>' + esc(job.error) : ''}</span>`;
+  } else box.textContent = '';
+}
+
+async function pollExternalTermsJob(docId, wasActive){
+  if (TERMS.externalTimer) clearTimeout(TERMS.externalTimer);
+  TERMS.externalTimer = 0;
+  try {
+    const job = await api('/api/terms/external/status?doc_id=' + encodeURIComponent(docId));
+    if (Number(TERMS.docId) !== Number(docId)) return;
+    renderExternalTermsStatus(job);
+    if (job.active){ TERMS.externalTimer = setTimeout(() => pollExternalTermsJob(docId, true), 1800); return; }
+    if (wasActive && job.status && job.status !== 'idle') await loadTerms();
+  } catch(e){
+    const box = $('#term-external-status'); if (box) box.textContent = '读取外部整理状态失败：' + e.message;
+  }
+}
+
+async function refreshExternalTermsOptions(){
+  const box = $('#term-external-info');
+  if (!box || !TERMS.docId) return;
+  const importButton = $('#term-import');
+  if (importButton) importButton.disabled = true;
+  try {
+    const data = await api('/api/terms/external/options?doc_id=' + encodeURIComponent(TERMS.docId));
+    TERMS.externalOptions = data;
+    if (importButton) importButton.disabled = !data.ready;
+    box.innerHTML = data.ready
+      ? `将根据「${esc(data.binding.book_title || '关联教材')}」第 ${Number(data.binding.chapter)} 章筛选名词，再关联 ${Number(data.n_courseware_kps || 0)} 条课件知识点。`
+      : `外部资料导入条件：${esc(data.reason || '请先关联教材章节并整理课件知识点。')}`;
+  } catch(e){
+    TERMS.externalOptions = null;
+    box.textContent = '读取外部资料导入条件失败：' + e.message;
+  }
+  await pollExternalTermsJob(TERMS.docId, false);
+}
+
+async function importExternalTerms(files){
+  const options = TERMS.externalOptions || {};
+  if (!options.ready) return toast(options.reason || '请先关联教材章节并整理课件知识点');
+  const list = Array.from(files || []);
+  if (!list.length) return;
+  const names = list.map(x => x.name).join('、');
+  const ok = await confirmBox('导入外部名词资料？',
+    `将读取 ${list.length} 份资料：${names}\n模型会按资料长度分段调用，筛选「${options.binding.book_title || '关联教材'}」第 ${Number(options.binding.chapter)} 章相关名词，并匹配到课件知识点。实际调用次数和费用取决于资料文本量。`);
+  if (!ok) return;
+  const status = $('#term-external-status');
+  if (status) status.textContent = '正在上传外部资料…';
+  const button = $('#term-import'); if (button) button.disabled = true;
+  try {
+    const form = new FormData();
+    form.append('doc_id', String(TERMS.docId));
+    list.forEach(file => form.append('files', file, file.name));
+    const result = await api('/api/terms/external/import', {method:'POST', body:form});
+    if (!result || result.ok === false) throw new Error((result && result.error) || '启动失败');
+    toast('外部名词整理已开始');
+    await pollExternalTermsJob(TERMS.docId, true);
+  } catch(e){
+    if (status) status.textContent = '外部资料导入失败：' + e.message;
+    if (button) button.disabled = false;
+  }
 }
 
 async function loadTerms(){
@@ -664,13 +848,96 @@ async function loadTerms(){
   TERMS.data = d;
   TERMS.n = (d.terms || []).length;
   renderTerms();
+  await refreshExternalTermsOptions();
   try { await refreshTermsPreview(); } catch(e){ /* 预览状态读不到不影响名词列表 */ }
+  try { await refreshTextbookTermsFilter(); } catch(e){ /* 关联筛选状态不影响名词列表 */ }
+}
+
+async function refreshTextbookTermsFilter(){
+  const box = $('#term-kp-filter');
+  if (!box) return;
+  const did = TERMS.docId;
+  if (!did){ box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="small muted">读取教材名词筛选条件…</span>';
+  let d;
+  try { d = await api('/api/terms/textbook-filter/options?doc_id=' + encodeURIComponent(did)); }
+  catch(e){
+    box.innerHTML = `<span class="small muted">筛选条件读取失败：${esc(e.message)}</span>`;
+    return;
+  }
+  if (!d || d.ok === false){
+    const reason = (d && d.error) || '暂不可筛选';
+    box.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="small muted">${esc(reason)}</span>
+      <button class="ghost" disabled title="${esc(reason)}">按课件知识点筛选教材名词</button>
+    </div>`;
+    return;
+  }
+  TERMS.filterOptions = d;
+  const binding = d.binding || {};
+  const savedThreshold = termsFilterSavedThreshold();
+  const threshold = savedThreshold == null ? Number(d.threshold ?? 0.62) : savedThreshold;
+  const stale = d.summary_stale ? ' · 教材总结已过期' : '';
+  box.innerHTML = `<div class="small muted" style="margin-bottom:7px">
+      关联教材：${esc(binding.book_title || '教材')} · 第${esc(binding.chapter || '?')}章${
+      binding.chapter_name ? '「' + esc(binding.chapter_name) + '」' : ''}；
+      ${Number(d.n_candidates || 0)} 个教材名词 · ${Number(d.n_courseware_kps || 0)} 个课件知识点${stale}
+    </div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <label class="small muted">关联度阈值
+        <input id="term-kp-filter-threshold" type="number" min="0" max="1" step="0.01"
+          value="${threshold.toFixed(2)}" style="width:82px;margin-left:5px">
+      </label>
+      <button class="ghost" id="term-kp-filter-build" ${Number(d.n_candidates || 0) ? '' : 'disabled'}>
+        按课件知识点筛选教材名词
+      </button>
+      <span class="small muted">只保留最高余弦相似度严格高于阈值的名词；本地评分，不调用 AI。</span>
+    </div>`;
+  const button = $('#term-kp-filter-build');
+  if (button) button.onclick = () => buildTextbookTermsFilter(did);
+  const input = $('#term-kp-filter-threshold');
+  if (input) input.addEventListener('input', () => termsFilterSaveThreshold(input.value));
+}
+
+async function buildTextbookTermsFilter(docId){
+  const input = $('#term-kp-filter-threshold');
+  if (!input || !String(input.value || '').trim())
+    return toast('请填写关联度阈值');
+  const threshold = Number(input.value);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1){
+    return toast('关联度阈值请输入 0 到 1 之间的数字');
+  }
+  termsFilterSaveThreshold(threshold);
+  const binding = (TERMS.filterOptions || {}).binding || {};
+  const ok = await confirmBox('筛选教材章节名词？',
+    `将比较「${binding.book_title || '关联教材'}」第${binding.chapter || '?'}章的教材名词与当前课件的知识点向量，只保留最高相似度严格大于 ${threshold.toFixed(2)} 的名词。只更新教材来源的词条，保留外部导入和手工维护的词条；会备份旧文件，不调用 AI。`);
+  if (!ok) return;
+  const button = $('#term-kp-filter-build');
+  if (button){ button.disabled = true; button.textContent = '评分并筛选中…'; }
+  try {
+    const r = await api('/api/terms/filter-textbook', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({doc_id:docId, threshold})});
+    if (!r || r.ok === false) throw new Error((r && r.error) || '筛选失败');
+    toast(`教材名词筛选完成：候选 ${r.n_candidates} 个，保留 ${r.n_selected} 个，舍弃 ${r.n_dropped} 个。`);
+    await loadTerms();
+  } catch(e){
+    toast('教材名词筛选失败：' + e.message);
+    if (button){ button.disabled = false; button.textContent = '按课件知识点筛选教材名词'; }
+  }
 }
 
 async function mountTerms(){
   const box = $('#term-box'); if (!box) return;
   const btn = $('#term-unfold');
   if (btn) btn.onclick = () => { TERMS.open = !TERMS.open; renderTerms(); };
+  const add = $('#term-add');
+  if (add) add.onclick = () => termEditorOpen('courseware', {doc_id: TERMS.docId}, -1, null);
+  const imp = $('#term-import'), input = $('#term-import-files');
+  if (imp && input) {
+    imp.onclick = () => input.click();
+    input.onchange = () => { importExternalTerms(input.files); input.value = ''; };
+  }
   let docs = [];
   try { docs = (await api('/api/terms')).documents || []; }
   catch(e){
@@ -681,6 +948,8 @@ async function mountTerms(){
     box.innerHTML = `<div class="empty">知识库里还没有课件。<br>
       <span class="small">先去「资料」页入库课件并整理知识点，再回来这里看名词解释。</span></div>`;
     if (btn) btn.disabled = true;
+    if (add) add.disabled = true;
+    if (imp) imp.disabled = true;
     return;
   }
   // 默认选中：**优先挑一份真有名词的**（人进这一栏就是想看名词解释）；

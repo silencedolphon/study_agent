@@ -220,7 +220,16 @@ async function bookPoll(){
   if (!$('#book-kp-panel') || MINDMAP.mode !== 'textbook') return;
   try {
     const wasActive = !!(BOOKKP.progress && BOOKKP.progress.active);
-    BOOKKP.progress = await api('/api/textbook-kp/progress');
+    // Progress responses deliberately include `error` after a failed run. The
+    // shared api() helper treats any `error` field as a failed HTTP request and
+    // throws before we can render the final failed state; read this snapshot
+    // directly so the page can show the saved 1/N progress and retry action.
+    const response = await fetch('/api/textbook-kp/progress');
+    let snapshot = null;
+    try { snapshot = await response.json(); } catch(e) { /* report below */ }
+    if (!response.ok || !snapshot || typeof snapshot !== 'object')
+      throw new Error((snapshot && snapshot.error) || `HTTP ${response.status}`);
+    BOOKKP.progress = snapshot;
     if ((wasActive || BOOKKP.awaiting) && !BOOKKP.progress.active){
       BOOKKP.awaiting = false;
       await bookLoadSummary();

@@ -384,7 +384,7 @@ SETTINGS_FILE = _path(
 #   真实配置的前提下测"改一个值 → 真管线用新值"。正常运行时它永远是
 #   `config.local.json`（已被 .gitignore 忽略）。
 
-# 六条管线（界面的分区，顺序即界面顺序）
+# 七条管线（界面的分区，顺序即界面顺序）
 _PIPELINES: list[dict] = [
     {
         "id": "chat", "label": "AI 问答", "icon": "💬",
@@ -427,6 +427,12 @@ _PIPELINES: list[dict] = [
                 "（标题/解释/要点/记忆提示/易错点/自测问答）→ 存本机产物，"
                 "可续跑、可回忆复习。**输出上限 0 = 无上限**；模型/端点/密钥/"
                 "推理档位都是这条管线自己一份，与看板其它管线互不影响。",
+    },
+    {
+        "id": "external_terms", "label": "AI 外部名词整理", "icon": "📚",
+        "sub": "从外部名词资料筛选章节词条并关联课件知识点 · core/external_terms.py",
+        "desc": "读取名词词典或学科汇总资料，结合手动关联教材章节的正文筛选本章名词，"
+                "再匹配到课件知识点并记录课件页码。与教材知识点总结中的名词提炼独立。",
     },
 ]
 
@@ -648,6 +654,28 @@ _FIELDS: list[dict] = [
      "type": "int", "default": 0,
      "hint": "★ 0 = 无上限（请求里不发送 max_tokens）。设成正数时思考链与正文共用；"
              "被截断时本段会停下并报错，不会自动重试。"},
+
+    # ---------------- 管线 7：AI 外部名词整理 ----------------
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_MODEL",
+     "label": "模型名", "type": "str", "default": "deepseek-flash",
+     "hint": "只用于名词解释栏的外部资料整理，与教材知识点总结分开配置。"},
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_BASE_URL",
+     "label": "API Base", "type": "str", "default": "https://api.deepseek.com",
+     "hint": "外部名词整理模型的端点根地址，不带 /chat/completions。"},
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_API_KEY",
+     "label": "API 密钥", "type": "secret", "default": "",
+     "env": "DEEPSEEK_API_KEY",
+     "hint": "留空时跟随本机凭据链；只存本机 config.local.json，不会上传。"},
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_THINKING",
+     "label": "开启推理", "type": "bool", "default": 1,
+     "hint": "从整学科名词集合里定位单章术语，需要结合章节上下文判断，默认开启。"},
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_REASONING_EFFORT",
+     "label": "推理强度", "type": "enum",
+     "choices": ["none", "low", "high", "max"], "default": "max",
+     "hint": "默认 max；模型每次调用的实际 token 与费用会记入任务状态和产物。"},
+    {"pipeline": "external_terms", "key": "EXTERNAL_TERMS_MAX_TOKENS",
+     "label": "单段输出上限（token；0 = 无上限）", "type": "int", "default": 0,
+     "hint": "★ 0 = 无上限（请求里不发送 max_tokens）；设成正数可限制单段模型输出。"},
 ]
 
 _FIELDS_BY_KEY: dict[str, dict] = {f["key"]: f for f in _FIELDS}
@@ -659,15 +687,18 @@ _PIPELINE_IDS = tuple(p["id"] for p in _PIPELINES)
 _PIPE_BASE_KEY = {"chat": "CHAT_BASE_URL", "kp": "KP_BUILD_BASE_URL",
                   "ingest": "DEEPSEEK_BASE_URL", "deck": "DECK_CHAT_BASE_URL",
                   "preview": "PREVIEW_BASE_URL",
-                  "textbook_kp": "TEXTBOOK_KP_BASE_URL"}
+                  "textbook_kp": "TEXTBOOK_KP_BASE_URL",
+                  "external_terms": "EXTERNAL_TERMS_BASE_URL"}
 _PIPE_MODEL_KEY = {"chat": "CHAT_MODEL", "kp": "KP_BUILD_MODEL",
                    "ingest": "INGEST_MODEL", "deck": "DECK_CHAT_MODEL",
                    "preview": "PREVIEW_MODEL",
-                   "textbook_kp": "TEXTBOOK_KP_MODEL"}
+                   "textbook_kp": "TEXTBOOK_KP_MODEL",
+                   "external_terms": "EXTERNAL_TERMS_MODEL"}
 _PIPE_KEY_KEY = {"chat": "CHAT_API_KEY", "kp": "KP_BUILD_API_KEY",
                  "ingest": "INGEST_API_KEY", "deck": "DECK_CHAT_API_KEY",
                  "preview": "PREVIEW_API_KEY",
-                 "textbook_kp": "TEXTBOOK_KP_API_KEY"}
+                 "textbook_kp": "TEXTBOOK_KP_API_KEY",
+                 "external_terms": "EXTERNAL_TERMS_API_KEY"}
 
 # 各管线的输出 token 上限键（**统一语义：0 = 无上限**）。
 # 这里同时认 agent_bridge 的细粒度管线名（courseware_kp / ingest_vision 等），
@@ -685,6 +716,7 @@ TOKEN_CAP_KEYS: dict[str, str] = {
     "deck": "DECK_CHAT_MAX_TOKENS",
     "preview": "PREVIEW_MAX_TOKENS",
     "textbook_kp": "TEXTBOOK_KP_MAX_TOKENS",
+    "external_terms": "EXTERNAL_TERMS_MAX_TOKENS",
 }
 
 
@@ -894,7 +926,7 @@ def settings_values() -> dict:
 
 
 def settings_payload() -> dict:
-    """给「设置」窗口的完整结构：四条管线 + 每条的字段（含说明与高级标记）。"""
+    """给「设置」窗口的完整结构：全部管线及其字段说明与高级标记。"""
     _ensure_loaded()
     pipes = []
     for p in _PIPELINES:

@@ -404,13 +404,39 @@ async function mmTeachPaint(d, el){
       <button class="mteach-x" title="收起" onclick="mmTeachClose()">✕</button></div>` +
       (bind ? `<div class="manual-book-title">${esc(bind.book_title)}<br><b>第 ${Number(bind.chapter)} 章 ${esc(bind.chapter_name)}</b></div>
       ${data.summary_stale ? '<p class="small muted">教材总结为旧版本，可重新整理。</p>' : ''}
-      ${list('预习难点', data.difficulties || [], data.preview_available ? '本章暂无难点' : '请先生成本章预习')}
       ${list('考试重点', data.exam_focus || [], data.preview_available ? '本章暂无考点' : '请先生成本章预习')}
-      <div class="manual-book-section"><h4>重点名词</h4>${terms.length
-        ? terms.map(t => `<details><summary><b>${esc(t.term || '')}</b>${t.en && t.en !== t.term ? ' · ' + esc(t.en) : ''}</summary>
-          <div>${mdToHtml(t.definition || '')}</div></details>`).join('')
-        : '<p class="muted small">' + (data.summary_available ? '暂无名词，可重新整理教材总结' : '请先整理本章教材知识点') + '</p>'}</div>`
+      <div class="manual-book-section"><h4 style="display:flex;align-items:center;justify-content:space-between">重点名词
+        <button class="ghost" id="mmteach-term-add">增加名词</button></h4>${terms.length
+        ? terms.map((t, index) => {
+          const ranges = (Array.isArray(t.source_ranges) ? t.source_ranges : [])
+            .map(r => Array.isArray(r) ? r : [])
+            .filter(r => Number(r[0]) > 0)
+            .map(r => Number(r[1]) > Number(r[0])
+              ? `p.${Number(r[0])}–${Number(r[1])}` : `p.${Number(r[0])}`);
+          const source = ranges.length
+            ? `<div class="small muted" style="margin:4px 0">教材来源：${esc(ranges.join('、'))}</div>` : '';
+          return `<details><summary><b>${esc(t.term || '')}</b>${t.en && t.en !== t.term ? ' · ' + esc(t.en) : ''}</summary>
+            ${source}<div>${mdToHtml(t.definition || '')}</div>
+            <div class="row" style="justify-content:flex-end;gap:6px;margin-top:7px">
+              <button class="text-btn mmteach-term-edit" data-index="${index}">修改</button>
+              <button class="text-btn mmteach-term-delete" data-index="${index}" style="color:var(--bad)">删除</button>
+            </div></details>`;
+        }).join('')
+        : '<p class="muted small">' + (data.summary_available ? '暂无名词，可手动添加' : '本章尚未整理教材知识点，可先手动添加名词') + '</p>'}</div>`
       : `<div class="mteach-empty">${esc(data.warning || '请在课件导图上方选择对应的教材章节。')}</div>`);
+    if (bind){
+      const termContext = {book_id:Number(bind.book_id), chapter:Number(bind.chapter), doc_id:docId};
+      const addTerm = $('#mmteach-term-add', aside);
+      if (addTerm) addTerm.onclick = () => termEditorOpen('textbook', termContext, -1, null);
+      aside.querySelectorAll('.mmteach-term-edit').forEach(button => button.onclick = () => {
+        const index = Number(button.dataset.index), term = terms[index];
+        if (term) termEditorOpen('textbook', termContext, index, term);
+      });
+      aside.querySelectorAll('.mmteach-term-delete').forEach(button => button.onclick = () => {
+        const index = Number(button.dataset.index), term = terms[index];
+        if (term) termDelete('textbook', termContext, index, term);
+      });
+    }
     evPopPlace(el || MMPOP.anchor || evPopEl());
   } catch(e){
     if (req === MMTEACH.req && aside === $('#mmkp-teach'))
@@ -443,7 +469,7 @@ async function mmTeachBackfill(docId){
     const books = opts.textbooks || [];
     const card = document.createElement('div');
     card.className = 'manual-book-link';
-    card.innerHTML = `<div><b>对应教材章节</b><div class="small muted">手动选择后，阅读知识点时可在右侧查看本章难点、考点和重点名词。</div></div>
+    card.innerHTML = `<div><b>对应教材章节</b><div class="small muted">手动选择后，阅读知识点时可在右侧查看本章考试重点和重点名词。</div></div>
       <div class="manual-book-controls"><select class="manual-book-select" aria-label="选择教材">
       <option value="">不关联教材</option>${books.map(b => `<option value="${Number(b.doc_id)}"${Number(b.doc_id) === Number(previous.book_id) ? ' selected' : ''}>${esc(b.title)}</option>`).join('')}</select>
       <select class="manual-chapter-select" aria-label="选择教材章节" disabled><option>请选择章节</option></select>

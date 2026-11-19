@@ -30,7 +30,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from . import config
+from . import config, terms_store
 
 TERMS_PREVIEW_VERSION = "C-0129-terms-preview-v1"
 TERMS_FILTER_VERSION = "C-0129-terms-filter-v1"
@@ -390,12 +390,14 @@ def build_terms_from_preview(doc_id: int, *, db_path=None, out_path=None,
         if out.exists() and not force:
             prev = _load_json(out)
             pm = prev.get("meta") if isinstance(prev.get("meta"), dict) else {}
-            if (str(pm.get("pipeline_version") or "") == TERMS_PREVIEW_VERSION
-                    and str(pm.get("preview_sha256") or "") == preview_sha
-                    and int((pm.get("chapter") or {}).get("no") or 0) == int(chapter["no"])):
+            preview_meta = ((pm.get("source_meta") or {}).get("preview_chapter")
+                            if isinstance(pm.get("source_meta"), dict) else None) or pm
+            if (str(preview_meta.get("pipeline_version") or "") == TERMS_PREVIEW_VERSION
+                    and str(preview_meta.get("preview_sha256") or "") == preview_sha
+                    and int((preview_meta.get("chapter") or {}).get("no") or 0) == int(chapter["no"])):
                 return {"ok": True, "status": "skipped", "source": "preview_key_terms",
-                        "n_candidates": int(pm.get("n_candidates") or 0),
-                        "n_selected": int(pm.get("n_selected") or 0),
+                        "n_candidates": int(preview_meta.get("n_candidates") or 0),
+                        "n_selected": int(preview_meta.get("n_selected") or 0),
                         "out_path": str(out), "chapter": chapter,
                         "calls": 0, "cost_cny": 0.0,
                         "elapsed_s": round(time.perf_counter() - started, 3)}
@@ -480,7 +482,8 @@ def build_terms_from_preview(doc_id: int, *, db_path=None, out_path=None,
         backup = _backup(out)
         if backup:
             meta["prev_backup"] = backup
-        _atomic_write_json({"meta": meta, "terms": selected}, out)
+        terms_store.replace_source(out, "preview_chapter", selected, meta,
+                                   legacy_meta_sources=("preview_key_terms", "preview_chapter"))
         if log:
             log("名词整理（预习名词）：doc#%d 第%d章 · 候选 %d → 保留 %d / 剔除 %d"
                 "（0 AI，%.3fs）" % (doc_id, int(chapter["no"]), len(candidates),
@@ -522,7 +525,9 @@ def terms_preview_status(doc_id: int, *, db_path=None, out_path=None,
         out = terms_out_file(doc_id, out_path)
         data = _load_json(out) if out.exists() else {}
         meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
-        is_current = str(meta.get("pipeline_version") or "") == TERMS_PREVIEW_VERSION
+        preview_meta = ((meta.get("source_meta") or {}).get("preview_chapter")
+                        if isinstance(meta.get("source_meta"), dict) else None) or meta
+        is_current = str(preview_meta.get("pipeline_version") or "") == TERMS_PREVIEW_VERSION
         try:
             preview_mtime = preview_path.stat().st_mtime if preview_path.exists() else 0.0
         except OSError:
@@ -534,7 +539,7 @@ def terms_preview_status(doc_id: int, *, db_path=None, out_path=None,
             preview_sha = ""
         can_rebuild = bool(candidates) and (
             not is_current
-            or str(meta.get("preview_sha256") or "") != preview_sha)
+            or str(preview_meta.get("preview_sha256") or "") != preview_sha)
         return {"ok": True, "doc_id": doc_id,
                 "source": "preview_key_terms" if candidates else "none",
                 "chapter": chapter,
@@ -545,7 +550,7 @@ def terms_preview_status(doc_id: int, *, db_path=None, out_path=None,
                 "current": {"exists": out.exists(), "is_current": is_current,
                             "source": str(meta.get("source") or ""),
                             "n_terms": len(data.get("terms") or []) if data else 0,
-                            "generated_at": str(meta.get("generated_at") or ""),
+                            "generated_at": str(preview_meta.get("generated_at") or ""),
                             "path": str(out)},
                 "can_rebuild": can_rebuild,
                 "calls": 0, "cost_cny": 0.0}

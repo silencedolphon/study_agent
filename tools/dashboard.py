@@ -34,6 +34,7 @@ import sqlite3
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 import zipfile                    # 卡 C-0080：只读 zip 中央目录（看包里有什么）
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -82,7 +83,7 @@ _setup_console_encoding()
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core import config, db, extract, ingest as ingest_mod  # noqa: E402
+from core import config, db, english_terms as english_terms_mod, extract, ingest as ingest_mod  # noqa: E402
 from core import outline as outline_mod  # noqa: E402
 from core import kp_build as kp_build_mod  # noqa: E402
 from core import textbook_kp as textbook_kp_mod  # noqa: E402
@@ -210,7 +211,8 @@ _KP_CLEAR_MAX_DOCS = 200
 _KP_E1_HINTS = ('封面', '封皮', '学习目标', '掌握要求', '目录', '提纲', '致谢',
                 '参考文献', 'thank you', '谢谢', '版权', '声明')
 _TERMS_FIELDS = ('term', 'en', 'en_source', 'def', 'first_page', 'first_kp_id',
-                 'first_kp_name', 'kp_ids', 'n_occurrences')
+                 'first_kp_name', 'kp_ids', 'n_occurrences', 'relevance_score',
+                 'relevance_kp_id', 'relevance_kp_name', 'source', 'external_sources')
 _WIN_BAD_CHARS = '<>:"/|?*' + chr(92)
 
 
@@ -2355,7 +2357,10 @@ def _terms_payload(art, doc_id):
     else:
         terms, own_meta = [], {}
     source = "own_file" if terms else ""
-    if not terms:
+    # A user-managed empty list is an intentional deletion. Do not resurrect
+    # legacy terms from the KP artifact after the last row has been removed.
+    overridden = bool((own_meta or {}).get("terms_override"))
+    if not terms and not overridden:
         terms = _terms_of(art)
         source = "kp_artifact" if terms else ""
     state, msg = _terms_state(art, terms, own_meta)
@@ -2371,16 +2376,45 @@ def _terms_payload(art, doc_id):
     }
     if state != "ok":
         return out
+    artifact_doc = art.get("doc") if isinstance(art.get("doc"), dict) else {}
+    kp_by_id = {
+        str(item.get("id") or item.get("uid") or "").strip(): item
+        for item in (artifact_doc.get("knowledge_points") or [])
+        if isinstance(item, dict) and str(item.get("id") or item.get("uid") or "").strip()
+    }
     for t in terms:
         row = {k: t.get(k) for k in _TERMS_FIELDS}
         for k in ("term", "en", "en_source", "def", "first_kp_id", "first_kp_name"):
             row[k] = str(row.get(k) or "")
+        row["source"] = str(row.get("source") or "")
+        row["external_sources"] = (row.get("external_sources")
+                                   if isinstance(row.get("external_sources"), list) else [])
+        row["en"] = english_terms_mod.segment_english(row["en"])
         row["kp_ids"] = [str(x) for x in (row.get("kp_ids") or [])]
         for k in ("first_page", "n_occurrences"):
             try:
                 row[k] = int(row.get(k) or 0)
             except (TypeError, ValueError):
                 row[k] = 0
+        if not row["first_kp_id"]:
+            row["first_kp_id"] = str(row.get("relevance_kp_id") or "")
+        if not row["first_kp_name"]:
+            row["first_kp_name"] = str(row.get("relevance_kp_name") or "")
+        if row["first_page"] <= 0:
+            kp = kp_by_id.get(row["first_kp_id"])
+            raw_pages = (kp or {}).get("pages") or []
+            if not isinstance(raw_pages, list):
+                raw_pages = [raw_pages]
+            pages = []
+            for value in raw_pages:
+                try:
+                    page = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if page > 0:
+                    pages.append(page)
+            if pages:
+                row["first_page"] = min(pages)
         if not row["term"]:
             continue
         out["terms"].append(row)
@@ -3148,6 +3182,73 @@ def api_terms_build_preview(payload):
         return {"ok": False, "error": "名词整理返回异常"}
     r.setdefault("ok", True)
     return r
+
+
+# ---------------- 教材章节名词关联筛选（知识点页签显式启动；0 AI） ----------------
+def _textbook_terms_filter_mod():
+    from core import textbook_terms_filter as _filter
+    return _filter
+
+
+def api_textbook_terms_filter_options(conn, doc_id):
+    try:
+        return _textbook_terms_filter_mod().options(conn, doc_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+def api_textbook_terms_filter(payload):
+    try:
+        doc_id = int(payload.get("doc_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "doc_id 必须是整数"}
+    try:
+        # The UI action is intentionally explicit; use a fresh app connection
+        # for vector sync and artifact reads without holding the dashboard lock.
+        conn = _conn(readonly=True)
+        try:
+            result = _textbook_terms_filter_mod().filter_terms(
+                conn, doc_id, payload.get("threshold", 0.62),
+                log=lambda *a, **k: None)
+        finally:
+            conn.close()
+        return result
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "教材名词关联筛选失败：%s: %s" % (type(e).__name__, e)}
+
+
+def _external_terms_mod():
+    from core import external_terms as _external
+    return _external
+
+
+def api_external_terms_options(conn, doc_id):
+    try:
+        return _external_terms_mod().options(conn, doc_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": True, "ready": False, "reason": str(e)}
+
+
+def api_external_terms_status(doc_id):
+    try:
+        return _external_terms_mod().status(doc_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+def api_external_terms_start(doc_id, paths, run_dir):
+    try:
+        return _external_terms_mod().start(doc_id, paths, run_dir)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+def api_terms_manage(conn, payload):
+    try:
+        from core import terms_manage as _manage
+        return _manage.manage(conn, payload)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
 def api_kp_build_start(payload):
     """启动整理（后台线程）。返回产物路径与备份路径，前端据此提示"去哪儿看结果"。"""
     try:
@@ -6834,6 +6935,7 @@ def api_share_import(payload):
         "target": {"slug": tgt["slug"], "db": str(tgt["db_path"])},
         "overwritten": removed,
         "warnings": res.get("warnings") or [],
+        "knowledge_vector": res.get("knowledge_vector"),
         "model_calls": int(res.get("model_calls") or 0),
         "cost_cny": float(res.get("cost_cny") or 0.0),
     }
@@ -7200,6 +7302,15 @@ class Handler(BaseHTTPRequestHandler):
                     if path == "/api/terms/preview/options" or path == "/api/terms/preview/status":
                         return self._json_auto(api_terms_preview_options(
                             conn, _int_arg(qs.get("doc_id"), 0)))
+                    if path == "/api/terms/textbook-filter/options":
+                        return self._json_auto(api_textbook_terms_filter_options(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
+                    if path == "/api/terms/external/options":
+                        return self._json_auto(api_external_terms_options(
+                            conn, _int_arg(qs.get("doc_id"), 0)))
+                    if path == "/api/terms/external/status":
+                        return self._json_auto(api_external_terms_status(
+                            _int_arg(qs.get("doc_id"), 0)))
                     if path == "/api/mindmap":
                         return self._json(api_mindmap(
                             conn,
@@ -7281,6 +7392,22 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/upload":
                 with _lock:
                     return self._json(api_upload(self))
+
+            # 独立的外部名词资料导入：文件只暂存于知识点日志目录，完成后由 worker 清理。
+            if u.path == "/api/terms/external/import":
+                run_dir = (Path(config.LOG_DIR) / "knowledge" / "_external_terms_uploads"
+                           / uuid.uuid4().hex)
+                try:
+                    fields = {}
+                    saved = _parse_multipart_stream(self, fields, lambda: run_dir)
+                    if not saved:
+                        raise ValueError("请选择至少一份外部名词资料")
+                    paths = [run_dir / item["name"] for item in saved]
+                    result = api_external_terms_start(fields.get("doc_id"), paths, run_dir)
+                    return self._json_auto(result)
+                except Exception as e:  # noqa: BLE001
+                    shutil.rmtree(run_dir, ignore_errors=True)
+                    return self._json({"ok": False, "error": str(e)}, 400)
 
             # 流式对话：直接透传（SSE），不能包 JSON
             if u.path == "/api/chat/stream":
@@ -7465,6 +7592,18 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- 名词整理（task-36）：按预习重点名词重新整理（锁外，0 AI、写产物） ----------------
             if u.path == "/api/terms/build-preview" or u.path == "/api/terms/preview/build":
                 return self._json_auto(api_terms_build_preview(payload))
+
+            # ---------------- 教材章节名词关联筛选（知识点页签显式启动，0 AI） ----------------
+            if u.path == "/api/terms/filter-textbook":
+                return self._json_auto(api_textbook_terms_filter(payload))
+
+            # 名词解释 / 教材重点名词的手工维护；CRUD 原子改写产物，不生成备份。
+            if u.path == "/api/terms/manage":
+                conn = _conn(readonly=True)
+                try:
+                    return self._json_auto(api_terms_manage(conn, payload))
+                finally:
+                    conn.close()
 
             # ---------------- 批量入库 ----------------
             if u.path == "/api/ingest/batch/plan":

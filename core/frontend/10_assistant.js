@@ -587,6 +587,9 @@ function evPopEl(){
 // 而且冒泡阶段可能被 stopPropagation 拦掉，导致"点外面关不掉"。
 function evPopOutside(e){
   if (!EVPOP || EVPOP.contains(e.target)) return;
+  // A modal editor may sit above the knowledge-point popup. This listener runs
+  // in capture phase, so modal clicks cannot reach EVPOP's stopPropagation.
+  if (e.target && e.target.closest && e.target.closest('.modal.on')) return;
   // task-33：点顶部页签是"切页"，不是"主动关窗"——先把弹窗收起来，
   // 但保留参数，回到该页签时自动放回来（主动关/评分的清空见 evPopClose/closeModal）。
   const nav = e.target && e.target.closest ? e.target.closest('#nav') : null;
@@ -634,7 +637,10 @@ function evPopClose(){
   document.querySelectorAll('.cite.on').forEach(c => c.classList.remove('on'));
 }
 
-function evPopEsc(e){ if (e.key === 'Escape') evPopClose(); }
+function evPopEsc(e){
+  if (e.key !== 'Escape' || document.querySelector('.modal.on')) return;
+  evPopClose();
+}
 
 // 浮窗是 position:fixed，滚动之后就会和角标脱节（看起来指向别处）。
 // 与其跟着滚（要持续重算坐标、还会闪烁），不如按浮层惯例收掉。
@@ -647,6 +653,7 @@ function evPopScroll(e){
   // task-36：切回后的恢复期（快照恢复 + 滚动位置重试）不能被
   // window.scroll 误关，否则表现为"闪一下然后消失"。
   if (Date.now() < (UI_PERSIST.holdUntil || 0)) return;
+  if (document.querySelector('.modal.on')) return;
   if (EVPOP && e && e.target && EVPOP.contains(e.target)) return;
   evPopClose();
 }

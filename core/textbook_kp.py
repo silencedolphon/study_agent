@@ -135,6 +135,110 @@ class SegmentOutputError(ValueError):
         self.finish_reason = finish_reason
 
 
+def _json_candidate(raw: str) -> str:
+    """Extract the same outer JSON object accepted by kp_build.parse_json."""
+    text = str(raw or "").strip()
+    match = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    if match:
+        text = match.group(1).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        text = text[start:end + 1]
+    return text
+
+
+def _repair_common_json_formatting(raw: str) -> str:
+    """Repair only unambiguous JSON string escapes and trailing commas.
+
+    This is deliberately conservative: it does not invent missing braces,
+    quotes, fields, or content, so an actually truncated response still fails.
+    """
+    text = _json_candidate(raw)
+    escaped: list[str] = []
+    in_string = False
+    i = 0
+    valid_escapes = set('"\\/bfnrt')
+    while i < len(text):
+        char = text[i]
+        if not in_string:
+            escaped.append(char)
+            if char == '"':
+                in_string = True
+            i += 1
+            continue
+        if char == '"':
+            escaped.append(char)
+            in_string = False
+            i += 1
+            continue
+        if char == "\\":
+            if i + 1 >= len(text):
+                escaped.append("\\\\")
+                i += 1
+                continue
+            nxt = text[i + 1]
+            # Protect LaTeX commands even when their first letter is itself a
+            # legal JSON escape (`\\tau`, `\\frac`, `\\beta`, etc.).
+            if re.match(r"\\[A-Za-z]{2,}", text[i:]):
+                escaped.append("\\\\")
+                i += 1
+                continue
+            if nxt in valid_escapes:
+                escaped.extend((char, nxt))
+                i += 2
+                continue
+            if nxt == "u" and i + 5 < len(text) and all(
+                    c in "0123456789abcdefABCDEF" for c in text[i + 2:i + 6]):
+                escaped.append(text[i:i + 6])
+                i += 6
+                continue
+            # A LaTeX command such as \\tau is a literal backslash in a JSON
+            # string, not a JSON escape. Double only that backslash.
+            escaped.append("\\\\")
+            i += 1
+            continue
+        if ord(char) < 0x20:
+            escaped.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}.get(
+                char, "\\u%04x" % ord(char)))
+        else:
+            escaped.append(char)
+        i += 1
+
+    # Remove trailing commas outside strings only; commas inside definitions stay intact.
+    source = "".join(escaped)
+    clean: list[str] = []
+    in_string = False
+    escaped_char = False
+    i = 0
+    while i < len(source):
+        char = source[i]
+        if in_string:
+            clean.append(char)
+            if escaped_char:
+                escaped_char = False
+            elif char == "\\":
+                escaped_char = True
+            elif char == '"':
+                in_string = False
+            i += 1
+            continue
+        if char == '"':
+            in_string = True
+            clean.append(char)
+            i += 1
+            continue
+        if char == ",":
+            look = i + 1
+            while look < len(source) and source[look].isspace():
+                look += 1
+            if look < len(source) and source[look] in "]}":
+                i += 1
+                continue
+        clean.append(char)
+        i += 1
+    return "".join(clean)
+
+
 def _paths(doc_id: int, chapter: int, log_dir=None) -> tuple[Path, Path, Path]:
     root = Path(log_dir if log_dir is not None else config.LOG_DIR) / "knowledge"
     stem = f"{int(doc_id)}-教材知识点-第{int(chapter)}章"
@@ -672,13 +776,36 @@ def _call(segment: dict, plan: dict, run_context=None) -> dict:
                        "可能是服务端限制）；本次已停止且不会自动重试。")
         raise SegmentOutputError(message, usage, finish_reason)
     parsed = kp_build.parse_json(content)
+    parse_error = str(parsed.get("_parse_error") or "") if isinstance(parsed, dict) else ""
+    candidate = _json_candidate(content)
+    # Valid JSON can silently turn LaTeX commands such as `\tau` into control
+    # characters. Detect unescaped command backslashes and repair before accepting.
+    has_unescaped_command = bool(re.search(r"(?<!\\)\\[A-Za-z]{2,}", candidate))
+    json_repaired = False
+    if parse_error or has_unescaped_command:
+        try:
+            repaired = json.loads(_repair_common_json_formatting(content))
+            if not isinstance(repaired, dict):
+                raise ValueError("JSON 顶层不是 object")
+            parsed = repaired
+            json_repaired = True
+        except Exception as exc:  # noqa: BLE001
+            repair_error = "%s: %s" % (type(exc).__name__, exc)
+            parse_error = (parse_error + "; 自动修复未成功：" + repair_error
+                           if parse_error else "疑似公式反斜杠转义异常；自动修复未成功：" + repair_error)
+            parsed = {"_parse_error": parse_error}
     if not isinstance(parsed, dict) or parsed.get("_parse_error"):
         if cap > 0 and output_tokens >= int(cap * 0.98):
             message = f"模型输出接近 {cap} 的上限，结果被截断；本次不会自动重试。"
         elif not str(content).strip():
             message = "模型返回了空白内容，未生成可用的知识点；本次不会自动重试。"
+        elif finish_reason == "stop":
+            message = ("模型已正常结束，但响应仍不是有效 JSON（%s）。已完成分段已保存；"
+                       "可点击‘继续整理’只重试失败分段。" % (parse_error or "未知 JSON 解析错误"))
         else:
-            message = "模型输出的 JSON 格式不完整（响应可能被截断）；本次不会自动重试。"
+            message = ("模型响应不是有效 JSON（结束原因：%s；解析错误：%s）。"
+                       "已完成分段已保存；可点击‘继续整理’只重试失败分段。"
+                       % (finish_reason or "未知", parse_error or "未知 JSON 解析错误"))
         raise SegmentOutputError(message, usage, finish_reason)
     raw_points = parsed.get("points")
     if not isinstance(raw_points, list) or not raw_points:
@@ -695,6 +822,7 @@ def _call(segment: dict, plan: dict, run_context=None) -> dict:
     terms = _clean_terms(parsed.get("terms") or [], segment["source_ids"], segment["material"])
     return {"points": points, "terms": terms, "partial": bool(invalid),
             "invalid_points": int(invalid),
+            "json_repaired": json_repaired,
             "usage": usage, "model": result.get("model") or mdl,
             "thinking": think, "reasoning_effort": eff, "output_cap": cap,
             "finish_reason": finish_reason}
@@ -813,6 +941,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                         attempts.append({"segment": segment["hash"], "ok": False,
                                          "usage": usage,
                                          "finish_reason": getattr(exc, "finish_reason", ""),
+                                         "error": str(exc)[:1200],
                                          "output_cap": cap, "remote_unknown": bool(remote_unknown)})
                         if first_error is None:
                             first_error = exc
@@ -835,6 +964,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                                          "output_cap": cap, "model": part.get("model"),
                                          "thinking": part.get("thinking"),
                                          "reasoning_effort": part.get("reasoning_effort"),
+                                         "json_repaired": bool(part.get("json_repaired")),
                                          "partial": bool(part.get("partial")),
                                          "invalid_points": int(part.get("invalid_points") or 0)})
                     _write(pending, {"version": VERSION, "signature": plan["signature"],

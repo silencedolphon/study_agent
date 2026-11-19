@@ -5529,6 +5529,19 @@ def build_v2(
         log("★落盘失败：%s" % e)
         status, err = "failed", str(e)
 
+    vector_index = None
+    try:
+        from . import kp_vector
+        vector_index = kp_vector.sync_artifact(
+            int(doc_id), out, db_path=(db_path or config.DB_PATH))
+        log("知识点向量库：%s，%d 条记录（本轮新算 %d 条向量）" % (
+            vector_index.get("status"), vector_index.get("indexed", 0),
+            vector_index.get("embedded", 0)))
+    except Exception as e:  # noqa: BLE001 - index failure must not discard the KP artifact
+        vector_index = {"status": "failed", "doc_id": int(doc_id),
+                        "error": f"{type(e).__name__}: {e}"}
+        log("★知识点总结已保存，但写入专属向量库失败：%s" % vector_index["error"])
+
     if progress_on:
         with _STATE_LOCK:
             _STATE["running"] = False
@@ -5577,6 +5590,7 @@ def build_v2(
         "out_path": str(out),
         "meta": meta,
         "estimate": est,
+        "knowledge_vector": vector_index,
     }
 
 

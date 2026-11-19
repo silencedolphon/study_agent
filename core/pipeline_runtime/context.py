@@ -34,6 +34,7 @@ _PIPELINE_MODEL_KEYS = {
     "structures": "DEEPSEEK_VISION_MODEL",
     "textbook_kp": "TEXTBOOK_KP_MODEL",
     "textbook_teach": "KP_BUILD_MODEL",
+    "external_terms": "EXTERNAL_TERMS_MODEL",
 }
 _PIPELINE_BASE_KEYS = {
     "chat": "CHAT_BASE_URL",
@@ -50,6 +51,7 @@ _PIPELINE_BASE_KEYS = {
     "structures": "DEEPSEEK_BASE_URL",
     "textbook_kp": "TEXTBOOK_KP_BASE_URL",
     "textbook_teach": "KP_BUILD_BASE_URL",
+    "external_terms": "EXTERNAL_TERMS_BASE_URL",
 }
 _PIPELINE_THINKING_KEYS = {
     "chat": "CHAT_THINKING",
@@ -66,6 +68,7 @@ _PIPELINE_THINKING_KEYS = {
     "structures": "FIGURE_THINKING",
     "textbook_kp": "TEXTBOOK_KP_THINKING",
     "textbook_teach": "KP_BUILD_THINKING",
+    "external_terms": "EXTERNAL_TERMS_THINKING",
 }
 _PIPELINE_EFFORT_KEYS = {
     "chat": "CHAT_REASONING_EFFORT",
@@ -82,6 +85,7 @@ _PIPELINE_EFFORT_KEYS = {
     "structures": "FIGURE_REASONING_EFFORT",
     "textbook_kp": "TEXTBOOK_KP_REASONING_EFFORT",
     "textbook_teach": "KP_BUILD_REASONING_EFFORT",
+    "external_terms": "EXTERNAL_TERMS_REASONING_EFFORT",
 }
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
