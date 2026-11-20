@@ -50,15 +50,15 @@ class TestManualLink(unittest.TestCase):
 
     def test_bind_context_clear_and_subject_isolation(self):
         with mock.patch.object(preview, "list_chapters", return_value=self.chapters), \
-             mock.patch.object(preview, "read_preview_artifact", return_value={
-                 "ok": True, "artifact": {"summary": {"difficulties": ["难点"], "exam_focus": ["考点"]}}}), \
              mock.patch.object(textbook_kp, "read_summary", return_value={
-                 "exists": True, "terms": [{"term": "受体", "en": "receptor", "definition": "识别信号"}]}):
+                 "exists": True, "exam_focus": ["考点"],
+                 "terms": [{"term": "受体", "en": "receptor", "definition": "识别信号"}]}):
             deck_chapter.save(self.conn, 1, 2, 3, log_dir=self.root, db_path=self.dbpath)
             data = deck_chapter.get(self.conn, 1, log_dir=self.root, db_path=self.dbpath)
             self.assertEqual(data["binding"]["chapter"], 3)
-            self.assertEqual(data["difficulties"], ["难点"])
             self.assertEqual(data["exam_focus"], ["考点"])
+            self.assertNotIn("difficulties", data,
+                             "课件知识点窗口只显示教材考试重点和名词，不显示预习难点")
             self.assertEqual(data["terms"][0]["en"], "receptor")
             self.assertIsNone(deck_chapter.get(self.conn, 1, log_dir=self.root / "other",
                                                db_path=self.dbpath)["binding"])
@@ -235,7 +235,7 @@ class TestBoundedConcurrency(fixture._Base):
         lock = threading.Lock()
         state = {"active": 0, "maximum": 0, "started": 0}
 
-        def fake_call(segment, plan, run_context=None):
+        def fake_call(segment, plan, run_context=None, include_terms=False):
             with lock:
                 state["started"] += 1
                 index = state["started"]

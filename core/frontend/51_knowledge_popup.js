@@ -146,7 +146,7 @@ function mmRenderKp(d, el, keepDeck){
         <div class="hdg">${esc((d.path || []).join(' › ') || d.node_name || '')}</div>
       </div>
       <button class="mmkp-toggle" id="mmkp-treebtn" title="展开 / 收起左侧导图">☰ 导图</button>
-      <button class="mmkp-teachbtn" id="mmkp-teachbtn" title="展开 / 收起右侧教材补充">📖 教材</button>
+      <button class="mmkp-teachbtn" id="mmkp-teachbtn" title="查看本章考试重点和全部名词解释">📖 考点与名词</button>
       <button class="pclose" onclick="evPopClose()" title="关闭（Esc）">✕</button>
     </div>
     <div class="pbody" id="mmkp-body">
@@ -223,7 +223,9 @@ function mmRenderKp(d, el, keepDeck){
     </div>
       </div>
       <aside class="mmkp-teach" id="mmkp-teach">
-        <div class="mteach-loading">教材补充加载中…</div>
+        <div class="mteach-h"><b>考试重点与名词解释</b>
+          <button class="mteach-x" title="收起" onclick="mmTeachClose()">✕</button></div>
+        <div id="mmkp-textbook"></div>
       </aside>
     </div>`;
   // 特性1：左侧栏占位（宽屏常驻）——失败会收起；窄屏抽屉若正开着，换节点后保持展开。
@@ -381,67 +383,109 @@ async function mmSidebarPaint(d, el){
   evPopPlace(el || MMPOP.anchor || pop);
 }
 
-// 课件与教材章节由用户手动对应；展示已有预习和教材总结，不调用模型。
+// 课件与教材章节由用户手动对应；统一展示课件/教材名词和教材总结重点，不调用模型。
 const MMTEACH = {open: false, req: 0};
 
 async function mmTeachPaint(d, el){
-  const aside = $('#mmkp-teach');
+  const aside = $('#mmkp-textbook');
   if (!aside) return;
   const docId = Number((d && d.doc_id) || MMPOP.docId) || 0;
   const req = ++MMTEACH.req;
-  aside.innerHTML = '<div class="mteach-loading">正在读取对应章节…</div>';
-  try {
-    const data = await api('/api/deck-chapter?doc_id=' + encodeURIComponent(docId));
-    if (req !== MMTEACH.req || aside !== $('#mmkp-teach')) return;
-    if (data.ok === false) throw new Error(data.error || '读取失败');
-    const bind = data.binding;
-    const list = (title, items, empty) => `<div class="manual-book-section">
-      <h4>${esc(title)}</h4>${items.length ? '<ul>' + items.map(x =>
-        '<li>' + mdToHtml(String(x)) + '</li>').join('') + '</ul>' :
-        '<p class="muted small">' + esc(empty) + '</p>'}</div>`;
-    const terms = Array.isArray(data.terms) ? data.terms : [];
-    aside.innerHTML = `<div class="mteach-h"><b>📖 对应教材章节</b>
-      <button class="mteach-x" title="收起" onclick="mmTeachClose()">✕</button></div>` +
-      (bind ? `<div class="manual-book-title">${esc(bind.book_title)}<br><b>第 ${Number(bind.chapter)} 章 ${esc(bind.chapter_name)}</b></div>
-      ${data.summary_stale ? '<p class="small muted">教材总结为旧版本，可重新整理。</p>' : ''}
-      ${list('考试重点', data.exam_focus || [], data.preview_available ? '本章暂无考点' : '请先生成本章预习')}
-      <div class="manual-book-section"><h4 style="display:flex;align-items:center;justify-content:space-between">重点名词
-        <button class="ghost" id="mmteach-term-add">增加名词</button></h4>${terms.length
-        ? terms.map((t, index) => {
-          const ranges = (Array.isArray(t.source_ranges) ? t.source_ranges : [])
-            .map(r => Array.isArray(r) ? r : [])
-            .filter(r => Number(r[0]) > 0)
-            .map(r => Number(r[1]) > Number(r[0])
-              ? `p.${Number(r[0])}–${Number(r[1])}` : `p.${Number(r[0])}`);
-          const source = ranges.length
-            ? `<div class="small muted" style="margin:4px 0">教材来源：${esc(ranges.join('、'))}</div>` : '';
-          return `<details><summary><b>${esc(t.term || '')}</b>${t.en && t.en !== t.term ? ' · ' + esc(t.en) : ''}</summary>
-            ${source}<div>${mdToHtml(t.definition || '')}</div>
-            <div class="row" style="justify-content:flex-end;gap:6px;margin-top:7px">
-              <button class="text-btn mmteach-term-edit" data-index="${index}">修改</button>
-              <button class="text-btn mmteach-term-delete" data-index="${index}" style="color:var(--bad)">删除</button>
-            </div></details>`;
-        }).join('')
-        : '<p class="muted small">' + (data.summary_available ? '暂无名词，可手动添加' : '本章尚未整理教材知识点，可先手动添加名词') + '</p>'}</div>`
-      : `<div class="mteach-empty">${esc(data.warning || '请在课件导图上方选择对应的教材章节。')}</div>`);
-    if (bind){
-      const termContext = {book_id:Number(bind.book_id), chapter:Number(bind.chapter), doc_id:docId};
-      const addTerm = $('#mmteach-term-add', aside);
-      if (addTerm) addTerm.onclick = () => termEditorOpen('textbook', termContext, -1, null);
-      aside.querySelectorAll('.mmteach-term-edit').forEach(button => button.onclick = () => {
-        const index = Number(button.dataset.index), term = terms[index];
-        if (term) termEditorOpen('textbook', termContext, index, term);
-      });
-      aside.querySelectorAll('.mmteach-term-delete').forEach(button => button.onclick = () => {
-        const index = Number(button.dataset.index), term = terms[index];
-        if (term) termDelete('textbook', termContext, index, term);
-      });
+  const kpId = String(d?.kp_id || '');
+  const isCurrent = () => req === MMTEACH.req && aside === $('#mmkp-textbook') &&
+    EVPOP?.dataset.kp === kpId;
+  if (!docId){ aside.innerHTML = '<div class="mteach-empty">课件名词尚不可用。</div>'; return; }
+  aside.innerHTML = '<div class="mteach-loading">正在读取课件名词和关联教材…</div>';
+  const [termsResult, chapterResult] = await Promise.allSettled([
+    api('/api/terms?doc_id=' + encodeURIComponent(docId)),
+    api('/api/deck-chapter?doc_id=' + encodeURIComponent(docId)),
+  ]);
+  if (!isCurrent()) return;
+  const termData = termsResult.status === 'fulfilled' ? termsResult.value : null;
+  const data = chapterResult.status === 'fulfilled' ? chapterResult.value : null;
+  const bind = data && data.binding;
+  const courseTerms = (termData && Array.isArray(termData.terms)) ? termData.terms : [];
+  const bookTerms = (bind && data && Array.isArray(data.terms)) ? data.terms : [];
+  const courseContext = {doc_id:docId};
+  const bookContext = bind ? {book_id:Number(bind.book_id), chapter:Number(bind.chapter), doc_id:docId} : null;
+  const list = (title, items, empty) => `<div class="manual-book-section">
+    <h4>${esc(title)}</h4>${items.length ? '<ul>' + items.map(x =>
+      '<li>' + mdToHtml(String(x)) + '</li>').join('') + '</ul>' :
+      '<p class="muted small">' + esc(empty) + '</p>'}</div>`;
+  const sourceLabel = (term, target) => {
+    if (target === 'textbook') return '教材';
+    if (term.source === 'external_material' || (term.external_sources || []).length) return '外部资料';
+    if (term.source === 'textbook_chapter') return '教材关联';
+    if (term.source === 'manual') return '手动维护';
+    return '课件';
+  };
+  const termRow = (term, index, target) => {
+    const label = sourceLabel(term, target);
+    const english = term.en && term.en !== term.term ? ` · ${esc(term.en)}` : '';
+    const definition = target === 'textbook' ? term.definition : term.def;
+    let location = '';
+    if (target === 'textbook'){
+      const ranges = (Array.isArray(term.source_ranges) ? term.source_ranges : [])
+        .map(r => Array.isArray(r) ? r : []).filter(r => Number(r[0]) > 0)
+        .map(r => Number(r[1]) > Number(r[0]) ? `p.${Number(r[0])}–${Number(r[1])}` : `p.${Number(r[0])}`);
+      if (ranges.length) location = `<div class="small muted mmterm-source">教材来源：${esc(ranges.join('、'))}</div>`;
+    } else {
+      const firstPage = Number(term.first_page) || 0;
+      const jumpId = String(term.first_kp_id || term.relevance_kp_id || (term.kp_ids || [])[0] || '');
+      const jumpName = String(term.first_kp_name || term.relevance_kp_name || term.term || jumpId);
+      const pageLabel = term.source === 'external_material' ? '关联位置' : '首次出现';
+      if (jumpId) location = `<div class="small muted mmterm-source"><button class="text-btn mmterm-jump"
+        data-kp="${esc(jumpId)}" data-name="${esc(jumpName)}">${firstPage > 0 ? `${pageLabel}：课件第 ${firstPage} 页` : '查看关联知识点'}</button></div>`;
+      else if (firstPage > 0) location = `<div class="small muted mmterm-source">课件第 ${firstPage} 页</div>`;
     }
-    evPopPlace(el || MMPOP.anchor || evPopEl());
-  } catch(e){
-    if (req === MMTEACH.req && aside === $('#mmkp-teach'))
-      aside.innerHTML = '<div class="mteach-empty">' + esc(e.message) + '</div>';
-  }
+    return `<details class="mmterm-row"><summary><b>${esc(term.term || '')}</b>${english}
+      <span class="badge mmterm-origin">${esc(label)}</span></summary>
+      ${location}<div>${mdToHtml(definition || '')}</div>
+      <div class="row" style="justify-content:flex-end;gap:6px;margin-top:7px">
+        <button class="text-btn mmterm-edit" data-target="${target}" data-index="${index}">修改</button>
+        <button class="text-btn mmterm-delete" data-target="${target}" data-index="${index}" style="color:var(--bad)">删除</button>
+      </div></details>`;
+  };
+  const rows = [
+    ...courseTerms.map((term, index) => ({term, index, target:'courseware'})),
+    ...bookTerms.map((term, index) => ({term, index, target:'textbook'})),
+  ];
+  aside.innerHTML = `${bind ? `<div class="manual-book-title">${esc(bind.book_title)}<br><b>第 ${Number(bind.chapter)} 章 ${esc(bind.chapter_name)}</b></div>
+      ${data.summary_stale ? '<p class="small muted">教材总结为旧版本，可重新整理。</p>' : ''}
+      ${list('考试重点', data.exam_focus || [], data.summary_available ? '本章暂无考试重点' : '请先整理本章教材知识点')}` :
+      `<div class="mteach-empty">${esc(chapterResult.status === 'rejected'
+        ? '教材章节读取失败：' + (chapterResult.reason?.message || '未知原因')
+        : (data?.warning || '请在课件导图上方选择对应的教材章节。'))}</div>`}
+    <div class="manual-book-section"><h4 style="display:flex;align-items:center;justify-content:space-between">
+      全部名词解释（${rows.length}）<span class="row" style="gap:5px">
+        <button class="ghost" id="mmteach-course-term-add">增加课件名词</button>
+        ${bind ? '<button class="ghost" id="mmteach-book-term-add">增加教材名词</button>' : ''}
+      </span></h4>
+      ${termData ? '' : `<p class="small muted">课件名词读取失败：${esc(termsResult.reason && termsResult.reason.message || '')}</p>`}
+      ${rows.length ? rows.map(row => termRow(row.term, row.index, row.target)).join('') :
+        '<p class="muted small">当前课件和关联教材还没有名词解释。</p>'}</div>`;
+  const addCourse = $('#mmteach-course-term-add', aside);
+  if (addCourse) addCourse.onclick = () => termEditorOpen('courseware', courseContext, -1, null);
+  const addBook = $('#mmteach-book-term-add', aside);
+  if (addBook && bookContext) addBook.onclick = () => termEditorOpen('textbook', bookContext, -1, null);
+  aside.querySelectorAll('.mmterm-edit').forEach(button => button.onclick = () => {
+    const index = Number(button.dataset.index), target = button.dataset.target;
+    const term = (target === 'textbook' ? bookTerms : courseTerms)[index];
+    const context = target === 'textbook' ? bookContext : courseContext;
+    if (term && context) termEditorOpen(target, context, index, term);
+  });
+  aside.querySelectorAll('.mmterm-delete').forEach(button => button.onclick = () => {
+    const index = Number(button.dataset.index), target = button.dataset.target;
+    const term = (target === 'textbook' ? bookTerms : courseTerms)[index];
+    const context = target === 'textbook' ? bookContext : courseContext;
+    if (term && context) termDelete(target, context, index, term);
+  });
+  aside.querySelectorAll('.mmterm-jump').forEach(button => button.onclick = () => {
+    const keepDeck = (evPopEl().dataset.deck || '') === '1';
+    mmOpenKp(button.dataset.kp, button.dataset.name || button.dataset.kp,
+             MMPOP.anchor, keepDeck, docId);
+  });
+  evPopPlace(el || MMPOP.anchor || evPopEl());
 }
 
 function mmTeachToggle(){
@@ -469,7 +513,7 @@ async function mmTeachBackfill(docId){
     const books = opts.textbooks || [];
     const card = document.createElement('div');
     card.className = 'manual-book-link';
-    card.innerHTML = `<div><b>对应教材章节</b><div class="small muted">手动选择后，阅读知识点时可在右侧查看本章考试重点和重点名词。</div></div>
+    card.innerHTML = `<div><b>对应教材章节</b><div class="small muted">手动选择后，知识点窗口右侧会显示本章考试重点，以及课件和教材的全部名词解释。</div></div>
       <div class="manual-book-controls"><select class="manual-book-select" aria-label="选择教材">
       <option value="">不关联教材</option>${books.map(b => `<option value="${Number(b.doc_id)}"${Number(b.doc_id) === Number(previous.book_id) ? ' selected' : ''}>${esc(b.title)}</option>`).join('')}</select>
       <select class="manual-chapter-select" aria-label="选择教材章节" disabled><option>请选择章节</option></select>

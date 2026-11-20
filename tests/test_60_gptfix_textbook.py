@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import env  # noqa: E402
 
 sys.path.insert(0, str(env.PROJECT))
-from core import config, db, textbook_kp  # noqa: E402
+from core import config, db, deck_chapter, textbook_kp  # noqa: E402
 
 
 def _point(i=1) -> dict:
@@ -65,6 +65,12 @@ class _Base(unittest.TestCase):
                                           "TEXTBOOK_KP_FAST_PLAN": "1"}),
             mock.patch.object(config, "LOG_DIR", self.logs),
             mock.patch.object(config, "DB_PATH", self.dbpath),
+            # These cases exercise retry/resume semantics, not the optional
+            # textbook-term branch; model a linked courseware glossary so that
+            # legacy pending parts remain eligible for reuse.
+            mock.patch.object(deck_chapter, "chapter_has_courseware_terms",
+                              return_value={"exists": True, "doc_id": 60,
+                                            "title": "测试课件"}),
         ]
         for p in self._patches:
             p.start()

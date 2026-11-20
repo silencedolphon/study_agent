@@ -6,7 +6,7 @@ import os
 import threading
 from pathlib import Path
 
-from . import config, english_terms, preview, textbook_kp
+from . import config, english_terms, kp_build, preview, terms_store, textbook_kp
 
 _LOCK = threading.RLock()
 
@@ -60,6 +60,52 @@ def _attach_term_source_ranges(conn, book_id, terms):
 
 def _path(log_dir=None):
     return Path(log_dir or config.LOG_DIR) / "knowledge" / "courseware-chapter-links.json"
+
+
+def chapter_has_courseware_terms(conn, book_id, chapter, *, log_dir=None) -> dict:
+    """Return whether any current deck linked to a chapter already has glossary rows.
+
+    This is a read-only gate for the optional textbook-term extraction branch. A stale
+    link (deleted/replaced deck or textbook, or changed path) is ignored; malformed term
+    artifacts still raise so an unreadable glossary is never mistaken for an empty one.
+    """
+    book_id, chapter = int(book_id), int(chapter)
+    with _LOCK:
+        links = _read(_path(log_dir))
+    for raw_id, entry in links.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            if int(entry.get("book_id") or 0) != book_id or int(entry.get("chapter") or 0) != chapter:
+                continue
+            deck_id = int(raw_id)
+            deck = _doc(conn, deck_id)
+            book = _doc(conn, book_id)
+        except (TypeError, ValueError):
+            continue
+        if (deck.get("role") != "courseware"
+                or str(deck.get("path") or "") != str(entry.get("deck_path") or "")):
+            continue
+        if (book.get("role") != "textbook"
+                or str(book.get("path") or "") != str(entry.get("book_path") or "")):
+            continue
+        term_path = (Path(log_dir or config.LOG_DIR) / "knowledge"
+                     / (str(deck_id) + kp_build.TERMS_SUFFIX))
+        artifact = terms_store.read(term_path)
+        if any(str(row.get("term") or "").strip() for row in artifact.get("terms", [])):
+            return {"exists": True, "doc_id": deck_id,
+                    "title": str(deck.get("title") or "")}
+        if artifact["meta"].get("terms_override"):
+            continue
+        legacy_path = (Path(log_dir or config.LOG_DIR) / "knowledge"
+                       / (str(deck_id) + kp_build.KP_SUFFIX))
+        legacy = kp_build._load_prev(legacy_path)
+        legacy_terms = legacy.get("terms") if isinstance(legacy.get("terms"), list) else []
+        if any(isinstance(row, dict) and str(row.get("term") or "").strip()
+               for row in legacy_terms):
+            return {"exists": True, "doc_id": deck_id,
+                    "title": str(deck.get("title") or "")}
+    return {"exists": False, "doc_id": 0, "title": ""}
 
 
 def _read(path):
@@ -136,17 +182,15 @@ def get(conn, doc_id, *, log_dir=None, db_path=None):
         return {**empty, "warning": "对应教材已不可用，请重新选择"}
     result = {**empty, "binding": {"book_id": book["id"], "book_title": book["title"],
                                   "chapter": chapter, "chapter_name": str(ch.get("name") or "")}}
-    # 两种产物可独立生成，不存在时展示空状态。它们都是按当前学科保存的文件。
-    pre = preview.read_preview_artifact(book["id"], chapter)
-    summary = ((pre.get("artifact") or {}).get("summary") or {}) if pre.get("ok") else {}
-    result["exam_focus"] = summary.get("exam_focus") or []
-    result["preview_available"] = bool(pre.get("ok"))
+    # 考试重点已归入教材知识点总结；预习产物不再为此栏提供数据。
     try:
         artifact = textbook_kp.read_summary(book["id"], chapter, log_dir=log_dir, db_path=db_path)
+        result["exam_focus"] = artifact.get("exam_focus") or []
         result["terms"] = _attach_term_source_ranges(
             conn, book["id"], artifact.get("terms") or [])
         result["summary_available"] = bool(artifact.get("exists"))
         result["summary_stale"] = bool(artifact.get("stale"))
     except (ValueError, OSError):
         result["summary_available"] = False
+        result["exam_focus"] = []
     return result

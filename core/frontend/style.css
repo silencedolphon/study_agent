@@ -1189,6 +1189,9 @@ button.ghost:hover{background:var(--panel2)}
 .manual-book-section ul{margin:0;padding-left:1.3em;line-height:1.65}
 .manual-book-section details{padding:6px 0;line-height:1.5}
 .manual-book-section details div{padding:5px 0 2px}
+.manual-book-section details.mmterm-row>summary{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.manual-book-section .mmterm-origin{margin-left:auto;font-size:.78em}
+.manual-book-section .mmterm-source{margin:4px 0}
 .mm-link-head{display:flex;flex-direction:column;gap:4px;padding:14px 0 8px}
 .mm-link-tag{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:12px;background:var(--panel,#f3f5f8);color:var(--dim);font-size:11px}
 .mm-link-group{margin:14px 0}.mm-link-group h4{margin:0 0 8px;font-size:14px}

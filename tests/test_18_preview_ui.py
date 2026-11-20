@@ -92,7 +92,7 @@ class TestPreviewFrontend(unittest.TestCase):
 
     def test_viewer_content_and_sources(self):
         for key in ("subsections", "summary", "overview", "study_order",
-                    "difficulties", "prerequisites", "exam_focus",
+                    "difficulties", "prerequisites",
                     "self_check", "pitfalls", "core"):
             self.assertIn(key, _PAGE, f"查看器没有读取字段 {key}")
         # 页/块出处 chip 复用 openChunk

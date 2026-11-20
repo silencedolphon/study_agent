@@ -215,6 +215,12 @@ def load_preview_prompts(path: str | os.PathLike | None = None) -> dict:
     p = prompt_file(path)
     blob = p.read_bytes()
     md = blob.decode("utf-8")
+    # Published data snapshots may still contain the old preview schema.
+    bundled = config.BUNDLE_ROOT / "logs" / "knowledge" / PREVIEW_PROMPT_NAME
+    if path is None and p != bundled and '"exam_focus"' in md and bundled.is_file():
+        p = bundled
+        blob = p.read_bytes()
+        md = blob.decode("utf-8")
     sys_p = kp_build._grab(md, "PROMPT-PREVIEW-SYS", p)
     user_p = kp_build._grab(md, "PROMPT-PREVIEW-USER", p)
     return {"sys": sys_p, "user": user_p, "sha256": hashlib.sha256(blob).hexdigest(),
@@ -1251,7 +1257,6 @@ def _build_summary(raw: dict, points: list, terms: list, material: str) -> dict:
         "study_order": _s("study_order", "order", "学习顺序"),
         "key_points": points,
         "key_terms": terms,
-        "exam_focus": _s("exam_focus", "考点", "exam_points"),
         "difficulties": _s("difficulties", "难点"),
         "prerequisites": _s("prerequisites", "先修", "前置知识"),
         "questions": _s("questions", "自测题", "self_check"),
@@ -1631,7 +1636,7 @@ def _subsections_from_key_points(points, pages_all, cover_map, sections, warning
 
 def _build_summary_v2(raw: dict, material: str) -> dict:
     """章级 summary（前端查看器顶部）：overview / study_order / difficulties /
-    prerequisites / exam_focus（+ 旧字段兼容 questions）。"""
+    prerequisites（+ 旧字段兼容 questions）。"""
     raw = raw if isinstance(raw, dict) else {}
     overview = str(raw.get("overview") or raw.get("summary") or "").strip()
     if len(overview) > 2000:
@@ -1641,7 +1646,6 @@ def _build_summary_v2(raw: dict, material: str) -> dict:
         "study_order": _list_str(raw.get("study_order") or raw.get("order")),
         "difficulties": _list_str(raw.get("difficulties") or raw.get("难点")),
         "prerequisites": _list_str(raw.get("prerequisites") or raw.get("先修")),
-        "exam_focus": _list_str(raw.get("exam_focus") or raw.get("考点")),
         "questions": _list_str(raw.get("questions") or raw.get("自测题")),
         "material_chars": len(material),
     }

@@ -108,7 +108,7 @@ class _Base(unittest.TestCase):
         return p
 
     def _content(self, points):
-        return json.dumps({"points": points}, ensure_ascii=False)
+        return json.dumps({"points": points, "exam_focus": []}, ensure_ascii=False)
 
     def _wire_call(self, content):
         calls = []
@@ -200,6 +200,32 @@ class TestPartial(_Base):
         self.assertEqual(len(part["points"]), 1)
         self.assertEqual(len(calls), 1)
 
+    def test_textbook_terms_are_conditional_on_existing_glossary(self):
+        plan = self._plan(16000)
+        from core import deck_chapter
+        with mock.patch.object(deck_chapter, "chapter_has_courseware_terms",
+                               return_value={"exists": True, "title": "对应课件"}) as has_terms:
+            decision = textbook_kp._terms_decision(plan, {}, db_path=self.dbpath,
+                                                   log_dir=self.logs)
+        self.assertFalse(decision["enabled"])
+        self.assertIn("对应课件", decision["reason"])
+        has_terms.assert_called_once()
+
+        previous = {"terms": [{"term": "已有名词", "definition": "已有解释"}]}
+        with mock.patch.object(deck_chapter, "chapter_has_courseware_terms",
+                               side_effect=AssertionError("已有名词时不应再查重")):
+            decision = textbook_kp._terms_decision(plan, previous, db_path=self.dbpath,
+                                                   log_dir=self.logs)
+        self.assertFalse(decision["enabled"])
+        self.assertIn("已有教材名词解释", decision["reason"])
+
+    def test_textbook_prompt_separates_required_and_optional_fields(self):
+        base = textbook_kp._system_prompt(False)
+        with_terms = textbook_kp._system_prompt(True)
+        self.assertIn('"exam_focus"', base)
+        self.assertNotIn('"terms":', base)
+        self.assertIn('"terms":', with_terms)
+
     def test_call_severe_errors_fail_and_never_retry(self):
         segment = {"hash": "h1", "source_ids": [1], "material": "m"}
         for content, finish in ((json.dumps({"points": []}), "stop"),
@@ -231,7 +257,7 @@ class TestPartial(_Base):
                 "finish_reason": "stop",
                 "partial": i == 0, "invalid_points": 2 if i == 0 else 0}
         calls = []
-        def fake_call(seg, pl, run_context=None):
+        def fake_call(seg, pl, run_context=None, include_terms=False):
             calls.append(seg["hash"])
             return parts[seg["hash"]]
         with mock.patch.object(textbook_kp, "_call", side_effect=fake_call):
@@ -266,7 +292,7 @@ class TestPartial(_Base):
                                    "invalid_points": 0, "usage": {},
                                    "finish_reason": "stop"}}}), encoding="utf-8")
         calls = []
-        def fake_call(seg, pl, run_context=None):
+        def fake_call(seg, pl, run_context=None, include_terms=False):
             calls.append(seg["hash"])
             return {"points": [self._point(2)], "usage": {}, "partial": False,
                     "invalid_points": 0, "finish_reason": "stop"}

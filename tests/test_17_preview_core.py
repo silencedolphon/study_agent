@@ -202,7 +202,8 @@ class TestPreviewSchema(_Base):
         # 章级 summary / terms / sources
         self.assertEqual(art["summary"]["overview"], parsed["overview"])
         self.assertEqual(art["summary"]["study_order"], parsed["study_order"])
-        self.assertEqual(art["summary"]["exam_focus"], parsed["exam_focus"])
+        self.assertNotIn("exam_focus", art["summary"],
+                         "考试重点应由教材知识点总结产出，不再保存在预习产物")
         self.assertEqual(art["terms"], [])
         self.assertTrue(all("lecture" not in section for section in subs))
         self.assertEqual(sorted(s["chunk_id"] for s in art["sources"]), [101, 102])

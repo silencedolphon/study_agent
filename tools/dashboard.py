@@ -730,9 +730,12 @@ def _book_batch_launch(mode, doc_id, chapter, est):
         return api_preview_start({"doc_id": doc_id, "chapter": chapter,
             "auto_textbook_kp": est.get("auto_textbook_kp", False),
             "book_signature": book.get("signature", ""), "book_max_calls": book.get("calls", 0),
-            "book_max_output_tokens": book.get("estimated_output_cap", 0)})
+            "book_max_output_tokens": book.get("estimated_output_cap", 0),
+            "book_terms_enabled": bool(book.get("terms_enabled"))})
     return textbook_kp_mod.start(doc_id, chapter, est["signature"], force=False,
-        max_calls=int(est.get("calls") or 0), max_output_tokens=int(est.get("estimated_output_cap") or 0))
+        max_calls=int(est.get("calls") or 0),
+        max_output_tokens=int(est.get("estimated_output_cap") or 0),
+        terms_enabled=bool(est.get("terms_enabled")))
 
 
 def _book_batch_busy():
@@ -755,6 +758,7 @@ def api_preview_start(payload):
                 "error": "预习后端还没就绪（缺 start_background）",
                 "hint": "后端智能体完成后即可在这里生成；联调由 Lead 统一做。"}
     auto_book = bool(config.value_int("PREVIEW_AUTO_TEXTBOOK_KP", 1))
+    book_estimate = None
     if "auto_textbook_kp" in payload and bool(payload["auto_textbook_kp"]) != auto_book:
         return {"ok": False, "started": False, "error": "预习设置已变化，请重新估算"}
     with _PREVIEW_JOIN_LOCK:
@@ -764,9 +768,12 @@ def api_preview_start(payload):
             if textbook_kp_mod.progress().get("active"):
                 return {"ok": False, "started": False, "error": "已有教材知识点任务在进行"}
             try:
-                est = textbook_kp_mod.estimate(doc_id, chapter, force=False)
-                if (str(payload["book_signature"]) != str(est["signature"])
-                        or int(payload.get("book_max_calls", -1)) < int(est["calls"])):
+                book_estimate = textbook_kp_mod.estimate(doc_id, chapter, force=False)
+                if (str(payload["book_signature"]) != str(book_estimate["signature"])
+                        or int(payload.get("book_max_calls", -1)) < int(book_estimate["calls"])
+                        or ("book_terms_enabled" in payload
+                            and bool(payload["book_terms_enabled"])
+                            != bool(book_estimate.get("terms_enabled")))):
                     return {"ok": False, "started": False, "error": "教材内容或预计调用量已变化，请重新估算"}
             except (ValueError, OSError, sqlite3.Error) as exc:
                 return {"ok": False, "started": False, "error": str(exc)}
@@ -784,7 +791,9 @@ def api_preview_start(payload):
                 try:
                     book = textbook_kp_mod.start(doc_id, chapter, str(payload["book_signature"]),
                         force=False, max_calls=int(payload["book_max_calls"]),
-                        max_output_tokens=int(payload.get("book_max_output_tokens") or 0))
+                        max_output_tokens=int(payload.get("book_max_output_tokens") or 0),
+                        terms_enabled=(bool(payload["book_terms_enabled"])
+                                       if "book_terms_enabled" in payload else None))
                 except Exception as exc:
                     book = {"ok": False, "error": str(exc)}
                 snap = textbook_kp_mod.progress() if book.get("started") else {}
@@ -7550,7 +7559,9 @@ class Handler(BaseHTTPRequestHandler):
                             int(payload.get("doc_id") or 0), int(payload.get("chapter") or 0),
                             str(payload.get("signature") or ""), force=payload.get("force") is True,
                             max_calls=int(payload.get("max_calls") or 0),
-                            max_output_tokens=int(payload.get("max_output_tokens") or 0))
+                            max_output_tokens=int(payload.get("max_output_tokens") or 0),
+                            terms_enabled=(bool(payload.get("terms_enabled"))
+                                           if "terms_enabled" in payload else None))
                     return self._json_auto(result)
                 except (ValueError, OSError, sqlite3.Error) as e:
                     return self._json_auto({"ok": False, "error": str(e)})

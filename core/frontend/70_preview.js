@@ -405,7 +405,6 @@ function pvNormArtifact(raw){
       study_order: list(sm.study_order || sm.order),
       difficulties: list(sm.difficulties),
       prerequisites: list(sm.prerequisites),
-      exam_points: list(sm.exam_focus || sm.exam_points),
     },
   };
 }
@@ -450,10 +449,9 @@ function pvViewerHtml(ch, art){
       <h3>第${ch.no}章 章概览</h3>
       ${ov.summary ? `<div class="pv-text">${pvText(ov.summary)}</div>` : '<div class="muted small">（这一章没有单独的章概览，直接看小节即可。）</div>'}
       ${ov.study_order.length ? `<div class="pv-sub"><b>学习顺序</b><ol>${ov.study_order.map(x => `<li>${pvText(x)}</li>`).join('')}</ol></div>` : ''}
-      <details class="pv-sub"><summary>查看难点、考点与前置知识</summary><div class="pv-cols">
+      <details class="pv-sub"><summary>查看难点与前置知识</summary><div class="pv-cols">
         ${ov.difficulties.length ? `<div><b>难点</b><ul>${ov.difficulties.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
         ${ov.prerequisites.length ? `<div><b>前置知识</b><ul>${ov.prerequisites.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
-        ${ov.exam_points.length ? `<div><b>考点</b><ul>${ov.exam_points.map(x => `<li>${pvText(x)}</li>`).join('')}</ul></div>` : ''}
       </div></details>
       <div class="row" style="margin-top:10px">
         <button class="act" data-pvact="sec" data-ch="${ch.no}" data-i="0">从第一节开始</button>
@@ -569,12 +567,16 @@ async function pvBookRetry(chNo){
     const cap = Number(est.estimated_output_cap || 0);
     const ok = await confirmBox('补齐教材知识点？',
       `只整理本章教材知识点，不重新预习。预计 ${Number(est.calls || 0)} 次模型调用，输入约 ${Number(est.estimated_input_tokens || 0)} tokens；` +
-      (cap > 0 ? `输出上限 ${cap} tokens。` : '输出不限额。') + '费用按实际调用和服务商价格结算。');
+      (cap > 0 ? `输出上限 ${cap} tokens。` : '输出不限额。') +
+      (est.terms_enabled ? ' 未发现已有名词解释，将按教材提取重点名词。' :
+        ` 已跳过教材名词提取：${est.terms_reason || '已存在名词解释'}。`) +
+      '费用按实际调用和服务商价格结算。');
     if (!ok) return;
     if (docId !== PV.docId || subject !== PV.subject || subject !== SUBJ.cur) throw new Error('教材或学科已变化，请重新选择');
     const r = await api('/api/textbook-kp/start', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({doc_id:docId, chapter:chNo, force:false, signature:est.signature,
-        max_calls:Number(est.calls || 0), max_output_tokens:cap, confirmed:true, expected_subject:subject})});
+        max_calls:Number(est.calls || 0), max_output_tokens:cap, confirmed:true,
+        terms_enabled:!!est.terms_enabled, expected_subject:subject})});
     if (!r || !r.started) throw new Error((r && r.error) || '教材总结未启动');
     PV.prog = null;
     PV.bookRetry = {docId, chapter:chNo};
@@ -629,7 +631,9 @@ async function pvStart(chNo, force){
       '模型：' + (est.model || '默认配置') + (est.page_label ? '｜' + est.page_label : ''),
       est.auto_textbook_kp ? ('还将并行整理教材知识点：预计 ' + Number(book.calls || 0) +
         ' 次调用，输入约 ' + Number(book.estimated_input_tokens || 0) +
-        ' tokens，费用另计；最终按实际输入、输出和模型价格结算（现有完整总结会复用）。') : '',
+        ' tokens，费用另计；最终按实际输入、输出和模型价格结算（现有完整总结会复用）。' +
+        (book.terms_enabled ? ' 本章未发现名词解释，将同时按教材提取重点名词。' :
+          (book.terms_reason ? ' 名词提取已跳过：' + book.terms_reason + '。' : ''))) : '',
       force ? '⚠ 这一章已有产物：重新预习会覆盖（旧产物会先备份）。' : '',
       est.skip_would_happen ? '产物与材料都没变，后端可能直接跳过（0 调用、0 花费）。' : '',
       '确认后才开始调用外接大模型。'
@@ -641,7 +645,8 @@ async function pvStart(chNo, force){
       body: JSON.stringify({doc_id: PV.docId, chapter: chNo, force: !!force,
         auto_textbook_kp: !!est.auto_textbook_kp, book_signature: book.signature || '',
         book_max_calls: Number(book.calls || 0),
-        book_max_output_tokens: Number(book.estimated_output_cap || 0)})});
+        book_max_output_tokens: Number(book.estimated_output_cap || 0),
+        book_terms_enabled: !!book.terms_enabled})});
     if (!r.started){
       toast('没能开始：' + (r.error || '未知原因'));
       if (r.hint) toast(r.hint);

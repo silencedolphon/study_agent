@@ -124,6 +124,7 @@ async function bookLoadSummary(){
 function bookRender(){
   const box = $('#book-kp-panel'); if (!box) return;
   const art = BOOKKP.artifact || {}, points = art.points || [], reviews = art.reviews || {};
+  const examFocus = Array.isArray(art.exam_focus) ? art.exam_focus : [];
   const p = BOOKKP.progress || {};
   const busy = !!p.active;
   const due = points.filter(x => !reviews[x.id] || reviews[x.id].due <= bookToday()).length;
@@ -134,11 +135,17 @@ function bookRender(){
     Number(ch.no)===Number(BOOKKP.chapter)?' selected':''}>第 ${Number(ch.no)} 章 ${esc(ch.name || '')}</option>`).join('');
   let content = '<div class="empty">选择章节后，可以整理知识点并进行回忆练习。</div>';
   if (!BOOKKP.chapters.length) content = '<div class="empty">这本教材尚未识别出章节，请检查教材入库结果。</div>';
-  else if (points.length){
+  else if (points.length || examFocus.length){
     const terms = (art.terms || []).length;
-    content = `<div class="book-kp-count">${points.length} 个知识点 · ${terms} 个重点名词 · ${due} 个待回顾</div>
-      <button class="act" data-book-window="${esc(points[0].id)}">📖 打开窗口阅读</button>
-      ${terms ? '' : '<p class="small muted">这份总结暂无重点名词；重新整理后可提取。</p>'}`;
+    const focusHtml = examFocus.length ? `<details class="book-exam-focus">
+      <summary>本章考试重点（${examFocus.length}）</summary>
+      <ul>${examFocus.map(x => `<li>${bookText(x)}</li>`).join('')}</ul></details>` : '';
+    const termNote = terms ? '' : (art.terms_generation && art.terms_generation.status === 'skipped_existing'
+      ? `<p class="small muted">${esc(art.terms_generation.reason || '已检测到已有名词解释')}；本章跳过重复的教材名词总结。</p>`
+      : '<p class="small muted">这份总结暂无重点名词。</p>');
+    content = `<div class="book-kp-count">${points.length} 个知识点 · ${terms} 个重点名词 · ${examFocus.length} 个考试重点 · ${due} 个待回顾</div>
+      ${points.length ? `<button class="act" data-book-window="${esc(points[0].id)}">📖 打开窗口阅读</button>` : ''}
+      ${focusHtml}${termNote}`;
   }
   // task-40：进度条（percent/elapsed/label）+ 结束后的成功/失败状态。
   const progress = bookProgressHtml(p);
@@ -195,16 +202,21 @@ async function bookStart(){
     const capTxt = (!isFinite(cap) || cap <= 0)
       ? '不设输出上限（0 = 无上限）'
       : ('输出上限 ' + cap + ' tokens（含思考）');
+    const termsTxt = est.terms_enabled
+      ? '未发现关联课件或本章已有名词解释，本次将按教材内容提取重点名词。'
+      : (est.terms_reason || '已发现现有名词解释，本次跳过教材名词提取。');
     const ok = await confirmBox(actionTitle(force, est.completed_segments),
       `本章分为 ${est.segments} 段，本次预计调用 ${est.calls} 次 ${modelTxt}（${effortTxt}）。\n` +
       `输入估计约 ${est.estimated_input_tokens} tokens，${capTxt}；费用以服务商计费为准。\n` +
+      `${termsTxt}\n` +
       '整理过程可中断，已完成的部分会保留；失败后不会自动重试。确认开始吗？');
     if (!ok) return;
     if (docId !== BOOKKP.docId || chapter !== BOOKKP.chapter) throw new Error('选择的章节已变化，请重新确认');
     await api('/api/textbook-kp/start', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({doc_id:docId, chapter, force,
         signature:est.signature, max_calls:est.calls,
-        max_output_tokens:est.estimated_output_cap, confirmed:true})});
+        max_output_tokens:est.estimated_output_cap,
+        terms_enabled:!!est.terms_enabled, confirmed:true})});
     BOOKKP.awaiting = true;
     await bookPoll();
   } catch(e){ toast('无法开始整理：' + e.message); }

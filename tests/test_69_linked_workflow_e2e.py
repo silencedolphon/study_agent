@@ -182,6 +182,7 @@ class TestPreviewLinkedEndToEnd(unittest.TestCase):
                     body = {"points": [{"title": "受体作用", "summary": "受体结合后产生细胞效应。",
                         "key_points": ["识别与激活"], "source_ids": [1],
                         "questions": [{"question": "如何产生效应？", "answer": "结合受体并激活信号。"}]}],
+                        "exam_focus": [],
                         "terms": []}
                 else:
                     body = {"overview": "学习受体作用。", "study_order": ["识别", "激活"],
@@ -205,7 +206,9 @@ class TestPreviewLinkedEndToEnd(unittest.TestCase):
                 else:
                     result = dashboard.api_preview_start({"doc_id": 50, "chapter": 1,
                         "auto_textbook_kp": True, "book_signature": book["signature"],
-                        "book_max_calls": book["calls"], "book_max_output_tokens": book["estimated_output_cap"]})
+                        "book_max_calls": book["calls"],
+                        "book_max_output_tokens": book["estimated_output_cap"],
+                        "book_terms_enabled": book.get("terms_enabled")})
                 self.assertTrue(result["started"])
                 if not batch_run:
                     self.assertEqual(result["companion_error"], "")
