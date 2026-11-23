@@ -199,7 +199,12 @@ def filter_terms(conn, doc_id: int, threshold=DEFAULT_THRESHOLD, *, log=None) ->
             dropped.append({"term": item["term"], "score": round(score, 6),
                             "kp_id": kp_id, "kp_name": kp_name})
 
+    from .share_content import source_tag
     binding = context["binding"]
+    book = conn.execute("SELECT title,content_hash FROM documents WHERE id=?", (binding.get("book_id"),)).fetchone()
+    if book:
+        for row in selected:
+            row["source_tag"] = source_tag(book)
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     output = _output_path(did)
     meta = {

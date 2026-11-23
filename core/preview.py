@@ -1799,6 +1799,8 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
 
     _stage(0, "读取第 %s 章" % est["chapter"], on_progress)
     prompt = load_preview_prompts(prompt_path)
+    from .share_content import source_for_db
+    root_source = source_for_db(doc_id, db_path)
     ch, info, material, inv, stats = read_chapter_ch(doc_id, chapter, db_path=db_path)
     if not info.get("ok"):
         return {"ok": False, "error": info.get("error"), "doc_id": int(doc_id)}
@@ -1896,6 +1898,7 @@ def build_chapter_preview(doc_id: int, chapter, *, prompt_path=None, out_path=No
                     run_no=run_no, sections_source=sections_source, parser=parser,
                     prev_backup=prev_backup, run_context=run_ctx)
     artifact = {
+        "source_tag": root_source,
         "meta": meta,
         "chapter": {"no": int(info.get("no") or 0), "name": info.get("name") or "",
                     "heading_path": info.get("heading_path") or "",

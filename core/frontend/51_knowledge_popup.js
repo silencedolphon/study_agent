@@ -151,7 +151,9 @@ function mmRenderKp(d, el, keepDeck){
     </div>
     <div class="pbody" id="mmkp-body">
       <div class="small muted" style="margin-bottom:9px">
-        出处：${esc(d.pages_label || '')} · doc#${esc(d.doc_id)}${
+        ${d.source_title ? `<button class="text-btn" id="mmkp-source">来源 · ${esc(d.source_title)}</button> · ` : ''}
+        ${esc(d.pages_label || '')}
+        ${d.share_item_id ? '<button class="text-btn" id="mmkp-share-point">分享此知识点</button>' : ''}${
           nMat ? ` · 材料 ${nMat} 块（正文 ${d.n_body_blocks || 0} / 识图 ${
             d.n_fig_blocks || 0}）${d.material_chars ? ' / ' + d.material_chars + ' 字' : ''}` : ''}${
           d.insufficient ? ' · <span class="badge warn">材料不足</span>' : ''}
@@ -235,6 +237,12 @@ function mmRenderKp(d, el, keepDeck){
   pop0.classList.add('mmkp-has-teach');
   if (MMTEACH.open) pop0.classList.add('mm-teach-open');
   evPopMount(el, html);
+  if ($('#mmkp-source')) $('#mmkp-source').onclick = () => { evPopClose(); openDoc(d.doc_id); };
+  if ($('#mmkp-share-point')) $('#mmkp-share-point').onclick = () => {
+    evPopClose();
+    openShareExport(d.doc_id, d.source_title, d.share_item_id);
+  };
+
   // ★ 卡 C-0042：点「▸ 展开：总结正文 · 出处明细 · 生成链条」也会让内容变高
   //   （同一类"尺寸变了位置没跟着变"的越界），所以折叠体一开一合也重新兜一次。
   const more = $('#mmkp-more');

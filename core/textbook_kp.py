@@ -428,7 +428,7 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
     except sqlite3.Error:
         pass
     try:
-        doc = conn.execute("SELECT title, role FROM documents WHERE id=?", (doc_id,)).fetchone()
+        doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         if not doc or doc["role"] != "textbook":
             raise ValueError("教材不存在或尚未按教材方式入库")
         # 章级定向查询：教材的 heading_path 形如「书名 > 第6章 …」。
@@ -491,11 +491,16 @@ def _plan(doc_id: int, chapter: int, *, db_path=None) -> dict:
         sig_items.insert(1, SEGMENT_V2_VERSION)
     signature = hashlib.sha256(json.dumps(
         sig_items, ensure_ascii=False).encode("utf-8")).hexdigest()
+    from .share_content import digest, source_tag
+    portable_signature = digest([[row.get("heading_path"), row["ref"], row["text"]]
+                                 for row in selected])
     result = {"doc_id": doc_id, "chapter": chapter, "chapter_name": name,
               "title": str(doc["title"] or ""), "signature": signature,
               "config_fingerprint": settings_fingerprint(),
               "segment_version": seg_version,
               "segments": segments, "n_blocks": len(selected),
+              "source_tag": source_tag(doc) if "content_hash" in doc.keys() else None,
+              "portable_signature": portable_signature,
               "chars": sum(len(x["text"]) for x in selected)}
     # P3-A：只读长章覆盖统计（只增字段；关掉后与旧版逐字一致，不影响签名/分段/点 ID）。
     if coverage_enabled():
@@ -596,6 +601,14 @@ def _collect_parts(pending_data: dict, previous: dict, plan: dict) -> tuple[dict
     return done, partial
 
 
+def _matches_plan(artifact, plan):
+    signature = plan.get("portable_signature")
+    return artifact.get("signature") == plan["signature"] or bool(
+        signature and plan.get("source_tag") and not artifact.get("share_partial") and artifact.get("portable_signature") == signature
+        and (artifact.get("source_tag") or {}).get("key") == (plan.get("source_tag") or {}).get("key")
+    )
+
+
 def _resume_state(plan: dict, previous: dict, pending_data: dict,
                   *, include_terms=False) -> dict:
     """estimate / read_summary / _build 共用的"续跑状态"（保证估算与实际调用一致）。"""
@@ -622,7 +635,7 @@ def _resume_state(plan: dict, previous: dict, pending_data: dict,
     resumable = bool(done or partial or attempts or terms_missing)
     current = (isinstance(previous, dict)
                and previous.get("status") == "done"
-               and previous.get("signature") == plan["signature"])
+               and _matches_plan(previous, plan))
     return {"done": done, "partial": partial, "todo": todo,
             "attempts": attempts, "resumable": resumable, "current": current,
             "terms_missing": terms_missing}
@@ -1090,6 +1103,7 @@ def _build(plan: dict, *, force: bool, db_path: Path, log_dir: Path, max_calls: 
                          for s in plan["segments"])
     status = "partial" if partial_segments else "done"
     artifact = {"version": VERSION, "status": status, "signature": plan["signature"],
+                "source_tag": plan.get("source_tag"), "portable_signature": plan.get("portable_signature"),
                 "doc_id": plan["doc_id"], "chapter": plan["chapter"], "title": plan["title"],
                 "chapter_name": plan["chapter_name"], "generated_at": time.time(),
                 "model": model_name(), "thinking": thinking_on(),
@@ -1580,7 +1594,7 @@ def read_summary(doc_id: int, chapter: int, *, log_dir=None, db_path=None) -> di
     except Exception:  # noqa: BLE001
         current_fp = ""
     result.update({**base, "exists": True,
-                   "stale": result.get("signature") != plan["signature"],
+                   "stale": not _matches_plan(result, plan),
                    # P2-B：只提示，不自动重跑、不改旧字段。
                    "settings_unknown": not bool(stored_fp),
                    "settings_changed": bool(stored_fp and current_fp

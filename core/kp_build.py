@@ -1003,18 +1003,50 @@ def cost_of(usage: dict) -> float:
 
 
 def parse_json(raw: str) -> dict:
-    """剥代码块 + 截取最外层 {}（与 `core/outline.py::_parse` 同一套路）。"""
-    s = (raw or "").strip()
-    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.S)
-    if m:
-        s = m.group(1).strip()
-    i, j = s.find("{"), s.rfind("}")
-    if i >= 0 and j > i:
-        s = s[i:j + 1]
-    try:
-        return json.loads(s)
-    except Exception as e:  # noqa: BLE001
-        return {"_parse_error": "%s: %s" % (type(e).__name__, e), "_raw": raw}
+    parsed, _, _ = _decode_json_object(raw)
+    return parsed
+
+
+def _decode_json_object(raw: str) -> tuple[dict, str, str]:
+    """Return the object, failure category, and any lossless local repair."""
+    text = (raw or "").strip().lstrip("\ufeff").strip()
+    if not text:
+        return {"_parse_error": "模型返回空正文", "_raw": raw}, "empty", ""
+
+    # Parse the full answer first so Markdown fences in JSON string fields survive.
+    candidates = [text]
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.I | re.S)
+    if fenced:
+        candidates.append(fenced.group(1))
+    elif not text.startswith("["):
+        left, right = text.find("{"), text.rfind("}")
+        if 0 <= left < right and (left > 0 or right < len(text) - 1):
+            candidates.append(text[left:right + 1])
+
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+            repair = ""
+        except json.JSONDecodeError as exc:
+            error = exc
+            failed_on_control = exc.msg.startswith("Invalid control character")
+            if not failed_on_control:
+                continue
+            try:
+                # strict=False accepts literal control chars inside strings only.
+                obj = json.loads(candidate, strict=False)
+                repair = "literal_control_character"
+            except json.JSONDecodeError as exc:
+                error = exc
+                continue
+        if isinstance(obj, dict):
+            return obj, "", repair
+        return {"_parse_error": "顶层必须是 JSON 对象", "_raw": raw}, "invalid", ""
+
+    candidate = candidates[-1]
+    incomplete = error.pos >= len(candidate) or error.msg.startswith("Unterminated string")
+    return ({"_parse_error": f"JSONDecodeError: {error}", "_raw": raw},
+            "incomplete" if incomplete else "invalid", "")
 
 
 # 照抄判定：与 C-0031/C-0032/C-0034 **同一判据**
@@ -1866,12 +1898,16 @@ def build_v1(
     status = "done"
     err = ""
 
+    from .share_content import source_for_db
+    root_source = source_for_db(doc_id, db_path)
+
     def persist():
         # C-0110 回填：真值 = _work/rebuilt/kp_build/0049-build_v1.persist.py
         # （kp_build.funcs.txt：build_v1.persist args=0 vars: doc；其 <lambda> args=1 vars: r
         #  且 kp_build.strings.txt 该条唯一常量是 pages ⇒ 排序键是 rec["pages"]，
         #  重建分块里写的 r["key"] 是猜的，与 _parent_nodes.<lambda> 那处同源）
         doc = {
+            "source_tag": root_source,
             "meta": _meta(est, prompt, recs, extra, status, started, excluded_note),
             "knowledge_points": sorted(recs, key=lambda r: r["pages"]),
             "merge_decisions": merge_decisions(recs, est, ch),
@@ -2338,10 +2374,24 @@ def _load_md_prompts(path: Path, tags: list, optional: list = ()) -> dict:
 def load_struct_prompts(path: str | os.PathLike | None = None) -> dict:
     """结构生成的四个提示词块（map 的 sys/user + reduce 的 sys/user）。"""
     p = _prompt_path_v2(STRUCT_PROMPT_NAME, path)
-    return _load_md_prompts(p, [("PROMPT-STRUCT-SYS", "sys"),
-                                ("PROMPT-STRUCT-USER", "user"),
-                                ("PROMPT-STRUCT-MERGE-SYS", "merge_sys"),
-                                ("PROMPT-STRUCT-MERGE-USER", "merge_user")])
+    tags = [("PROMPT-STRUCT-SYS", "sys"), ("PROMPT-STRUCT-USER", "user"),
+            ("PROMPT-STRUCT-MERGE-SYS", "merge_sys"), ("PROMPT-STRUCT-MERGE-USER", "merge_user")]
+    prompts = _load_md_prompts(p, tags)
+    # Existing data snapshots can ship an older default alongside the user's library.
+    # Update only the old stock clauses, preserving any edits elsewhere in that prompt.
+    old_map = ('**分几层由你判断**——一个章节里如果同时讲了"分类 → 每一类的判据 → 判据的例外"，\n'
+               '   就该往下分成三层四层，不要为了整齐把它们压平；**四到五级都可以**。')
+    old_merge = '**层级深浅由你判断**：内容确实是逐层展开就继续往下分，四到五级都可以；'
+    rule = ('**层级深度不设固定上限**：按课件知识点的实际从属关系逐层展开，'
+            '直到内容没有更细的从属关系。并列内容保持同层，不凭空添加层级。')
+    updated = {"sys": prompts["sys"].replace(old_map, rule),
+               "merge_sys": prompts["merge_sys"].replace(old_merge, rule)}
+    if path is None and any(value != prompts[key] for key, value in updated.items()):
+        prompts.update(updated)
+        fingerprint = json.dumps([prompts["sha256"], *updated.values()], ensure_ascii=False)
+        prompts["sha256"] = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+        prompts["chars"] = sum(len(prompts[key]) for _, key in tags)
+    return prompts
 
 
 MATH_FORMAT_INSTRUCTION = r"""
@@ -2814,13 +2864,20 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
         call_eff = str(reasoning_effort) if call_think else ""
     last = ""
     last_idx = -1
+    json_failure = ""
     for attempt in range(retry + 1):
         t0 = time.perf_counter()
+        retry_hint = {
+            "empty": "请把完整的 JSON 对象写入最终回答正文，正文不能为空。",
+            "incomplete": "请优先输出完整的 JSON 对象。保留要求的字段和要点，删减重复措辞，确保所有括号和字符串闭合。",
+            "invalid": "请检查 JSON 的逗号、引号和转义。字符串里的换行与反斜杠按 JSON 规范转义，只输出一个完整对象。",
+        }.get(json_failure)
+        system = sys_p + "\n\n输出格式补充：" + retry_hint if retry_hint else sys_p
         rec = {"run": int(run_no), "kind": kind, "attempt": attempt + 1, "note": note,
                "model": call_model, "max_tokens": call_max,
                "thinking": call_think,
                "reasoning_effort": call_eff,
-               "chars_in": len(sys_p) + len(user_p),
+               "chars_in": len(system) + len(user_p),
                "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         try:
             # 额度随实际调用存活；超时只结束等待，不释放仍运行的请求。
@@ -2835,7 +2892,7 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                 with agent_bridge.pipeline_scope(pipeline):
                     r = _call_with_hard_timeout(
                         lambda _ctx=ctx: chat.chat_once(
-                            [{"role": "system", "content": sys_p},
+                            [{"role": "system", "content": system},
                              {"role": "user", "content": user_p}],
                             model=call_model, max_tokens=call_max,
                             thinking=call_think, temperature=temperature,
@@ -2892,7 +2949,14 @@ def _v2_call(calls: list, kind: str, sys_p: str, user_p: str, *, max_tokens: int
                  "cost_cny": cost_of(u)}
         raw = r["content"] or ""
         rec["finish_reason"] = str(r.get("finish_reason") or "")
-        parsed = parse_json(raw)
+        parsed, json_failure, repair = _decode_json_object(raw)
+        if json_failure and rec["finish_reason"] == "length":
+            json_failure = "incomplete"
+            parsed["_parse_error"] = "模型输出达到长度上限，未返回完整 JSON"
+        if json_failure:
+            rec["json_failure"] = json_failure
+        if repair:
+            rec["json_repair"] = repair
         err = str(parsed.get("_parse_error") or "")
         el_ok = round(time.perf_counter() - t0, 1)
         observe_call_seconds(kind, el_ok)
@@ -4876,8 +4940,7 @@ def _v2_structure_block(gen: dict, norm: dict, tasks: list, recs: list,
         "n_nodes": norm["n_nodes"], "n_leaves": norm["n_leaves"],
         "max_level": norm["max_level"],
         "level_histogram": [hist[k] for k in sorted(hist)],
-        "level_rule": ("层级深浅由模型按内容判断（提示词已删掉\u201c最多 3 级\u201d的硬限制，"
-                       "鼓励四到五级）；管线侧没有层级常数，这里只统计、不裁剪"),
+        "level_rule": "层级按课件知识点的实际从属关系展开，不设固定上限。",
         "page_titles": {str(k): v for k, v in sorted(gen["titles"].items())},
         "segment_drafts": [{"segment": d["segment"], "a": d["a"], "b": d["b"],
                             "n_sections": len(d["sections"]),
@@ -4946,7 +5009,7 @@ def _v2_meta(est, kp_prompt, st_prompt, norm, tasks, recs, calls, *, status, sta
                 'seg_pages': int(est.get('seg_pages') or STRUCT_SEG_PAGES),
                 'seg_chars': STRUCT_SEG_CHARS,
                 'page_chars': STRUCT_PAGE_CHARS,
-                'level_rule': '层级不设上限，由模型按内容判断（鼓励四到五级）',
+                'level_rule': '按课件知识点的实际从属关系展开，不设固定上限',
             },
         },
         'price_rule': '非高峰 $%.2f/1M 入 + $%.2f/1M 出，汇率 %.1f（同 core/outline.py）；思考 token 计入 completion（出）' % (PRICE_IN, PRICE_OUT, FX),
@@ -5256,6 +5319,9 @@ def build_v2(
     def ordered_recs() -> list:
         return sorted(recs, key=lambda r: ((r.get("pages") or [0])[0], str(r.get("id") or "")))
 
+    from .share_content import source_for_db
+    root_source = source_for_db(doc_id, db_path)
+
     def persist() -> None:
         """落盘。**只由主线程调用**（并发路径里 worker 只调模型、不落盘）。
 
@@ -5275,6 +5341,7 @@ def build_v2(
             calls_snap = list(calls)
 
         doc = {
+            "source_tag": root_source,
             "meta": _v2_meta(
                 est, kp_prompt, st_prompt, norm, tasks, recs, calls_snap,
                 status=status, started=started, budget=max_cost,

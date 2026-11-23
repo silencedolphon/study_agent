@@ -90,12 +90,12 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Iterator
 
-from . import config, db
+from . import config, db, share_content
 
 # ---------------------------------------------------------------- 常量
 
 FORMAT = "study_agent.courseware_share"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 MANIFEST = "manifest.json"
 DOC = "doc.json"
@@ -345,6 +345,14 @@ class _Entry:
     def data(self) -> bytes:
         return self.text().encode("utf-8")
 
+    def verify(self) -> None:
+        h = hashlib.sha256()
+        with self._open() as source:
+            for block in iter(lambda: source.read(1 << 20), b""):
+                h.update(block)
+        if self.want and h.hexdigest() != self.want:
+            raise ShareError("包内文件校验失败（sha256 不符）：%s" % self.name)
+
     def write_to(self, dest: Path, hash_check: bool = True) -> tuple[int, str]:
         """二进制条目流式落盘（原文件 / 页图）。返回 (字节数, sha256)。"""
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -449,6 +457,17 @@ def read_manifest(zip_path: Path | str) -> dict:
     return m
 
 
+def _read_content(zf, manifest, doc):
+    if manifest["format_version"] < 2:
+        return None
+    try:
+        return share_content.validate(json.loads(_Entry(
+            zf, share_content.ENTRY, _manifest_sha(manifest, share_content.ENTRY)
+        ).text(max_bytes=64 << 20)), doc)
+    except (KeyError, ValueError) as error:
+        raise ShareError(f"子文件清单无法读取：{error}") from error
+
+
 def inspect_package(zip_path: Path | str, *, deep: bool = True) -> dict:
     """给界面/CLI 看的"包里有什么"：结构校验 + 计数，**不写任何库**。
 
@@ -473,6 +492,7 @@ def inspect_package(zip_path: Path | str, *, deep: bool = True) -> dict:
         out["format_ok"] = _check_manifest(manifest)
         doc = json.loads(_Entry(zf, DOC, _manifest_sha(manifest, DOC)).text())
         out["doc"] = _check_doc(doc)
+        out["children"] = share_content.public(_read_content(zf, manifest, doc) or [])
         out["entries"] = sorted(members)
         out["n_entries"] = len(members)
         if not deep:
@@ -513,7 +533,7 @@ def _put_stream(zf: zipfile.ZipFile, name: str, blocks,
     return n, h.hexdigest()
 
 
-def _iter_chunk_lines(conn: sqlite3.Connection, doc_id: int) -> Iterator[str]:
+def _iter_chunk_lines(conn: sqlite3.Connection, doc_id: int, selected=None) -> Iterator[str]:
     cur = conn.execute(
         "SELECT id,ord,text,heading_path,topic,source_ref,char_len,token_est,"
         "content_hash,created_at FROM chunks WHERE doc_id=? ORDER BY ord, id", (doc_id,))
@@ -522,6 +542,8 @@ def _iter_chunk_lines(conn: sqlite3.Connection, doc_id: int) -> Iterator[str]:
         if not rows:
             break
         for r in rows:
+            if selected is not None and r["id"] not in selected:
+                continue
             yield json.dumps({
                 "id": int(r["id"]), "ord": int(r["ord"]), "text": r["text"],
                 "heading_path": r["heading_path"], "topic": r["topic"],
@@ -531,7 +553,7 @@ def _iter_chunk_lines(conn: sqlite3.Connection, doc_id: int) -> Iterator[str]:
             }, ensure_ascii=False) + "\n"
 
 
-def _iter_embedding_lines(conn: sqlite3.Connection, doc_id: int) -> Iterator[str]:
+def _iter_embedding_lines(conn: sqlite3.Connection, doc_id: int, selected=None) -> Iterator[str]:
     cur = conn.execute(
         "SELECT c.ord AS ord, c.id AS src_id, e.model AS model, e.dim AS dim, "
         "e.vec AS vec FROM chunks c JOIN embeddings e ON e.chunk_id=c.id "
@@ -541,6 +563,8 @@ def _iter_embedding_lines(conn: sqlite3.Connection, doc_id: int) -> Iterator[str
         if not rows:
             break
         for r in rows:
+            if selected is not None and r["src_id"] not in selected:
+                continue
             yield json.dumps({
                 "ord": int(r["ord"]), "src_id": int(r["src_id"]),
                 "model": r["model"], "dim": int(r["dim"]),
@@ -612,12 +636,27 @@ def _readme(manifest: dict, doc: dict) -> str:
     return "\n".join(lines)
 
 
+def _referenced_chunks(value, result):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _CHUNK_KEYS and type(item) is int:
+                result.add(item)
+            elif key in _CHUNK_KEYS and isinstance(item, list):
+                result.update(x for x in item if type(x) is int)
+            else:
+                _referenced_chunks(item, result)
+    elif isinstance(value, list):
+        for item in value:
+            _referenced_chunks(item, result)
+
+
 def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                db_path: Path | str | None = None, with_original: bool = False,
                with_pages: bool = False, subject: str = "", exported_by: str = "",
                note: str = "", log_dir: Path | str | None = None,
                raw_dir: Path | str | None = None, root: Path | str | None = None,
-               progress: Progress | None = None) -> dict:
+               progress: Progress | None = None, children: list[str] | None = None,
+               minimize_context: bool = False) -> dict:
     """把一份课件导出成分享包。返回导出报告（含包路径、计数、体积）。
 
     默认 `with_original=False, with_pages=False`（大管家 2026 拍板）：
@@ -671,26 +710,27 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                             % (counts["chunks"], counts["embeddings"]))
 
         # ---- 原文件 ----
-        src_file = Path(str(doc.get("abs_path") or ""))
-        if not src_file.is_file():
-            alt = root / str(doc["path"])
-            if alt.is_file():
-                src_file = alt
+        source_file = share_content.original_file(doc, root, raw_dir)
+        indexed_file = Path(doc.get("abs_path") or root / str(doc["path"]))
         orig_info: dict | None = None
         if with_original:
-            if not src_file.is_file():
+            if source_file is None:
                 warnings.append("勾选了「带原课件文件」，但本机找不到源文件（%s），"
                                 "已降级为不带原文件" % (doc.get("abs_path") or doc.get("path")))
             else:
-                orig_info = {"name": src_file.name, "bytes": src_file.stat().st_size,
-                             "sha256": sha256_file(src_file), "entry": None}
+                orig_info = {"name": source_file.name, "bytes": source_file.stat().st_size,
+                             "sha256": sha256_file(source_file), "entry": None}
+                wanted = share_content.document_extra(doc).get("original_source_hash")
+                if wanted and wanted != orig_info["sha256"]:
+                    warnings.append("磁盘上的源文件自入库后已更换，包中保留本次入库的子文件和出处")
+                    orig_info = None
 
         # ---- 识图页图 ----
         # 目录名由**源库**的文件名 stem 决定（与 figures 写图时同一个规则）
         page_files: list[tuple[Path, str]] = []
         pages_bytes = 0
         if with_pages:
-            src_stem = Path(src_file.name).stem if src_file.is_file() else Path(doc["path"]).stem
+            src_stem = indexed_file.stem if indexed_file.is_file() else Path(doc["path"]).stem
             from . import figure_cache
             pdir = figure_cache.directory(log_dir, doc_id, doc.get("content_hash"))
             if pdir is None or not pdir.is_dir():
@@ -706,22 +746,38 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                 warnings.append("勾选了「带识图页图」，但本机没有渲染好的页图（%s），"
                                 "已降级为不带页图" % pdir)
 
+        doc["title"] = title
+        try:
+            invalid = []
+            records, artifacts = share_content.select(
+                *share_content.inventory(conn, doc, log_dir, invalid), children)
+            if invalid:
+                warnings.append("以下子文件的来源已失效，请整理新版后再导出：" + "、".join(invalid))
+        except (ValueError, OSError) as error:
+            raise ShareError(str(error)) from error
+
+        selected_chunks = None
+        context_chars = doc.get("n_chars")
+        partial_context = bool(share_content.document_extra(doc).get("source_context_partial") or minimize_context)
+        if minimize_context:
+            selected_chunks = set()
+            _referenced_chunks(records, selected_chunks)
+            _referenced_chunks(artifacts, selected_chunks)
+            subset = [(row["id"], row["chars"], row["has_embedding"]) for row in conn.execute(
+                "SELECT c.id,LENGTH(c.text) chars,e.chunk_id IS NOT NULL AS has_embedding "
+                "FROM chunks c LEFT JOIN embeddings e ON e.chunk_id=c.id WHERE c.doc_id=?", (doc_id,))
+                if row["id"] in selected_chunks]
+            counts.update(chunks=len(subset), embeddings=sum(row[2] for row in subset), figure_desc=0)
+            context_chars = sum(row[1] for row in subset)
+            page_files.clear()
+            warnings.append("此包只包含所选子文件及其引用的切块。")
         # ---- 知识点产物 ----
         know_items: list[dict] = []
-        knowledge_dir = log_dir / "knowledge"
-        fixed = [knowledge_dir / ("%d%s" % (int(doc_id), suffix)) for suffix in KNOW_SUFFIXES]
-        chapter_pattern = re.compile(r"^%d-(?:预习总结|教材知识点)-第\d+章\.json$" % int(doc_id))
-        chapter_files = sorted(p for p in knowledge_dir.glob("%d-*-第*章.json" % int(doc_id))
-                               if chapter_pattern.fullmatch(p.name))
-        for kf in fixed + chapter_files:
-            if not kf.is_file():
-                continue
-            suffix = kf.name[len(str(int(doc_id))):]
-            item = {"name": kf.name, "entry": "%s/%s" % (KNOW_DIR, kf.name),
-                    "source_doc_id": int(doc_id), "suffix": suffix,
-                    "bytes": kf.stat().st_size, "sha256": sha256_file(kf)}
+        for suffix, obj in artifacts.items():
+            name = f"{doc_id}{suffix}"
+            item = {"name": name, "entry": f"{KNOW_DIR}/{name}",
+                    "source_doc_id": int(doc_id), "suffix": suffix}
             try:
-                obj = json.loads(kf.read_text(encoding="utf-8"))
                 meta = obj.get("meta") if isinstance(obj, dict) else None
                 meta_doc_id = (meta or {}).get("doc_id") if isinstance(meta, dict) else obj.get("doc_id")
                 item["meta_doc_id"] = int(meta_doc_id) if meta_doc_id is not None else None
@@ -729,7 +785,7 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                     warnings.append(
                         "产物 %s 里 meta.doc_id=%s 与文件名里的 doc_id=%d 不一致"
                         "（源库自身的问题）；导入时会统一改写成接收方的新 doc_id"
-                        % (kf.name, meta_doc_id, int(doc_id)))
+                        % (name, meta_doc_id, int(doc_id)))
                 if suffix == KP_SUFFIX:
                     kps = obj.get("knowledge_points") if isinstance(obj, dict) else None
                     item["n_points"] = len(kps) if isinstance(kps, list) else 0
@@ -753,28 +809,41 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                                 n_sec += len(sub)
                     item["n_points"] = n_sec
             except (OSError, ValueError) as e:
-                warnings.append("产物 %s 读不出 JSON（%s），仍原样打包" % (kf.name, e))
+                warnings.append("产物 %s 的元信息无法核对（%s）" % (name, e))
             know_items.append(item)
 
         _ipc(progress, "export", 0, counts["chunks"])
         files: list[dict] = []
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-            n, h = _put_stream(zf, CHUNKS, _iter_chunk_lines(conn, doc_id))
+            n, h = _put_stream(zf, CHUNKS, _iter_chunk_lines(conn, doc_id, selected_chunks))
             files.append({"name": CHUNKS, "bytes": n, "sha256": h})
-            n, h = _put_stream(zf, EMBEDDINGS, _iter_embedding_lines(conn, doc_id))
+            n, h = _put_stream(zf, EMBEDDINGS, _iter_embedding_lines(conn, doc_id, selected_chunks))
             files.append({"name": EMBEDDINGS, "bytes": n, "sha256": h})
-            n, h = _put_stream(zf, FIGURES, _iter_figure_lines(conn, doc_id))
+            n, h = _put_stream(zf, FIGURES, _iter_figure_lines(conn, doc_id) if not minimize_context else ())
             files.append({"name": FIGURES, "bytes": n, "sha256": h})
 
+            for suffix, artifact in artifacts.items():
+                pattern, chapter = share_content._chapter_info(suffix)
+                if pattern == "-教材知识点-第{chapter}章.json" and not artifact.get("portable_signature"):
+                    from . import textbook_kp
+                    try:
+                        plan = textbook_kp._plan(doc_id, chapter, db_path=dbp)
+                    except ValueError:
+                        continue
+                    if artifact.get("signature") == plan["signature"]:
+                        artifact["portable_signature"] = plan["portable_signature"]
+                        artifact["source_tag"] = share_content.source_tag(doc)
+
             for item in know_items:
-                kf = log_dir / "knowledge" / item["name"]
-                n, h = _put_stream(zf, item["entry"], _file_blocks(kf))
+                n, h = _put_text(zf, item["entry"], share_content.canonical(artifacts[item["suffix"]]))
                 files.append({"name": item["entry"], "bytes": n, "sha256": h})
                 item["bytes"], item["sha256"] = n, h
 
             if orig_info is not None:
                 n, h = _put_stream(zf, "%s/%s" % (ORIG_DIR, orig_info["name"]),
-                                   _file_blocks(src_file))
+                                   _file_blocks(source_file))
+                if h != orig_info["sha256"]:
+                    raise ShareError("导出过程中源文件已变化，请重新导出")
                 orig_info.update({"entry": "%s/%s" % (ORIG_DIR, orig_info["name"]),
                                   "bytes": n, "sha256": h})
                 files.append({"name": orig_info["entry"], "bytes": n, "sha256": h})
@@ -794,10 +863,12 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                 "title": title, "kind": doc.get("kind"), "file_name": None,
                 "content_hash": doc.get("content_hash"),
                 "size_bytes": doc.get("size_bytes"), "mtime": doc.get("mtime"),
-                "n_chunks": doc.get("n_chunks"), "n_chars": doc.get("n_chars"),
+                "n_chunks": counts["chunks"] if partial_context else doc.get("n_chunks"), "n_chars": context_chars,
                 "status": doc.get("status"), "role": doc.get("role"),
                 "corpus": doc.get("corpus"), "warnings": doc.get("warnings"),
-                "extra": doc.get("extra"), "indexed_at": doc.get("indexed_at"),
+                "extra": json.dumps({k: v for k, v in share_content.document_extra(doc).items()
+                                     if k not in {"original_source", "original_source_hash", "source_revision_changed_at", "shared_from"}},
+                                    ensure_ascii=False), "indexed_at": doc.get("indexed_at"),
                 "source_path": doc.get("path"),
                 "source_abs_name": Path(str(doc.get("abs_path") or doc.get("path"))).name,
             }
@@ -806,7 +877,12 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
             n, h = _put_text(zf, DOC, json.dumps(doc_out, ensure_ascii=False, indent=2))
             files.append({"name": DOC, "bytes": n, "sha256": h})
 
+            n, h = _put_text(zf, share_content.ENTRY, share_content.canonical(
+                {"source": share_content.source_tag(doc), "children": records}))
+            files.append({"name": share_content.ENTRY, "bytes": n, "sha256": h})
             manifest = {
+                "board_id": share_content.board_id(root),
+                "source_context_partial": partial_context,
                 "format": FORMAT,
                 "format_version": FORMAT_VERSION,
                 "tool": "study_agent core/share.py",
@@ -819,6 +895,7 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                     "db": rel_to(dbp, root),
                     "root_name": root.name,
                     "doc_id": int(doc_id),
+                    "folder": share_content.source_folder(doc),
                     "title": title,
                     "path": doc.get("path"),
                     "kind": doc.get("kind"),
@@ -831,7 +908,7 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
                              "pages": n_pages > 0},
                 "original": orig_info,
                 "pages": ({"dir": "%s/%s" % (PAGE_DIR, safe_dirname(
-                    Path(src_file.name).stem if src_file.is_file()
+                    indexed_file.stem if indexed_file.is_file()
                     else Path(doc["path"]).stem)),
                     "n": n_pages, "bytes": pg_bytes} if n_pages else None),
                 "knowledge": [{k: v for k, v in it.items() if k != "suffix"}
@@ -869,6 +946,7 @@ def export_doc(doc_id: int, out_path: Path | str | None = None, *,
         "status": "exported", "zip": str(out), "bytes": size,
         "counts": counts, "includes": manifest["includes"],
         "embedding": manifest["embedding"], "warnings": warnings,
+        "children": share_content.public(records),
         "manifest": manifest, "n_pages": manifest["counts"]["pages"],
         "original_bytes": (orig_info or {}).get("bytes", 0),
         "pages_bytes": (manifest.get("pages") or {}).get("bytes", 0),
@@ -1195,11 +1273,212 @@ def _unique_rel(conn: sqlite3.Connection, rel: str) -> str:
     raise ShareError("path 冲突太多，无法为 %s 找到可用值" % rel)
 
 
+def _atomic_artifact(path: Path, data: bytes) -> None:
+    tmp = path.with_name(path.name + ".share-part")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _place_content(conn, doc, doc_id, records, knowledge, id_map, log_dir, action,
+                   written, replaced, reuse):
+    by_suffix = {item["suffix"]: item for item in knowledge}
+    target = dict(conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone())
+    outcomes, outputs = [], []
+    remap = {"remapped": 0, "dropped": 0}
+    kdir = log_dir / "knowledge"
+
+    def save(item, obj, stats, path, previous):
+        kdir.mkdir(parents=True, exist_ok=True)
+        _atomic_artifact(path, share_content.canonical(obj).encode("utf-8"))
+        if previous is None:
+            written.append(path)
+        else:
+            replaced[path] = previous
+        for key in remap:
+            remap[key] += stats[key]
+        outputs.append({"file": item["name"], "new_file": path.name, "new_path": str(path),
+                        "n_points": item["n_points"], "remapped_refs": stats["remapped"],
+                        "dropped_refs": stats["dropped"]})
+
+    if records is None:
+        for item in knowledge:
+            path = kdir / f"{doc_id}{item['suffix']}"
+            if reuse and action == "merge" and path.exists():
+                continue
+            previous = path.read_bytes() if path.exists() else None
+            if previous is not None and not reuse:
+                raise ShareError(f"目标产物已存在：{path}")
+            obj, stats = rewrite_knowledge(item["obj"], doc_id, id_map)
+            save(item, obj, stats, path, previous)
+        return outputs, remap, outcomes
+
+    def place_linked_term(owner, record):
+        payload = record.get("payload")
+        root = record.get("source")
+        receiving = share_content.by_source(conn, record.get("target"))
+        if not receiving or not isinstance(payload, dict) or not str(payload.get("term") or "").strip():
+            reason = "等待导入关联的课件" if not receiving else "名词格式无法识别"
+            share_content.hold(conn, owner, record, reason)
+            return record, "unclassified", reason
+        if not conn.execute("SELECT 1 FROM documents WHERE id=? AND role='courseware'",
+                            (receiving["id"],)).fetchone():
+            reason = "关联对象无法归位到课件"
+            share_content.hold(conn, owner, record, reason)
+            return record, "unclassified", reason
+        path = kdir / f"{receiving['id']}{TERMS_SUFFIX}"
+        before = path.read_bytes() if path.exists() else None
+        obj = json.loads(before) if before is not None else {
+            "meta": {"doc_id": receiving["id"], "terms_override": True},
+            "source_tag": share_content.source_tag(receiving), "terms": []}
+        terms = obj.setdefault("terms", [])
+        identity = share_content._identity("term", payload)
+        index = next((i for i, term in enumerate(terms)
+                      if share_content._identity("term", term) == identity), None)
+        if index is not None and action != "overwrite":
+            share_content.clear_hold(conn, owner, record)
+            return record, "skipped", "保留本地已有的同一名词"
+        term = {**payload, "source_tag": root}
+        term.pop("source_ids", None)
+        if index is None:
+            terms.append(term)
+        else:
+            terms[index] = term
+        kdir.mkdir(parents=True, exist_ok=True)
+        _atomic_artifact(path, share_content.canonical(obj).encode("utf-8"))
+        if before is None:
+            written.append(path)
+        elif path not in written:
+            replaced.setdefault(path, before)
+        share_content.clear_hold(conn, owner, record)
+        return record, "success", ""
+
+
+    pending = {}
+    questions = []
+
+    def hold(record, reason, payload=None):
+        row = dict(record)
+        if payload is not None:
+            row["held_payload"] = payload
+        share_content.hold(conn, target, row, reason)
+        outcomes.append((record, "unclassified", reason))
+
+    for record in records:
+        suffix = record.get("artifact")
+        item = by_suffix.get(suffix) if isinstance(suffix, str) else None
+        field = record.get("field")
+        index = record.get("index")
+        payload = item["obj"] if item else record.get("held_payload")
+        if field and isinstance(field, str) and isinstance(payload, dict) and item:
+            values = payload.get(field)
+            payload = values[index] if isinstance(values, list) and type(index) is int and 0 <= index < len(values) else None
+        if not share_content.placement(record):
+            hold(record, "目标看板无法识别此位置标签", payload)
+            continue
+        if record["kind"] == share_content.LINKED_TERM:
+            outcomes.append(place_linked_term(target, record))
+            continue
+        if record["kind"] == share_content.CHAPTER_LINK:
+            outcomes.append(share_content.import_chapter(conn, target, record, log_dir, action))
+            continue
+        if record["kind"] == share_content.QUESTION:
+            questions.append(record)
+            continue
+        permitted = share_content.ARTIFACTS.get(share_content._chapter_info(suffix)[0], ()) if item else ()
+        if (record["kind"], field) not in permitted or payload is None:
+            hold(record, "缺少可归位的子文件数据", payload)
+            continue
+        pending.setdefault(suffix, []).append((record, field, payload))
+
+    for suffix, selected in pending.items():
+        item = by_suffix[suffix]
+        path = kdir / f"{doc_id}{suffix}"
+        previous = path.read_bytes() if path.exists() else None
+        if previous is not None and not reuse:
+            raise ShareError(f"目标产物已存在：{path}")
+        existing = json.loads(previous) if previous is not None else None
+        if existing is None and any(field for _, field in share_content.ARTIFACTS[share_content._chapter_info(suffix)[0]]):
+            fields = {field for _, field in share_content.ARTIFACTS[share_content._chapter_info(suffix)[0]] if field}
+            metadata = {k: v for k, v in item["obj"].items() if k not in fields | {"parts", "segments"}}
+            local, _ = rewrite_knowledge(metadata, doc_id, id_map)
+            local.update({field: [] for field in fields})
+        else:
+            local = dict(existing or {})
+        changed = False
+        totals = {"remapped": 0, "dropped": 0}
+        for record, field, payload in selected:
+            if record["kind"] == "mindmap":
+                payload = {key: value for key, value in payload.items()
+                           if key not in {"knowledge_points", "terms", "merge_decisions"}}
+            if not field and existing is not None and action == "merge":
+                outcomes.append((record, "skipped", "保留本地已有的同一份子文件"))
+                continue
+            if record["kind"] == "term" and isinstance(payload, dict):
+                roots = record.get("roots")
+                source = roots[0] if isinstance(roots, list) and roots and isinstance(roots[0], dict) else share_content.source_tag(target)
+                payload = {**payload, "source_tag": source}
+                if isinstance(record.get("related_refs"), list):
+                    payload["portable_term_refs"] = record["related_refs"]
+                    payload.pop("source_ids", None)
+            obj, stats = rewrite_knowledge(payload if not field else {"value": payload},
+                                           doc_id, id_map)
+            if reuse and stats["dropped"]:
+                hold(record, "本地切块与来源不一致，无法完整恢复引用", payload)
+                continue
+            if field:
+                values = local.setdefault(field, [])
+                identity = share_content._identity(record["kind"], obj["value"])
+                match = next((index for index, value in enumerate(values)
+                              if share_content._identity(record["kind"], value) == identity), None)
+                if match is not None and action != "overwrite":
+                    outcomes.append((record, "skipped", "保留本地已有的同一份子文件"))
+                    continue
+                if match is None:
+                    values.append(obj["value"])
+                else:
+                    values[match] = obj["value"]
+            elif record["kind"] == "mindmap":
+                local.update(obj)
+            else:
+                local = obj
+            for key in totals:
+                totals[key] += stats[key]
+            changed = True
+            share_content.clear_hold(conn, target, record)
+            outcomes.append((record, "success", "部分引用缺失" if stats["dropped"] else ""))
+        if changed:
+            local["source_tag"] = share_content.source_tag(target)
+            save(item, local, totals, path, previous)
+
+    if questions:
+        outcomes.extend(share_content.import_questions(conn, target, questions, id_map, action))
+    for owner, record in share_content.pending_for_target(conn, target):
+        if share_content.placement(record):
+            outcomes.append(place_linked_term(owner, record))
+    return outputs, remap, outcomes
+
+
+def _insert_shared_chunk(conn, doc_id, obj):
+    text = obj["text"]
+    cur = conn.execute(
+        "INSERT INTO chunks(doc_id,ord,text,text_norm,heading_path,topic,source_ref,char_len,"
+        "token_est,content_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (doc_id, obj["ord"], text, db.normalize_for_match(text),
+         obj.get("heading_path"), obj.get("topic"), obj.get("source_ref"),
+         obj.get("char_len") if obj.get("char_len") is not None else len(text),
+         obj.get("token_est"), obj.get("content_hash"), obj.get("created_at") or _now()))
+    return int(cur.lastrowid)
+
+
 def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                    log_dir: Path | str | None = None, raw_dir: Path | str | None = None,
                    root: Path | str | None = None, embed_model: str | None = None,
                    embed_dim: int | None = None, duplicate: bool = False,
-                   dry_run: bool = False, progress: Progress | None = None) -> dict:
+                   dry_run: bool = False, progress: Progress | None = None,
+                   conflict_action: str = "skip") -> dict:
     """把一个分享包导入当前库。**全程零模型调用、零费用。**
 
     `duplicate=False`（默认）时，若本库已有相同 `content_hash` 的课件 → 不重复导入，
@@ -1213,6 +1492,8 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
     zp = Path(zip_path)
     if not zp.is_file():
         raise ShareError("找不到分享包：%s" % zp)
+    if conflict_action not in {"skip", "merge", "overwrite"}:
+        raise ShareError("未知的分享包冲突处理方式")
     pkg_sha = sha256_file(zp)
 
     warnings: list[str] = []
@@ -1220,6 +1501,7 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
     conn.isolation_level = None            # 手动事务：写库要么全成、要么全不成
     written: list[Path] = []
     made_dirs: list[Path] = []
+    replaced: dict[Path, bytes] = {}
     try:
         db.init_db(conn)                   # 幂等：确保 schema/FTS 就绪（不含任何新列）
         try:
@@ -1243,6 +1525,7 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
             except ValueError as e:
                 raise ShareError("doc.json 不是合法 JSON：%s" % e)
             _check_doc(doc)
+            records = _read_content(zf, manifest, doc)
 
             # ---- 1. 向量兼容性硬校验（最重要的一道闸）----
             lm, ld = local_embedding_identity(conn, embed_model, embed_dim)
@@ -1283,12 +1566,15 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
             if orig_entry and orig_entry not in members:
                 raise ShareError("manifest 声明带原课件 %s，但包里没有它" % orig_entry)
 
-            if not n_chunks["body_ord_ok"]:
+            partial_context = manifest.get("source_context_partial") is True
+            if not n_chunks["body_ord_ok"] and not partial_context:
                 warnings.append("源库正文块的 ord 不是 0..n-1 连续（首个异常处 ord=%s），"
                                 "已按原样导入" % n_chunks.get("body_ord_gap_at"))
 
             # ---- 3. 冲突：同一份课件（content_hash 相同）默认不重复导 ----
-            hit = conn.execute("SELECT id,path,title FROM documents WHERE content_hash=? "
+            if not dry_run:
+                conn.execute("BEGIN IMMEDIATE")
+            hit = conn.execute("SELECT * FROM documents WHERE content_hash=? "
                                "ORDER BY id LIMIT 1", (doc["content_hash"],)).fetchone()
             conflict = ({"doc_id": int(hit["id"]), "existing_path": hit["path"],
                          "existing_title": hit["title"]} if hit is not None else None)
@@ -1303,165 +1589,203 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                     "pages": len(page_entries), "original": orig_entry or None,
                     "embedding": {"model": pm, "dim": pd, "local": [lm, ld]},
                     "conflict": conflict,
-                    "would_skip": bool(conflict) and not duplicate,
+                    "would_skip": bool(conflict) and not duplicate and conflict_action == "skip",
                     "model_calls": 0, "cost_cny": 0.0, "warnings": warnings,
                 }
 
-            if conflict is not None and not duplicate:
+            if conflict is not None and not duplicate and conflict_action == "skip":
                 return {
                     "status": "skipped", "reason": "本库已有同一份课件（content_hash 相同）",
                     **conflict, "package_sha256": pkg_sha,
                     "source": info["source"], "counts": info["counts"],
                     "model_calls": 0, "cost_cny": 0.0,
-                    "hint": "如需再导入一份副本（例如对比不同来源），用 --duplicate",
+                    "content_report": share_content.report(
+                        [(row, "skipped", "本库已有同一源文件，选择了跳过") for row in records or []]),
+                    "hint": "需要同步子文件时，请选择合并或覆盖。",
                 }
 
+            reuse = hit is not None and not duplicate
+            target_raw = raw_dir
+            if records is not None:
+                folder = info["source"].get("folder")
+                if folder not in share_content.SOURCE_FOLDERS:
+                    warnings.append("源文件分类无法识别，已按其资料类型归类")
+                    folder = share_content.source_folder(doc)
+                target_raw = raw_dir / folder
+
             # ---- 4. 落库 ----
-            orig_name = (Path(str(orig_entry)).name if orig_entry
-                         else str(doc.get("file_name") or "courseware.bin"))
-            new_file = None
-            if orig_entry:
-                raw_dir.mkdir(parents=True, exist_ok=True)
-                target = _unique_path(raw_dir / clean_name(orig_name, 120))
-                n_b, _h = _Entry(zf, orig_entry, _manifest_sha(manifest, orig_entry)
-                                 ).write_to(target)
-                written.append(target)
-                new_file = target
-                if n_b != int(doc.get("size_bytes") or n_b):
-                    warnings.append("原文件字节数 %d 与 doc.json 记录的 %d 不同"
-                                    % (n_b, int(doc.get("size_bytes") or 0)))
-                rel = _unique_rel(conn, rel_to(target, root))
-                abs_path = str(target)
+            if reuse:
+                new_doc_id = int(hit["id"])
+                rel, new_file = hit["path"], None
+                extra = share_content.document_extra(dict(hit))
+                fill_context = bool(extra.get("source_context_partial"))
+                if orig_entry:
+                    # Consume and verify even when the local original already exists.
+                    local_original = Path(hit["abs_path"] or root / rel)
+                    if local_original.is_file():
+                        _Entry(zf, orig_entry, _manifest_sha(manifest, orig_entry)).verify()
+                    else:
+                        target_raw.mkdir(parents=True, exist_ok=True)
+                        new_file = _unique_path(target_raw / clean_name(Path(orig_entry).name, 120))
+                        _Entry(zf, orig_entry, _manifest_sha(manifest, orig_entry)).write_to(new_file)
+                        written.append(new_file)
+                        rel = _unique_rel(conn, rel_to(new_file, root))
+                        extra.update(original_source=rel, original_source_hash=(manifest.get("original") or {}).get("sha256"))
+                        conn.execute("UPDATE documents SET path=?,abs_path=?,extra=? WHERE id=?",
+                                     (rel, str(new_file), share_content.canonical(extra), new_doc_id))
+                local_chunks = {
+                    (r["ord"], r["source_ref"], r["text"]): r["id"] for r in
+                    conn.execute("SELECT id,ord,source_ref,text FROM chunks WHERE doc_id=?", (new_doc_id,))
+                }
+                src_to_new = {}
+                n = m = n_fig = 0
+                for item in _Entry(zf, CHUNKS, _manifest_sha(manifest, CHUNKS)).lines():
+                    local_id = local_chunks.get((item["ord"], item.get("source_ref"), item["text"]))
+                    if local_id is None and fill_context:
+                        local_id = _insert_shared_chunk(conn, new_doc_id, item)
+                        local_chunks[(item["ord"], item.get("source_ref"), item["text"])] = local_id
+                        n += 1
+                    if local_id is not None and isinstance(item.get("id"), int):
+                        src_to_new[item["id"]] = local_id
+                if fill_context:
+                    for obj in _Entry(zf, EMBEDDINGS, _manifest_sha(manifest, EMBEDDINGS)).lines():
+                        nid = src_to_new.get(obj.get("src_id"))
+                        if nid is not None:
+                            m += conn.execute(
+                                "INSERT OR IGNORE INTO embeddings(chunk_id,model,dim,vec) VALUES(?,?,?,?)",
+                                (nid, pm, pd, base64.b64decode(obj["vec_b64"], validate=True))).rowcount
+                    if not partial_context:
+                        extra.pop("source_context_partial", None)
+                    n_local, n_chars = conn.execute(
+                        "SELECT COUNT(*), COALESCE(SUM(LENGTH(text)),0) FROM chunks WHERE doc_id=?", (new_doc_id,)).fetchone()
+                    conn.execute("UPDATE documents SET n_chunks=?,n_chars=?,extra=? WHERE id=?",
+                                 (n_local, n_chars, share_content.canonical(extra), new_doc_id))
             else:
-                stem = Path(str(doc.get("file_name") or doc["title"])).stem
-                stem = clean_name(stem, 50)
-                h8 = str(doc["content_hash"])[:8]
-                rel = _unique_rel(conn, str(
-                    Path(rel_to(raw_dir, root)) / PLACEHOLDER_DIR /
-                    ("%s-%s%s" % (stem, h8, PLACEHOLDER_EXT))))
-                abs_path = str(root / rel)
-                warnings.append("包内不含原课件文件，documents.path 用占位路径（%s）："
-                                "这是「来自分享包」的标记，不是本机真实文件" % rel)
+                orig_name = (Path(str(orig_entry)).name if orig_entry
+                             else str(doc.get("file_name") or "courseware.bin"))
+                new_file = None
+                if orig_entry:
+                    target_raw.mkdir(parents=True, exist_ok=True)
+                    target = _unique_path(target_raw / clean_name(orig_name, 120))
+                    n_b, _h = _Entry(zf, orig_entry, _manifest_sha(manifest, orig_entry)
+                                     ).write_to(target)
+                    written.append(target)
+                    new_file = target
+                    if n_b != int(doc.get("size_bytes") or n_b):
+                        warnings.append("原文件字节数 %d 与 doc.json 记录的 %d 不同"
+                                        % (n_b, int(doc.get("size_bytes") or 0)))
+                    rel = _unique_rel(conn, rel_to(target, root))
+                    abs_path = str(target)
+                else:
+                    stem = Path(str(doc.get("file_name") or doc["title"])).stem
+                    stem = clean_name(stem, 50)
+                    h8 = str(doc["content_hash"])[:8]
+                    rel = _unique_rel(conn, str(
+                        Path(rel_to(target_raw, root)) / PLACEHOLDER_DIR /
+                        ("%s-%s%s" % (stem, h8, PLACEHOLDER_EXT))))
+                    abs_path = str(root / rel)
+                    warnings.append("包内不含原课件文件，documents.path 用占位路径（%s）："
+                                    "这是「来自分享包」的标记，不是本机真实文件" % rel)
 
-            extra_new = {}
-            try:
-                old_extra = json.loads(doc.get("extra") or "{}")
-                if isinstance(old_extra, dict):
-                    extra_new.update(old_extra)
-            except ValueError:
-                pass
-            extra_new["shared_from"] = {
-                "format": FORMAT, "format_version": int(info["format_version"]),
-                "package": zp.name, "package_path": str(zp),
-                "package_sha256": pkg_sha,
-                "exported_at": manifest.get("created_at"),
-                "exported_by": manifest.get("exported_by") or "",
-                "note": manifest.get("note") or "",
-                "source_subject": info["source"].get("subject") or "",
-                "source_db": info["source"].get("db") or "",
-                "source_doc_id": int(info["source"]["doc_id"]),
-                "source_path": info["source"].get("path"),
-                "imported_at": _iso(_now()),
-                "importer": "study_agent core/share.py",
-            }
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "INSERT INTO documents(path,abs_path,kind,title,content_hash,size_bytes,"
-                "mtime,n_chunks,n_chars,status,role,corpus,warnings,extra,indexed_at,"
-                "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (rel, abs_path, doc.get("kind") or "text", doc["title"],
-                 doc["content_hash"], doc.get("size_bytes"), doc.get("mtime"),
-                 doc.get("n_chunks"), doc.get("n_chars"),
-                 doc.get("status") or "ok", doc.get("role") or "courseware",
-                 doc.get("corpus") or "main", doc.get("warnings") or "[]",
-                 json.dumps(extra_new, ensure_ascii=False),
-                 doc.get("indexed_at") or _now(), _now()))
-            new_doc_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-
-            src_to_new: dict[int, int] = {}
-            ord_to_new: dict[int, list[int]] = {}
-            _ipc(progress, "chunks", 0, info["counts"].get("chunks") or 0)
-            n = 0
-            for obj in _Entry(zf, CHUNKS, _manifest_sha(manifest, CHUNKS)).lines():
-                o = int(obj["ord"])
-                text = obj["text"]
+                extra_new = {}
+                try:
+                    old_extra = json.loads(doc.get("extra") or "{}")
+                    if isinstance(old_extra, dict):
+                        extra_new.update({k: v for k, v in old_extra.items()
+                                          if k not in {"original_source", "original_source_hash", "source_revision_changed_at", "shared_from"}})
+                except ValueError:
+                    pass
+                if partial_context:
+                    extra_new["source_context_partial"] = True
+                if new_file:
+                    extra_new["original_source"] = rel
+                    extra_new["original_source_hash"] = (manifest.get("original") or {}).get("sha256")
+                extra_new["shared_from"] = {
+                    "board_id": manifest.get("board_id"),
+                    "format": FORMAT, "format_version": int(info["format_version"]),
+                    "package": zp.name, "package_path": str(zp),
+                    "package_sha256": pkg_sha,
+                    "exported_at": manifest.get("created_at"),
+                    "exported_by": manifest.get("exported_by") or "",
+                    "note": manifest.get("note") or "",
+                    "source_subject": info["source"].get("subject") or "",
+                    "source_db": info["source"].get("db") or "",
+                    "source_doc_id": int(info["source"]["doc_id"]),
+                    "source_path": info["source"].get("path"),
+                    "imported_at": _iso(_now()),
+                    "importer": "study_agent core/share.py",
+                }
                 conn.execute(
-                    "INSERT INTO chunks(doc_id,ord,text,text_norm,heading_path,topic,"
-                    "source_ref,char_len,token_est,content_hash,created_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (new_doc_id, o, text, db.normalize_for_match(text),
-                     obj.get("heading_path"), obj.get("topic"), obj.get("source_ref"),
-                     obj.get("char_len") if obj.get("char_len") is not None else len(text),
-                     obj.get("token_est"), obj.get("content_hash"),
-                     obj.get("created_at") or _now()))
-                nid = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-                if isinstance(obj.get("id"), int):
-                    src_to_new[int(obj["id"])] = nid
-                ord_to_new.setdefault(o, []).append(nid)
-                n += 1
-                if n % 200 == 0:
-                    _ipc(progress, "chunks", n, info["counts"].get("chunks") or n)
-            _ipc(progress, "chunks", n, n)
+                    "INSERT INTO documents(path,abs_path,kind,title,content_hash,size_bytes,"
+                    "mtime,n_chunks,n_chars,status,role,corpus,warnings,extra,indexed_at,"
+                    "updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rel, abs_path, doc.get("kind") or "text", doc["title"],
+                     doc["content_hash"], doc.get("size_bytes"), doc.get("mtime"),
+                     doc.get("n_chunks"), doc.get("n_chars"),
+                     doc.get("status") or "ok", doc.get("role") or "courseware",
+                     doc.get("corpus") or "main", doc.get("warnings") or "[]",
+                     json.dumps(extra_new, ensure_ascii=False),
+                     doc.get("indexed_at") or _now(), _now()))
+                new_doc_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
-            _ipc(progress, "embeddings", 0, n_emb["total"])
-            used: set[int] = set()
-            m = 0
-            for obj in _Entry(zf, EMBEDDINGS, _manifest_sha(manifest, EMBEDDINGS)).lines():
-                blob = base64.b64decode(obj["vec_b64"], validate=True)
-                nid = None
-                if isinstance(obj.get("src_id"), int):
-                    nid = src_to_new.get(int(obj["src_id"]))
-                if nid is None:
-                    ord_value = obj.get("ord")
-                    cands = [c for c in ord_to_new.get(int(ord_value) if ord_value is not None else -1, [])
-                             if c not in used]
-                    if not cands:
-                        raise ShareError("向量找不到对应的块（src_id=%r ord=%r）："
-                                         "包内 chunks 与 embeddings 不匹配"
-                                         % (obj.get("src_id"), obj.get("ord")))
-                    nid = cands[0]
-                conn.execute("INSERT INTO embeddings(chunk_id,model,dim,vec) VALUES(?,?,?,?)",
-                             (nid, pm, pd, blob))
-                used.add(nid)
-                m += 1
-                if m % 200 == 0:
-                    _ipc(progress, "embeddings", m, n_emb["total"])
-            _ipc(progress, "embeddings", m, m)
-            if m != n:
-                warnings.append("导入了 %d 块和 %d 条向量；缺少向量的块仅支持关键词检索" % (n, m))
+                src_to_new: dict[int, int] = {}
+                ord_to_new: dict[int, list[int]] = {}
+                _ipc(progress, "chunks", 0, info["counts"].get("chunks") or 0)
+                n = 0
+                for obj in _Entry(zf, CHUNKS, _manifest_sha(manifest, CHUNKS)).lines():
+                    o = int(obj["ord"])
+                    nid = _insert_shared_chunk(conn, new_doc_id, obj)
+                    if isinstance(obj.get("id"), int):
+                        src_to_new[int(obj["id"])] = nid
+                    ord_to_new.setdefault(o, []).append(nid)
+                    n += 1
+                    if n % 200 == 0:
+                        _ipc(progress, "chunks", n, info["counts"].get("chunks") or n)
+                _ipc(progress, "chunks", n, n)
 
-            if FIGURES in members:
-                for obj in _Entry(zf, FIGURES, _manifest_sha(manifest, FIGURES)).lines():
-                    conn.execute(
-                        "INSERT INTO figure_desc(doc_id,page,page_title,image_hash,model,"
-                        "thinking,tokens_in,tokens_out,cost_cny,n_chunks,created_at,"
-                        "description,no_info) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (new_doc_id, int(obj["page"]), obj.get("page_title"),
-                         obj.get("image_hash") or "", obj.get("model"),
-                         int(obj.get("thinking") or 0), int(obj.get("tokens_in") or 0),
-                         int(obj.get("tokens_out") or 0), float(obj.get("cost_cny") or 0.0),
-                         int(obj.get("n_chunks") or 0), obj.get("created_at") or _now(),
-                         obj.get("description"), int(obj.get("no_info") or 0)))
+                _ipc(progress, "embeddings", 0, n_emb["total"])
+                used: set[int] = set()
+                m = 0
+                for obj in _Entry(zf, EMBEDDINGS, _manifest_sha(manifest, EMBEDDINGS)).lines():
+                    blob = base64.b64decode(obj["vec_b64"], validate=True)
+                    nid = None
+                    if isinstance(obj.get("src_id"), int):
+                        nid = src_to_new.get(int(obj["src_id"]))
+                    if nid is None:
+                        ord_value = obj.get("ord")
+                        cands = [c for c in ord_to_new.get(int(ord_value) if ord_value is not None else -1, [])
+                                 if c not in used]
+                        if not cands:
+                            raise ShareError("向量找不到对应的块（src_id=%r ord=%r）："
+                                             "包内 chunks 与 embeddings 不匹配"
+                                             % (obj.get("src_id"), obj.get("ord")))
+                        nid = cands[0]
+                    conn.execute("INSERT INTO embeddings(chunk_id,model,dim,vec) VALUES(?,?,?,?)",
+                                 (nid, pm, pd, blob))
+                    used.add(nid)
+                    m += 1
+                    if m % 200 == 0:
+                        _ipc(progress, "embeddings", m, n_emb["total"])
+                _ipc(progress, "embeddings", m, m)
+                if m != n:
+                    warnings.append("导入了 %d 块和 %d 条向量；缺少向量的块仅支持关键词检索" % (n, m))
 
-            # 知识点产物：改文件名 + 改 meta.doc_id + 重映射块引用
-            k_out: list[dict] = []
-            remap_stats = {"remapped": 0, "dropped": 0}
-            if know:
-                kdir = log_dir / "knowledge"
-                kdir.mkdir(parents=True, exist_ok=True)
-            for k in know:
-                obj, st = rewrite_knowledge(k["obj"], new_doc_id, src_to_new)
-                remap_stats["remapped"] += st["remapped"]
-                remap_stats["dropped"] += st["dropped"]
-                dest = kdir / ("%d%s" % (new_doc_id, k["suffix"]))
-                if dest.exists():
-                    raise ShareError("目标产物已存在，拒绝覆盖：%s" % dest)
-                dest.write_text(json.dumps(obj, ensure_ascii=False, indent=2),
-                                encoding="utf-8")
-                written.append(dest)
-                k_out.append({"file": k["name"], "new_file": dest.name,
-                              "new_path": str(dest), "n_points": k["n_points"],
-                              "remapped_refs": st["remapped"], "dropped_refs": st["dropped"]})
+                if FIGURES in members:
+                    for obj in _Entry(zf, FIGURES, _manifest_sha(manifest, FIGURES)).lines():
+                        conn.execute(
+                            "INSERT INTO figure_desc(doc_id,page,page_title,image_hash,model,"
+                            "thinking,tokens_in,tokens_out,cost_cny,n_chunks,created_at,"
+                            "description,no_info) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (new_doc_id, int(obj["page"]), obj.get("page_title"),
+                             obj.get("image_hash") or "", obj.get("model"),
+                             int(obj.get("thinking") or 0), int(obj.get("tokens_in") or 0),
+                             int(obj.get("tokens_out") or 0), float(obj.get("cost_cny") or 0.0),
+                             int(obj.get("n_chunks") or 0), obj.get("created_at") or _now(),
+                             obj.get("description"), int(obj.get("no_info") or 0)))
+
+            k_out, remap_stats, outcomes = _place_content(
+                conn, doc, new_doc_id, records, know, src_to_new, log_dir,
+                conflict_action, written, replaced, reuse)
 
             # 页图：写到本库 logs/figure_desc/<新文件名 stem>/，供"以后重跑识图"复用
             n_pages = 0
@@ -1491,6 +1815,8 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
                                 "检索可能只能靠 LIKE 兜底" % fts.get("probe"))
         conn.commit()
     except BaseException:
+        for path, previous in replaced.items():
+            _atomic_artifact(path, previous)
         try:
             conn.rollback()
         except sqlite3.Error:
@@ -1542,10 +1868,11 @@ def import_package(zip_path: Path | str, *, db_path: Path | str | None = None,
         "status": "imported", "doc_id": new_doc_id, "title": doc["title"],
         "zip": str(zp), "package_sha256": pkg_sha,
         "path": rel, "file": new_file.name if new_file else None,
-        "counts": {"documents": 1, "chunks": n, "embeddings": m, "figure_desc": n_fig,
+        "counts": {"documents": int(not reuse), "chunks": n, "embeddings": m, "figure_desc": n_fig,
                    "knowledge": len(k_out), "pages": n_pages},
         "source": info["source"], "embedding": {"model": pm, "dim": pd},
         "knowledge": k_out, "remap": remap_stats,
+        "content_report": share_content.report(outcomes),
         "knowledge_vector": kp_vector_result,
         "fts": fts, "warnings": warnings,
         "model_calls": 0, "cost_cny": 0.0,

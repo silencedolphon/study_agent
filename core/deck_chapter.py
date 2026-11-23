@@ -6,7 +6,7 @@ import os
 import threading
 from pathlib import Path
 
-from . import config, english_terms, kp_build, preview, terms_store, textbook_kp
+from . import config, english_terms, kp_build, preview, share_content, terms_store, textbook_kp
 
 _LOCK = threading.RLock()
 
@@ -72,6 +72,16 @@ def chapter_has_courseware_terms(conn, book_id, chapter, *, log_dir=None) -> dic
     book_id, chapter = int(book_id), int(chapter)
     with _LOCK:
         links = _read(_path(log_dir))
+    if share_content.has_table(conn, "share_chapter_links"):
+        book = _doc(conn, book_id)
+        content_hash = conn.execute("SELECT content_hash FROM documents WHERE id=?", (book_id,)).fetchone()[0]
+        for row in conn.execute(
+            "SELECT l.doc_id,l.target,d.path FROM share_chapter_links l JOIN documents d ON d.id=l.doc_id "
+            "AND d.content_hash=l.source_hash"):
+            target = json.loads(row["target"])
+            if target.get("key") == "content:" + content_hash:
+                links[str(row["doc_id"])] = {"deck_path": row["path"], "book_path": book["path"],
+                                               "book_id": book_id, "chapter": target.get("chapter")}
     for raw_id, entry in links.items():
         if not isinstance(entry, dict):
             continue
@@ -157,6 +167,9 @@ def save(conn, doc_id, book_id, chapter, *, log_dir=None, db_path=None):
         finally:
             if tmp.exists():
                 tmp.unlink()
+    if share_content.has_table(conn, "share_chapter_links"):
+        with conn:
+            conn.execute("DELETE FROM share_chapter_links WHERE doc_id=?", (doc_id,))
     return {"ok": True}
 
 
@@ -167,6 +180,19 @@ def get(conn, doc_id, *, log_dir=None, db_path=None):
     with _LOCK:
         entry = _read(_path(log_dir)).get(str(deck["id"]))
     empty = {"ok": True, "binding": None, "exam_focus": [], "terms": []}
+    if share_content.has_table(conn, "share_chapter_links"):
+        portable = conn.execute(
+            "SELECT l.target,d.content_hash FROM share_chapter_links l JOIN documents d ON d.id=l.doc_id "
+            "WHERE l.doc_id=? AND l.source_hash=d.content_hash", (doc_id,)).fetchone()
+        if portable:
+            target = json.loads(portable["target"])
+            key = share_content._local_chapter(conn, target, dict(portable) | {"id": doc_id, "title": deck["title"]})
+            if not key:
+                return {**empty, "warning": "等待导入关联的教材：" + str(target.get("title") or "")}
+            book_id, chapter = (int(part) for part in key.split(":"))
+            book = _doc(conn, book_id)
+            entry = {"deck_path": deck["path"], "book_id": book_id,
+                     "book_path": book["path"], "chapter": chapter}
     if not isinstance(entry, dict) or entry.get("deck_path") != deck["path"]:
         return empty
     try:

@@ -313,7 +313,7 @@ async function openDocDelByIds(ids, expected_subject){
     </div>
     <details class="docs-extra"><summary>查看详细影响</summary><div class="docs-extra-body small muted">
       预计删除 ${art} 个整理文件（约 ${artMb.toFixed(1)} MB）和
-      ${(pv && pv.decks_total) || 0} 组课件图片。相关知识点会解除与这些资料的关联；
+      ${(pv && pv.decks_total) || 0} 组课件图片。源文件的题库条目和待归类子文件也会清理。相关知识点会解除与这些资料的关联；
       失去全部出处的知识点及其复习记录会一并清理。
     </div></details>
     <div class="sub" style="margin-top:14px;line-height:1.95;border-top:1px solid var(--line);padding-top:12px">
@@ -428,6 +428,7 @@ async function openCleanup(){
 
 async function openDoc(id){
   const d = await api('/api/doc?id='+id);
+  if (!d.document){ toast(d.error || '源文件已失效'); return; }
   const tab = 'main';
   if (DOCS_TAB !== tab || CURRENT !== 'docs') {
     DOCS_TAB = tab;
@@ -447,7 +448,10 @@ async function openDoc(id){
     ${d.document.warnings && d.document.warnings!=='[]'
       ? `<div class="small" style="color:var(--warn);margin-bottom:10px">⚠ ${
           esc(JSON.parse(d.document.warnings).join('；'))}</div>` : ''}
+    <div class="row" style="margin-bottom:10px"><button class="ghost" id="doc-share-children">查看子文件 / 导出分享包</button></div>
     <table><thead><tr><th>章节</th><th>出处</th><th>块数</th><th>字数</th></tr>
     </thead><tbody>${o}</tbody></table>`);
+  $('#doc-share-children').onclick = () => openShareExport(id, d.document.title || d.document.path);
+
 }
 

@@ -42,9 +42,9 @@ async function viewQuestionBank(subject, tabs){
       ${item.options.length ? '<ul>' + item.options.map(o => '<li>' + mdInline(o) + '</li>').join('') + '</ul>' : ''}
       ${item.answer ? '<details><summary>查看原文答案</summary>' + mdToHtml(item.answer) +
         (item.answer_refs || []).map(ref => `<button class="text-btn" data-qb-chunk="${Number(ref.chunk_id)}">答案出处 ${esc(ref.ref || '')}</button>`).join(' ') + '</details>' : ''}
-      <p class="small muted">${esc(item.title)} ${item.refs.map(ref => `<button class="text-btn" data-qb-chunk="${Number(ref.chunk_id)}">${esc(ref.ref || '查看出处')}</button>`).join(' ')}</p>
+      <p class="small muted"><button class="text-btn" data-qb-source="${Number(item.doc_id)}">来源 · ${esc(item.title)}</button> ${item.refs.map(ref => `<button class="text-btn" data-qb-chunk="${Number(ref.chunk_id)}">${esc(ref.ref || '查看出处')}</button>`).join(' ')}</p>
       <div class="row"><label>移到章节 <select aria-label="移到章节"><option value="">待归章</option>${chapterOptions(data.chapters)}</select></label>
-      <button class="ghost" data-qb-assign="${esc(item.id)}">保存章节</button></div></details>`).join('');
+      <button class="ghost" data-qb-assign="${esc(item.id)}">保存章节</button><button class="ghost" data-qb-share="${esc(item.share_item_id)}">分享此题</button></div></details>`).join('');
     const count = data.groups.find(g => g.key === requested)?.count || 0;
     questionsHost.innerHTML = rows || '<p class="small muted">本章暂时没有题目。</p>';
     if (count > 40) questionsHost.insertAdjacentHTML('beforeend', `<div class="row">
@@ -57,6 +57,12 @@ async function viewQuestionBank(subject, tabs){
     }
     questionsHost.querySelectorAll('[data-qb-chunk]').forEach(button => {
       button.onclick = () => openChunk(Number(button.dataset.qbChunk)).catch(e => toast(e.message));
+    });
+    questionsHost.querySelectorAll('[data-qb-source]').forEach(button => {
+      button.onclick = () => openDoc(Number(button.dataset.qbSource));
+    });
+    questionsHost.querySelectorAll('[data-qb-share]').forEach((button, i) => {
+      button.onclick = () => openShareExport(data.items[i].doc_id, data.items[i].title, button.dataset.qbShare);
     });
     questionsHost.querySelectorAll('[data-qb-assign]').forEach((button, i) => {
       const select = $('select', button.closest('.qbank-item'));

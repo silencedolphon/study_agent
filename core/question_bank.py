@@ -11,7 +11,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agent_bridge, chat, db, deck_chapter, ingest, kp_build, question_bank_layout as layout, textbook
+from . import agent_bridge, chat, db, deck_chapter, ingest, kp_build, question_bank_layout as layout, share_content, textbook
 from .pipeline_runtime import context
 from .pipeline_runtime.state import RemoteUnknownError
 
@@ -423,6 +423,9 @@ def _save_chapter(conn, doc, candidates, answers):
         for ident, item in items.items():
             if not item["answer"] and prior.get(ident, {}).get("answer"):
                 item.update(answer=prior[ident]["answer"], answer_refs=prior[ident].get("answer_refs", []))
+            item["source_tag"] = share_content.source_tag(doc)
+            if prior.get(ident, {}).get("share_source_id"):
+                item["share_source_id"] = prior[ident]["share_source_id"]
             conn.execute("INSERT INTO question_bank_items(id,doc_id,chunk_id,source_hash,chapter,payload) "
                          "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET chunk_id=excluded.chunk_id, "
                          "source_hash=excluded.source_hash, payload=excluded.payload, chapter=CASE WHEN "
@@ -552,9 +555,20 @@ def view(conn, chapter, offset):
     chapters, _, _ = _catalog(conn, docs)
     grouped, items = [], []
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='question_bank_items'").fetchone():
-        active = " FROM question_bank_items q JOIN documents d ON d.id=q.doc_id AND d.content_hash=q.source_hash "
+        # A portable chapter can resolve after the related textbook is imported.
+        cte = """WITH active AS (
+            SELECT q.id,q.rowid AS seq,q.payload,q.doc_id,d.title,d.content_hash,
+                CASE WHEN q.manual_chapter OR q.chapter <> '' THEN q.chapter
+                     ELSE COALESCE((
+                         SELECT other.id || ':' || json_extract(q.payload,'$.portable_chapter.chapter')
+                         FROM documents other
+                         WHERE 'content:' || other.content_hash = json_extract(q.payload,'$.portable_chapter.key')
+                         LIMIT 1
+                     ), '') END AS chapter
+            FROM question_bank_items q JOIN documents d ON d.id=q.doc_id AND d.content_hash=q.source_hash
+        ) """
         counts = Counter()
-        for row in conn.execute("SELECT q.chapter,count(*) AS n" + active + "GROUP BY q.chapter"):
+        for row in conn.execute(cte + "SELECT chapter,count(*) AS n FROM active GROUP BY chapter"):
             key = row["chapter"] if row["chapter"] in chapters else ""
             counts[key] += row["n"]
         grouped = [{**c, "count": counts[k]} for k, c in chapters.items() if counts[k]]
@@ -563,12 +577,13 @@ def view(conn, chapter, offset):
         if chapter is not None:
             if chapter and chapter not in chapters:
                 raise ValueError("章节已变化，请重新选择")
-            # Removed chapter keys can still be opened and reassigned under 待归章.
-            where = "WHERE q.chapter=?" if chapter else "WHERE q.chapter NOT IN (SELECT value FROM json_each(?))"
+            where = "WHERE chapter=?" if chapter else "WHERE chapter NOT IN (SELECT value FROM json_each(?))"
             param = chapter or _json(list(chapters))
-            for row in conn.execute("SELECT q.id,q.payload,q.chapter,d.title" + active + where +
-                                    " ORDER BY q.rowid LIMIT 40 OFFSET ?", (param, max(0, offset))):
-                items.append({**json.loads(row["payload"]), "id": row["id"], "title": row["title"],
+            for row in conn.execute(cte + "SELECT * FROM active " + where +
+                                    " ORDER BY seq LIMIT 40 OFFSET ?", (param, max(0, offset))):
+                item = json.loads(row["payload"])
+                items.append({**item, "id": row["id"], "title": row["title"], "doc_id": row["doc_id"],
+                              "share_item_id": share_content.question_id(row, item),
                               "chapter": row["chapter"] if row["chapter"] in chapters else ""})
     return {"sources": [{key: doc[key] for key in ("id", "title", "category")} for doc in docs],
             "groups": grouped, "chapters": list(chapters.values()), "items": items}

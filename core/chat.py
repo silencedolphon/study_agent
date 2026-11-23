@@ -46,9 +46,11 @@ else:
 
 try:
     from .pipeline_runtime import context as pipeline_context
+    from .pipeline_runtime import model_http
     from .pipeline_runtime import state as runtime_state
 except Exception:  # noqa: BLE001  （单文件自测模式）
     from core.pipeline_runtime import context as pipeline_context
+    from core.pipeline_runtime import model_http
     from core.pipeline_runtime import state as runtime_state
 
 # DeepSeek 官方端点与模型
@@ -749,7 +751,7 @@ def _chat_once_unthrottled(messages: list[dict], model: str = CHAT_MODEL,
     )
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with model_http.open_model(req, timeout=timeout) as r:
             body = json.loads(r.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         if e.code in (502, 504):
@@ -761,8 +763,8 @@ def _chat_once_unthrottled(messages: list[dict], model: str = CHAT_MODEL,
         # P0-B：网络发送后超时/断连/没回包 —— **结果未知，禁止自动重试**。
         if runtime_state.request_may_have_been_sent(e):
             raise runtime_state.RemoteUnknownError(
-                "调用模型失败（结果未知，可能已发出，禁止自动重试）：%s: %s"
-                % (type(e).__name__, e), cause=e) from None
+                "调用模型失败（%s 路由，结果未知，禁止自动重试）：%s: %s"
+                % (model_http.route(req.full_url), type(e).__name__, e), cause=e) from None
         raise ChatError(f"调用模型失败：{type(e).__name__}: {e}") from None
     elapsed = time.perf_counter() - t0
     choice = (body.get("choices") or [{}])[0]
@@ -892,7 +894,7 @@ def _stream_chat_unthrottled(messages: list[dict], model: str = CHAT_MODEL,
         method="POST",
     )
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        resp = model_http.open_model(req, timeout=timeout)
     except urllib.error.HTTPError as e:
         if e.code in (502, 504):
             raise runtime_state.RemoteUnknownError(

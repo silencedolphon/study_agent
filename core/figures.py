@@ -42,6 +42,7 @@ from pathlib import Path
 
 from . import config, db
 from .pipeline_runtime import context as runtime_context
+from .pipeline_runtime import model_http
 
 # ---------------------------------------------------------------- 提示词
 
@@ -2163,7 +2164,7 @@ def _http_post_unthrottled(url: str, payload: dict, key: str, timeout: int = 300
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with model_http.open_model(req, timeout=timeout) as r:
                 return r.status, json.loads(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
             # 服务端有响应 = 已知失败；429/5xx 仍按旧策略重试（P0-B 允许）。
@@ -2179,8 +2180,8 @@ def _http_post_unthrottled(url: str, payload: dict, key: str, timeout: int = 300
             # 其它发送后异常（如响应解析失败）同样不重发，避免重复计费。
             from .pipeline_runtime import state as runtime_state
             if runtime_state.request_may_have_been_sent(e):
-                return (0, "remote_unknown: %s: %s（结果未知，禁止自动重试）"
-                        % (type(e).__name__, e))
+                return (0, "remote_unknown: %s: %s（%s 路由，结果未知，禁止自动重试）"
+                        % (type(e).__name__, e, model_http.route(url)))
             return (0, f"{type(e).__name__}: {e}")
         if attempt < retries:
             time.sleep(wait * (attempt + 1))

@@ -214,7 +214,7 @@ _KP_E1_HINTS = ('封面', '封皮', '学习目标', '掌握要求', '目录', '�
                 '参考文献', 'thank you', '谢谢', '版权', '声明')
 _TERMS_FIELDS = ('term', 'en', 'en_source', 'def', 'first_page', 'first_kp_id',
                  'first_kp_name', 'kp_ids', 'n_occurrences', 'relevance_score',
-                 'relevance_kp_id', 'relevance_kp_name', 'source', 'external_sources')
+                 'relevance_kp_id', 'relevance_kp_name', 'source', 'external_sources', 'source_tag')
 _WIN_BAD_CHARS = '<>:"/|?*' + chr(92)
 
 
@@ -1928,9 +1928,14 @@ def api_summary_kp(doc_id, kp_id, conn):
                 and matches_legacy_root(path[0], artifact_title, artifact_title)):
             path[0] = corrected_title
 
+    source_doc = conn.execute("SELECT title,content_hash,extra FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if source_doc and share_mod.share_content.source_invalid(dict(source_doc), _artifact_load(doc_id)["doc"], _artifact_file(doc_id)):
+        return {"error": "源文件版本已更新，此知识点的旧出处已失效，请重新整理课件"}
     return {
         "doc_id": doc_id,
         "kp_id": str(kp.get("id") or ""),
+        "share_item_id": share_mod.share_content.courseware_point_id(source_doc, kp) if source_doc else "",
+        "source_title": source_doc["title"] if source_doc else "",
         "name": str(kp.get("name") or ""),
         "node_name": str(kp.get("node_name") or ""),
         "path": path,
@@ -2184,7 +2189,7 @@ def api_mindmap(conn, doc_id):
 
     art = _artifact_load(doc_id)
     row = conn.execute(
-        "SELECT id, title, kind, path, n_chunks, status FROM documents WHERE id=?",
+        "SELECT id,title,kind,path,n_chunks,status,content_hash,extra FROM documents WHERE id=?",
         (doc_id,)).fetchone()
     doc = dict(row) if row else {}
     from core.document_titles import display_titles, matches_legacy_root
@@ -2192,7 +2197,8 @@ def api_mindmap(conn, doc_id):
     meta = art.get("meta") if isinstance(art.get("meta"), dict) else {}
     sm = art.get("summary") or {}
     state = str(art.get("state") or _ARTIFACT_NONE)
-    ok = state == _ARTIFACT_V2_STATE
+    invalid_source = bool(row and share_mod.share_content.source_invalid(doc, art.get("doc"), _artifact_file(doc_id)))
+    ok = state == _ARTIFACT_V2_STATE and not invalid_source
     idx = _lkp_index(doc_id)
 
     out = {
@@ -2203,7 +2209,7 @@ def api_mindmap(conn, doc_id):
         "data_source": "artifact",
         "artifact_state": state,
         "artifact_source": str(art.get("source") or art.get("name") or ""),
-        "artifact_message": "" if ok else _ARTIFACT_MESSAGE.get(state, ""),
+        "artifact_message": "源文件版本已更新，请重新整理课件" if invalid_source else "" if ok else _ARTIFACT_MESSAGE.get(state, ""),
         "has_structure": ok,
         "has_outline": ok,
         "pipeline_version": str(sm.get("pipeline_version") or ""),
@@ -2442,11 +2448,14 @@ def api_terms(conn, doc_id):
     `terms_state` + 一句人话（`message`）——前端据此给空态，不是报错。
     """
     if doc_id <= 0:
+        textbooks = {int(row[0]) for row in conn.execute("SELECT id FROM documents WHERE role='textbook'")}
         items = []
         for d in _artifact_doc_list(conn):
             try:
                 did = int(d["doc_id"])
             except (TypeError, ValueError):
+                continue
+            if did in textbooks:
                 continue
             art = _artifact_load(did)
             pl = _terms_payload(art, did)
@@ -2464,7 +2473,7 @@ def api_terms(conn, doc_id):
     row = None
     try:
         row = conn.execute(
-            "SELECT id, title FROM documents WHERE id=?",
+            "SELECT id,title,content_hash FROM documents WHERE id=?",
             (doc_id,)).fetchone()
     except sqlite3.Error:
         row = None
@@ -2479,6 +2488,18 @@ def api_terms(conn, doc_id):
         "n_kps": int((art.get("summary") or {}).get("n_kps") or 0),
     }
     out.update(_terms_payload(art, doc_id))
+    for term in out["terms"]:
+        tag = term.get("source_tag")
+        if not isinstance(tag, dict) and row is not None and term["source"] not in ("external_material", "textbook_chapter"):
+            tag = share_mod.share_content.source_tag(row)
+        if isinstance(tag, dict):
+            if row is not None and tag.get("key") == share_mod.share_content.source_tag(row)["key"]:
+                source = row
+            else:
+                source = share_mod.share_content.by_source(conn, tag)
+            term["source_doc_id"] = source["id"] if source is not None else 0
+            term["source_title"] = source["title"] if source is not None else tag.get("title")
+            term["source_missing"] = bool(tag.get("key") and source is None)
     return out
 
 
@@ -6382,6 +6403,8 @@ def _subject_running() -> str:
         return "教材知识点整理"
     if knowledge_links_ai_mod.is_running():
         return "知识联系分析"
+    if _external_terms_mod().is_running():
+        return "外部名词整理"
 
     if question_bank.running():
         return "批量摘取题目"
@@ -6515,19 +6538,11 @@ def _share_target(slug):
 
 
 def _share_source_file(tgt, doc):
-    """课件在本机的源文件（回退规则与 `share.export_doc` 逐字一致）。"""
-    src = Path(str(doc.get("abs_path") or ""))
-    if src.is_file():
-        return src
-    alt = Path(tgt["root"]) / str(doc.get("path") or "")
-    if alt.is_file():
-        return alt
-    return None
+    return share_mod.share_content.original_file(doc, tgt["root"], tgt["raw_dir"])
 
 
 def _share_page_files(tgt, doc):
-    src = _share_source_file(tgt, doc)
-    stem = src.name if src is not None else Path(str(doc.get("path") or "")).name
+    stem = Path(str(doc.get("path") or "")).name
     pdir = figure_cache_mod.directory(tgt["log_dir"], doc.get("id"), doc.get("content_hash"))
     if pdir is None or not pdir.is_dir():
         if figure_cache_mod.document_directories(tgt["log_dir"], doc.get("id")):
@@ -6624,6 +6639,11 @@ def api_share_estimate(payload):
         n_fig = conn.execute(
             "SELECT COUNT(*) n, COALESCE(SUM(LENGTH(COALESCE(description,''))+LENGTH(COALESCE(thinking,''))),0) b FROM figure_desc WHERE doc_id=?",
             (doc_id,)).fetchone()
+        invalid = []
+        records, _ = share_mod.share_content.inventory(conn, row, tgt["log_dir"], invalid)
+        children = share_mod.share_content.public(records)
+    except (ValueError, OSError) as error:
+        return {"error": str(error)}
     finally:
         conn.close()
 
@@ -6645,10 +6665,10 @@ def api_share_estimate(payload):
 
     emb_b64 = (int(n_emb['b']) + 2) // 3 * 4
     parts = {
-        'chunks': int(n_chunk['b']) + emb_b64,
-        'embeddings': int(n_fig['b']) + sum(k['bytes'] for k in know),
-        'figure_desc': orig_b,
-        'knowledge': pages_b,
+        'chunks': int(n_chunk['b']),
+        'embeddings': emb_b64,
+        'figure_desc': int(n_fig['b']),
+        'knowledge': sum(k['bytes'] for k in know) + len(share_mod.share_content.canonical(records).encode()),
         'original': orig_b,
         'pages': pages_b,
     }
@@ -6656,11 +6676,12 @@ def api_share_estimate(payload):
             + parts['knowledge'] + 20480)
 
     def est(extra: int) -> list[int]:
-        return [comp + extra, int((comp + extra) * 0.25)]
+        return [int(comp * 0.25) + extra, comp + extra]
 
     return {
         'ok': True,
         'doc_id': doc_id,
+        'subject': tgt['slug'],
         'title': row.get('title') or row.get('path'),
         'kind': row.get('kind'),
         'n_chunks': int(n_chunk['n']),
@@ -6671,6 +6692,8 @@ def api_share_estimate(payload):
         'original_name': src.name if src is not None else '',
         'parts': parts,
         'knowledge_files': know,
+        'children': children,
+        'invalid_children': invalid,
         'raw_base': comp,
         'raw_with_original': comp + orig_b,
         'raw_with_pages': comp + pages_b,
@@ -6685,7 +6708,7 @@ def api_share_estimate(payload):
 
 def api_share_export(payload):
     doc_id = int(payload.get("doc_id") or 0)
-    with_original = bool(payload.get("with_original"))
+    with_original = bool(payload.get("with_original", True))
     with_pages = bool(payload.get("with_pages"))
     note = str(payload.get("note") or "")[:200]
     try:
@@ -6693,6 +6716,8 @@ def api_share_export(payload):
     except subjects_mod.SubjectError as e:
         return {"error": str(e)}
 
+    if payload.get("expected_subject", tgt["slug"]) != tgt["slug"]:
+        return {"error": "学科已切换，请重新打开分享包清单"}
     _share_prog_reset()
     t0 = time.time()
     try:
@@ -6703,7 +6728,8 @@ def api_share_export(payload):
                 raw_dir=tgt["raw_dir"], root=tgt["root"],
                 with_original=with_original, with_pages=with_pages,
                 exported_by=str(payload.get("by") or ""), note=note,
-                progress=_share_prog,
+                progress=_share_prog, children=payload.get('children'),
+                minimize_context=payload.get('minimize_context') is True,
             )
     except share_mod.ShareError as e:
         _share_prog_done(str(e))
@@ -6711,7 +6737,7 @@ def api_share_export(payload):
     except Exception as e:
         msg = f"导出失败：{type(e).__name__}: {e}"
         _share_prog_done(msg)
-        return {msg: round(time.time() - t0, 1)}  # TODO(反编译存疑)
+        return {'error': msg, 'elapsed': round(time.time() - t0, 1)}
     _share_prog_done()
     z = Path(res["zip"])
     return {
@@ -6721,6 +6747,7 @@ def api_share_export(payload):
         "name": z.name,
         "bytes": int(res["bytes"]),
         "counts": res["counts"],
+        "children": res["children"],
         "includes": res["includes"],
         "embedding": res["embedding"],
         "n_pages": int(res["n_pages"]),
@@ -6775,6 +6802,8 @@ def api_share_inspect(payload):
         "bytes": int(info["bytes"]),
         "format": man.get("format"),
         "format_version": man.get("format_version"),
+        "board_id": man.get("board_id"),
+        "children": info.get("children") or [],
         "created_at": man.get("created_at"),
         "exported_by": man.get("exported_by") or "",
         "note": man.get("note") or "",
@@ -6852,13 +6881,7 @@ def api_share_inspect(payload):
 
 
 def api_share_import(payload):
-    """把一个分享包导进目标学科库。**零模型调用、零费用**（C-0079 保证）。
-
-    冲突三选一（卡面要求）：skip（默认，不动本库已有的那份）/ duplicate
-    （再导一份副本，同 content_hash 会出现两行，用于对比来源）/ overwrite
-    （**先全量校验新包，通过了才删掉本库那一份**，然后导入）。
-    覆盖的这个顺序不能反：反了就是一个坏包先把用户手里的资料删掉再报错。
-    """
+    """Import into the selected subject using transactional conflict handling."""
     zip_arg = str(payload.get("zip") or "").strip().strip('"').strip("'")
     if not zip_arg:
         return {"error": "请先填写分享包路径"}
@@ -6866,63 +6889,21 @@ def api_share_import(payload):
     if not zp.is_file():
         return {"error": "找不到分享包：%s" % zp, "kind": "package"}
     on_conflict = str(payload.get("on_conflict") or "skip")
-    if on_conflict not in ("skip", "duplicate", "overwrite"):
+    if on_conflict not in ("skip", "merge", "overwrite"):
         return {"error": "未知的冲突处理方式：%s" % on_conflict}
-    if on_conflict == "overwrite":
-        return {"error": "为保护已有资料，请选择跳过或另存一份"}
     try:
         tgt = _share_target(str(payload.get("subject") or ""))
     except subjects_mod.SubjectError as e:
         return {"error": str(e), "kind": "subject"}
     _share_prog_reset()
     t0 = time.time()
-    removed = None
     try:
         with _INGEST_LOCK:
-            if on_conflict == "overwrite" and Path(tgt["db_path"]).is_file():
-                # 先全量校验新包（dry_run=True），通过了才删本库那一份
-                dry = share_mod.import_package(
-                    str(zp),
-                    db_path=tgt["db_path"], log_dir=tgt["log_dir"],
-                    raw_dir=tgt["raw_dir"], root=tgt["root"],
-                    dry_run=True,
-                )
-                hit = dry.get("conflict")
-                if hit:
-                    conn = db.connect(tgt["db_path"])
-                    try:
-                        ch = conn.execute(
-                            "SELECT content_hash FROM documents WHERE id=?",
-                            (int(hit["doc_id"]),),
-                        ).fetchone()["content_hash"]
-                        ids = [
-                            int(r["id"])
-                            for r in conn.execute(
-                                "SELECT id FROM documents WHERE content_hash=? ORDER BY id",
-                                (ch,),
-                            )
-                        ]
-                        removed = {"deleted_doc_ids": [], "chunks_removed": 0}
-                        for did in ids:
-                            # C-0107 修：真值里这条调用是带三个关键字的
-                            # （rebuilt/dashboard/0101-api_delete_docs.py：
-                            # `api_delete_doc(conn, did, delete_file=…,
-                            # purge_orphans=…, dry_run=False)`），重建版漏成了
-                            # `api_delete_doc(conn, did)` ⇒ TypeError。
-                            # 这里是分享导入的"同内容文档去重"：只移除本机索引
-                            # （原文件来自包、不在本机），孤儿清理由外层统一负责。
-                            one = api_delete_doc(conn, did, delete_file=False,
-                                                 purge_orphans=False, dry_run=False)
-                            removed["deleted_doc_ids"].append(int(one["deleted_doc_id"]))
-                            removed["chunks_removed"] += int(one["chunks_removed"])
-                    finally:
-                        conn.close()
-                    _share_prog("remove", 1, 1)
             res = share_mod.import_package(
                 str(zp),
                 db_path=tgt["db_path"], log_dir=tgt["log_dir"],
                 raw_dir=tgt["raw_dir"], root=tgt["root"],
-                duplicate=(on_conflict == "duplicate"),
+                conflict_action=on_conflict,
                 progress=_share_prog,
             )
     except share_mod.ShareError as e:
@@ -6930,7 +6911,6 @@ def api_share_import(payload):
         return {
             "error": str(e),
             "kind": "share",
-            "overwritten": removed,
             "elapsed": round(time.time() - t0, 1),
         }
     except Exception as e:
@@ -6938,7 +6918,6 @@ def api_share_import(payload):
         _share_prog_done(msg)
         return {
             "error": "导入失败：" + msg,
-            "overwritten": removed,
             "elapsed": round(time.time() - t0, 1),
         }
     _share_prog_done()
@@ -6950,7 +6929,7 @@ def api_share_import(payload):
         "zip": res.get("zip"),
         "package_sha256": res.get("package_sha256"),
         "target": {"slug": tgt["slug"], "db": str(tgt["db_path"])},
-        "overwritten": removed,
+        "content_report": res.get("content_report"),
         "warnings": res.get("warnings") or [],
         "knowledge_vector": res.get("knowledge_vector"),
         "model_calls": int(res.get("model_calls") or 0),
@@ -7426,15 +7405,20 @@ class Handler(BaseHTTPRequestHandler):
 
             # 独立的外部名词资料导入：文件只暂存于知识点日志目录，完成后由 worker 清理。
             if u.path == "/api/terms/external/import":
-                run_dir = (Path(config.LOG_DIR) / "knowledge" / "_external_terms_uploads"
-                           / uuid.uuid4().hex)
+                with _lock:
+                    upload_db = Path(config.DB_PATH)
+                    run_dir = (Path(config.LOG_DIR) / "knowledge" / "_external_terms_uploads"
+                               / uuid.uuid4().hex)
                 try:
                     fields = {}
                     saved = _parse_multipart_stream(self, fields, lambda: run_dir)
                     if not saved:
                         raise ValueError("请选择至少一份外部名词资料")
                     paths = [run_dir / item["name"] for item in saved]
-                    result = api_external_terms_start(fields.get("doc_id"), paths, run_dir)
+                    with _lock:
+                        if upload_db != Path(config.DB_PATH):
+                            raise ValueError("上传期间学科已切换，请重新选择课件")
+                        result = api_external_terms_start(fields.get("doc_id"), paths, run_dir)
                     return self._json_auto(result)
                 except Exception as e:  # noqa: BLE001
                     shutil.rmtree(run_dir, ignore_errors=True)

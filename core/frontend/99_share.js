@@ -30,7 +30,18 @@ function shareWatchProgress(sel){
 }
 
 // ---------- 导出 ----------
-async function openShareExport(docId, title){
+function shareChildGroups(children){
+  const groups = new Map();
+  for (const child of children){
+    const loc = child.location || {};
+    const label = child.unclassified ? '未归类' : [loc.module, loc.tab || loc.slot].filter(Boolean).join(' / ');
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(child);
+  }
+  return [...groups];
+}
+
+async function openShareExport(docId, title, onlyChild){
   modal(`<h2>导出分享包</h2>
     <div class="sub" style="margin-bottom:10px">${esc(title||'')}</div>
     <div id="she-body"><div class="empty">正在估算体积…</div></div>`);
@@ -45,13 +56,21 @@ async function openShareExport(docId, title){
   }
   const b = $('#she-body');
   if (!b) return;                       // 用户已经关掉了窗口
-  const knowN = (e.knowledge_files||[]).length;
+  if (e.error){ b.innerHTML = '<div class="empty">' + esc(e.error) + '</div>'; return; }
+  const groups = shareChildGroups(e.children || []);
+  const checklist = groups.map(([label, entries]) =>
+    `<details style="margin:8px 0"><summary>${esc(label)} · ${entries.length} 项</summary>
+      ${entries.map(child => `<label class="row" style="padding:4px 0">
+        <input type="checkbox" name="she-child" value="${esc(child.id)}" ${!onlyChild || onlyChild === child.id ? 'checked' : ''}>
+        <span>${esc(child.title)}${child.count > 1 ? '（'+child.count+' 条）' : ''}${child.unclassified ? ' · ' + esc(child.reason || '待归类') : ''}</span>
+      </label>`).join('')}</details>`).join('');
+  const knowN = (e.children||[]).length;
   b.innerHTML = `
     <div class="sub">切块 <b>${e.n_chunks}</b> · 向量 <b>${e.n_embeddings}</b> ·
-      识图描述 <b>${e.n_figures}</b> 页 · 知识点产物 <b>${knowN}</b> 个${
+      识图描述 <b>${e.n_figures}</b> 页 · 子文件 <b>${knowN}</b> 项${
       e.n_pages ? ` · 识图页图 <b>${e.n_pages}</b> 张` : ''}</div>
     <label class="row" style="margin-top:12px;cursor:pointer">
-      <input type="checkbox" id="she-orig" ${e.has_original ? '' : 'disabled'}>
+      <input type="checkbox" id="she-orig" ${e.has_original ? (onlyChild ? '' : 'checked') : 'disabled'}>
       <span>包含原资料文件${e.has_original
         ? `（${fmtSize(e.parts.original)}${e.original_name ? '：' + esc(e.original_name) : ''}）`
         : '（本机找不到源文件，不可选）'}</span>
@@ -62,6 +81,16 @@ async function openShareExport(docId, title){
         ? `（${e.n_pages} 张 / ${fmtSize(e.parts.pages)}，体积最大的一项）`
         : '（本机没有渲染好的页图，不可选）'}</span>
     </label>
+    <div class="card" style="margin-top:12px;padding:10px">
+      <div class="row"><b>子文件</b><span id="she-selection" class="sub"></span>
+        <button type="button" class="ghost" id="she-all">全选</button>
+        <button type="button" class="ghost" id="she-none">取消全选</button></div>
+      <div id="she-items" style="max-height:250px;overflow:auto">${checklist || '<div class="sub">此源文件暂无子文件。</div>'}</div>
+      ${(e.invalid_children || []).length ? '<p class="sub">有 ' + e.invalid_children.length
+        + ' 个旧产物的源文件已更新，重新整理后可导出。</p>' : ''}
+      <label class="row"><input type="checkbox" id="she-limited" ${onlyChild ? 'checked' : ''}>
+        只带所选子文件用到的切块和向量</label>
+    </div>
     <div class="card" style="margin-top:12px;padding:10px">
       <div class="row"><span class="muted">预估包体积</span><b id="she-est"></b></div>
       <div class="sub" style="margin-top:4px">${esc(e.note)}</div>
@@ -77,17 +106,29 @@ async function openShareExport(docId, title){
     const r = (o && pg) ? e.est_with_both
       : (o ? e.est_with_original : (pg ? e.est_with_pages : e.est_base));
     const t = $('#she-est');
-    if (t) t.textContent = fmtRange(r[0], r[1]);
+    if (t) t.textContent = $('#she-limited').checked ? '按所选子文件计算' : fmtRange(r[0], r[1]);
   };
   if ($('#she-orig')) $('#she-orig').onchange = upd;
   if ($('#she-pages')) $('#she-pages').onchange = upd;
+  $('#she-limited').onchange = upd;
+  const checks = [...b.querySelectorAll('[name="she-child"]')];
+  const recount = () => { $('#she-selection').textContent = '已选 ' + checks.filter(c => c.checked).length + ' 项'; };
+  $('#she-items').onchange = recount;
+  for (const [id, checked] of [['she-all',true],['she-none',false]]){
+    $('#'+id).onclick = () => { checks.forEach(c => { c.checked = checked; }); recount(); };
+  }
+  if (onlyChild) checks.find(c => c.checked)?.closest('details')?.setAttribute('open', '');
+  recount();
   upd();
-  $('#she-go').onclick = () => shareExportStart(docId);
+  $('#she-go').onclick = () => shareExportStart(docId, e.subject);
 }
 
-async function shareExportStart(docId){
+async function shareExportStart(docId, subject){
   const go = $('#she-go');
-  const body = {doc_id: docId,
+  const checks = [...document.querySelectorAll('#she-items [name="she-child"]')];
+  const selected = checks.filter(c => c.checked).map(c => c.value);
+  const body = {doc_id: docId, children: selected, expected_subject: subject,
+    minimize_context: $('#she-limited')?.checked === true,
     with_original: !!($('#she-orig') && $('#she-orig').checked),
     with_pages: !!($('#she-pages') && $('#she-pages').checked)};
   if (go){ go.disabled = true; go.textContent = '导出中…'; }
@@ -102,7 +143,8 @@ async function shareExportStart(docId){
     return;
   }
   if (SHARE_TIMER){ clearInterval(SHARE_TIMER); SHARE_TIMER = null; }
-  shareExportResult(r);
+  if (r.error) shareExportFail(r.error);
+  else shareExportResult(r);
 }
 
 function shareExportFail(msg){
@@ -127,6 +169,7 @@ function shareExportResult(r){
         <span class="badge">切块 ${c.chunks}</span>
         <span class="badge">向量 ${c.embeddings}</span>
         <span class="badge">识图描述 ${c.figure_desc}</span>
+        <span class="badge">子文件 ${(r.children||[]).length}</span>
         <span class="badge">页图 ${r.n_pages}</span>
         <span class="badge">${r.includes && r.includes.original ? '含原文件' : '不含原文件'}</span>
         <span class="badge">用时 ${r.elapsed}s</span>
@@ -242,6 +285,7 @@ async function shareInspect(zip){
   const emb = m.embedding || {};
   const inc = m.includes || {};
   const src = m.source || {};
+  const children = shareChildGroups(m.children || []);
   const know = (m.knowledge||[]).length
     ? (m.knowledge||[]).map(k => `${esc(k.name)}（${k.n_points} 条）`).join('、') : '无';
   const subsList = (subs && subs.subjects) ? subs.subjects : [];
@@ -252,7 +296,7 @@ async function shareInspect(zip){
   box.innerHTML = `
     <div class="card" style="margin-top:12px">
       <h2>${esc(m.title || '(无标题)')}</h2>
-      <div class="sub">来源：${esc(src.subject || '未知学科')} · doc#${esc(src.doc_id)} ·
+      <div class="sub">来源 ${esc(src.subject || '未知学科')} · 格式 v${esc(m.format_version)} ·
         导出于 ${esc(m.created_at || '未知时间')}${
         m.exported_by ? ' · 导出者 ' + esc(m.exported_by) : ''}</div>
       <div class="row" style="margin-top:8px">
@@ -263,7 +307,9 @@ async function shareInspect(zip){
         <span class="badge">${inc.original ? '含原资料文件' : '不含原资料文件'}</span>
         <span class="badge">${inc.pages ? ('识图页图 ' + inc.pages + ' 张') : '不含页图'}</span>
       </div>
-      <div class="sub" style="margin-top:8px">知识点产物：${know}</div>
+      <div class="sub" style="margin-top:8px">${children.length
+        ? children.map(([loc, entries]) => esc(loc) + ' ' + entries.length + ' 项').join(' · ')
+        : '知识点产物 ' + know}</div>
       <div class="sub">包内 ${m.n_entries} 个条目；导入预计 <b>${m.est_seconds} 秒</b>
         （纯本机写库，0 次模型调用、CNY 0）</div>
       ${(m.entry_total > (m.entries||[]).length) ? `<div class="sub">占体积最大的是：${
@@ -284,16 +330,18 @@ async function shareInspect(zip){
         <div class="sub" style="white-space:pre-wrap;margin-top:6px">${em(m.reason)}</div>
       </div>`}
       ${m.conflict ? `<div class="card" style="margin-top:10px;padding:10px;
-        border-color:#7a5a1e;background:#2a2113">
-        <b>本库已有同一份课件</b>：doc#${m.conflict.doc_id} ${esc(m.conflict.title || '')}
+        border-color:var(--border)">
+        <b>本库已有同一源文件</b> · ${esc(m.conflict.title || '')}
         <div class="sub" style="margin-top:4px">${esc(m.conflict.path || '')}</div>
         <div class="row" style="margin-top:8px">
           <label class="row" style="cursor:pointer">
             <input type="radio" name="shi-cf" value="skip" checked> 跳过（不动已有的）</label>
           <label class="row" style="cursor:pointer">
-            <input type="radio" name="shi-cf" value="duplicate"> 另存一份（两份并存）</label>
+            <input type="radio" name="shi-cf" value="merge"> 合并</label>
+          <label class="row" style="cursor:pointer">
+            <input type="radio" name="shi-cf" value="overwrite"> 覆盖</label>
         </div>
-        <div class="sub" style="margin-top:6px">为保护已有资料，导入不会覆盖已有内容。</div>
+        <div class="sub" style="margin-top:6px">合并会补入缺失的内容，覆盖会更新包中匹配的子文件。</div>
       </div>` : ''}
       ${m.db_note ? `<div class="sub" style="margin-top:8px">${esc(m.db_note)}</div>` : ''}
       <div class="row" style="margin-top:12px">
@@ -317,7 +365,7 @@ async function shareImportStart(zip){
   const onConflict = cf ? cf.value : 'skip';
   const go = $('#shi-go');
   if (onConflict === 'overwrite' && !confirm(
-      '「覆盖」会先删掉本库已有的那一份（索引，不动 raw\\ 原文件），再导入这个包。\\n\\n确定继续？')){
+      '覆盖会更新这份分享包中匹配的子文件。确定继续？')){
     return;
   }
   if (go){ go.disabled = true; go.textContent = '导入中…'; }
@@ -334,7 +382,8 @@ async function shareImportStart(zip){
     return;
   }
   if (SHARE_TIMER){ clearInterval(SHARE_TIMER); SHARE_TIMER = null; }
-  shareImportResult(r, zip);
+  if (r.error) shareImportFail(r.error);
+  else shareImportResult(r, zip);
 }
 
 function shareImportFail(msg){
@@ -354,9 +403,9 @@ function shareImportResult(r, zip){
       <div class="sub" style="margin-top:6px">
         本库已有 doc#${r.doc_id} ${esc(r.title || '')}。</div>
       <div class="sub" style="margin-top:6px">
-        此次没有导入包内的章节、预习或知识点。若需导入这些成果，请查看包信息并选「另存一份」。</div>
+        可以重新查看包信息，选择合并或覆盖其中的子文件。</div>
       <div class="row" style="margin-top:14px">
-        <button class="act" id="shi-again">查看并另存一份</button>
+        <button class="act" id="shi-again">查看导入选项</button>
         <button class="act" onclick="closeModal()">知道了</button>
       </div>`);
     $('#shi-again').onclick = () => openShareImport(zip || '');
@@ -389,9 +438,10 @@ function shareImportResult(r, zip){
         （日后可追溯是从哪个包来的）</div>` : ''}
       ${r.file ? `<div class="sub">原资料已落到 raw\\：${esc(r.file)}</div>`
                : `<div class="sub">包内不含原文件：已有文字块可检索，查看原文件和按页渲染需要源文件。</div>`}
-      ${r.overwritten ? `<div class="sub">已按你的选择覆盖：先删掉本库已有的同一份
-        （doc#${(r.overwritten.deleted_doc_ids||[]).join('、doc#')}，共
-        ${r.overwritten.chunks_removed} 个切块），再导入这个包。raw\\ 里的原文件没动。</div>` : ''}
+      ${r.content_report ? `<p>归位 ${r.content_report.success} 项 · 跳过 ${r.content_report.skipped} 项 · 未归类 ${r.content_report.unclassified} 项</p>
+        <div class="sub">${Object.entries(r.content_report.locations || {}).map(([place, n]) => esc(place) + ' ' + n + ' 项').join(' · ')}</div>
+        ${(r.content_report.issues || []).length ? `<details><summary>查看处理明细</summary><ul>${r.content_report.issues.map(issue =>
+          '<li>' + esc(issue.title) + ' · ' + esc(issue.reason) + '</li>').join('')}</ul></details>` : ''}` : ''}
       ${(r.knowledge||[]).map(k => `<div class="sub">知识点产物：${esc(k.new_file)}
         （${k.n_points} 条，重映射引用 ${k.remapped_refs} 处）</div>`).join('')}
       ${(r.warnings||[]).length ? `<div class="sub" style="margin-top:6px">${

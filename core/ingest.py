@@ -439,6 +439,7 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     tb_extra = ({"chunk_scheme": TEXTBOOK_CHUNK_SCHEME} if is_textbook else None)
     tb_diag: dict = {}
     kind = extract.detect_kind(path)
+    tb_extra = {**(tb_extra or {}), "original_source": _rel(original_path)}
 
     # 转换/切分两个"前置改造"段落共用：哪一段生效就由哪一段填。
     # （放在这里是因为 legacy 的转换必须排在下面那个 `unsupported` 分支**之前**。）
@@ -551,6 +552,8 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     page_mode = page_chunk_enabled(kind, is_textbook)
 
     content_hash = db.sha256_file(path)
+    if original_path.is_file():
+        tb_extra["original_source_hash"] = (content_hash if original_path == path else db.sha256_file(original_path))
     rel = rel_override or _rel(path)
     row = conn.execute(
         "SELECT id, content_hash, status, n_chunks, role, extra FROM documents WHERE path=?",
@@ -1254,8 +1257,14 @@ def _upsert_doc(conn: sqlite3.Connection, rel: str, path: Path, kind: str,
     # 回填与写入调同一个函数"，corpus 完全照抄这个范式。
     folder = material_folder(path)
     corpus = db.classify_corpus("raw/" + folder + "/item" if folder else rel)
-    row = conn.execute("SELECT id FROM documents WHERE path=?", (rel,)).fetchone()
+    row = conn.execute("SELECT id,content_hash,extra FROM documents WHERE path=?", (rel,)).fetchone()
     if row:
+        from .share_content import document_extra
+        revision = document_extra(dict(row)).get("source_revision_changed_at")
+        if row["content_hash"] != content_hash:
+            revision = now
+        if revision:
+            extra["source_revision_changed_at"] = revision
         conn.execute(
             """
             UPDATE documents SET abs_path=?, kind=?, title=?, content_hash=?,
