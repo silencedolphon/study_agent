@@ -15,7 +15,7 @@ const GUIDE = {
     {title:'切换学科', target:'#subj-btn', text:'不同学科的资料、知识点、错题和笔记彼此独立。点这里切换或新建学科知识库。'},
     {title:'总览', view:'overview', target:'#view .grid', text:'总览集中显示资料、知识点、待复习项目和错题数量，也会列出当前较薄弱的知识点。'},
     {title:'添加资料', view:'docs', target:'#im-go', text:'在“资料”页粘贴本机文件路径并点“导入”；也可以拖放文件。教材、课件和分享包的导入入口都在这页。'},
-    {title:'选择资料库', view:'docs', target:'#docs-tabs', text:'这里切换“教材与课件”和“题库与笔记”两个资料库。文件会按所属资料库分别显示。'},
+    {title:'选择资料库', view:'docs', target:'#docs-tabs', text:'这里切换「资料」和「题库」。先入库课件、教材或考试资料，再到题库批量摘取原题和答案。'},
     {title:'批量入库', view:'docs', target:'#view .docs-batch > summary', text:'展开“批量选择文件入库”，可以一次勾选多份待处理文件。开始前会显示任务数量和费用确认。'},
     {title:'整理课件知识点', view:'kps', target:'#kp-build-open', text:'点“整理课件知识点”后选择要整理的课件。批量任务开始前会显示预计调用和费用；已整理的结果会显示在本页。'},
     {title:'查看课件导图', view:'kps', target:'#mm-box', text:'选好课件后，点“展开导图”旁的箭头可展开整张导图，再点知识点名称即可打开详情；再次点击箭头可收起。更多操作里保留资料和导图的改名入口。教材总结和名词解释也在知识点页中。'},

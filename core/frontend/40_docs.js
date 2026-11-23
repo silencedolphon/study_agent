@@ -2,17 +2,8 @@
 const fmtSize = b => b < 1024 ? b + ' B'
   : (b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(1) + ' MB');
 
-// 资料页的两个子页签（卡 C-0021，方案 §7.2）：教材+课件 = 主库（main），
-// 试题+资料笔记 = 辅库（aux）。
-//
-// 它是**资料页内部的二级状态**，不是主导航——VIEWS 仍是 8 项，不新增条目。
-// 状态只存在内存里（方案 §7.3 选 S1：现状本就没有任何 URL 状态，加 hash 路由
-// 要同步 20+ 处 go() 调用，属独立需求）。刷新回默认，与现状"刷新回问答页"一致。
 let DOCS_TAB = 'main';
-const DOCS_TABS = { main:'教材与课件', aux:'题库与笔记' };
-// 已入库列表**始终**显示库徽章：在 main 页签里要能一眼看出有没有混进试题，
-// 所以即使在 aux 页签（那里每行都是辅库）也不省略。
-const CORPUS_BADGE = { main:{label:'主库', cls:'ok'}, aux:{label:'辅库', cls:'warn'} };
+const DOCS_TABS = { main:'资料', bank:'题库' };
 
 function docsTab(k){
   if (!DOCS_TABS[k] || k === DOCS_TAB) return;
@@ -31,50 +22,21 @@ let DOCS_PAGE_SUBJECT = '';
 async function viewDocs(){
   if (!SUBJ.loaded) await subjLoad();
   const pageSubject = SUBJ.loaded ? SUBJ.cur : '';
+  if (!pageSubject || CURRENT !== 'docs') return;
+  const tabBar = '<div class="card"><div class="row" id="docs-tabs">' +
+    Object.entries(DOCS_TABS).map(([k,label]) => `<button class="ghost ${k === DOCS_TAB ? 'on' : ''}"
+      onclick="docsTab('${k}')">${label}</button>`).join(' ') + '</div></div>';
+  if (DOCS_TAB === 'bank') return viewQuestionBank(pageSubject, tabBar);
   const [docsRes, rawRes] = await Promise.all([api('/api/docs'), api('/api/raw')]);
-  if (!pageSubject || SUBJ.cur !== pageSubject) return;
+  if (SUBJ.cur !== pageSubject || CURRENT !== 'docs' || DOCS_TAB !== 'main') return;
   DOCS_PAGE_SUBJECT = pageSubject;
   const raw = rawRes;
-
-  // 按当前子页签过滤：两个库的文件与已入库文档互不混显。
-  // corpus 由**文件路径**决定（core/db.py 的 classify_corpus），不由文件名决定。
-  const filesOf = k => raw.files.filter(f => (f.corpus||'main') === k);
-  // 「待入库」= 本库里还没入库、且格式支持的文件。
-  // 页签按钮的角标与下面卡片的角标**共用这一个函数**，两处数字必然相等，
-  // 也等于列表里「未入库且支持」的行数。
-  const pendingOf = k => filesOf(k).filter(f => f.state !== 'indexed' && f.supported).length;
-
-  const documents = docsRes.documents.filter(d => (d.corpus||'main') === DOCS_TAB);
-  const rawFiles  = filesOf(DOCS_TAB);
-  const orphans   = (raw.orphans||[]).filter(o => (o.corpus||'main') === DOCS_TAB);
-  // 计数取**本库**那一份（后端的 counts_by_corpus）。若这里仍用全量的 raw.counts，
-  // 角标就会写"两个库加起来"的数，而列表只有当前库的行——正是方案 §7.4 末尾
-  // 点名的那个可见 bug（"4 个待入库"但列表只有 1 个）。
-  // C-0109：末尾 `|| {}` 是防御性兜底——后端若再返回 null 计数（这次的根因就是
-  // `api_raw_list._counts()` 空实现返回 None，counts/counts_by_corpus 全是 null），
-  // 这一行会退化成空对象，页面只少几个数字，不再整块抛 TypeError 报红。
-  const c = (raw.counts_by_corpus || {})[DOCS_TAB] || raw.counts || {};
-
-  const pending = pendingOf(DOCS_TAB);
-  // 批量入库（卡 C-0037）的候选：本库里**未入库且格式支持**的文件。
-  // 与上面 pendingOf 用的是同一个判据，所以角标数字与可勾选的行数必然相等。
+  const documents = docsRes.documents;
+  const rawFiles = raw.files;
+  const orphans = raw.orphans || [];
+  const c = raw.counts || {};
   const pendingFiles = rawFiles.filter(f => f.state !== 'indexed' && f.supported);
-
-  // 二级页签栏：选中态复用既有的 .ghost.on 样式，不新增 CSS。
-  const tabBar = Object.entries(DOCS_TABS).map(([k, label]) => {
-    const n = pendingOf(k);
-    return `<button class="ghost ${k === DOCS_TAB ? 'on' : ''}"
-      onclick="docsTab('${k}')">${label}${
-      n ? ` <span class="badge warn">${n} 待入库</span>` : ''}</button>`;
-  }).join(' ');
-
-  // 「放到 raw\ 下的哪个子目录」的候选：本库真实存在的目录 + 本库的推荐目录。
-  // 按当前子页签给候选，是为了让"路径决定库归属"这条规则在 UI 上可见；
-  // 去重是因为推荐目录往往已经存在（如 raw\药理题库\）。
-  const folderOpts = [...new Set([
-    ...((raw.folders_by_corpus || {})[DOCS_TAB] || raw.folders || []).filter(Boolean),
-    ...(DOCS_TAB === 'aux' ? ['药理题库', '学习笔记'] : ['教材', '课件']),
-  ])];
+  const pending = pendingFiles.length;
 
   const rows = documents.map(d => {
     return `
@@ -82,7 +44,7 @@ async function viewDocs(){
       <td class="ds-td"><input type="checkbox" class="ds-cb" data-doc="${d.id}"
         title="选择这份资料"></td>
       <td><a href="#" onclick="openDoc(${d.id});return false">${esc(d.title||d.path)}</a>
-        <div class="small muted">${esc(String(d.kind || '文件').toUpperCase())} · ${d.role === 'textbook' ? '教材' : '课件'}</div></td>
+        <div class="small muted">${esc(d.folder || 'raw/')}</div></td>
       <td>${d.status==='ok'
         ? '<span class="badge ok">正常</span>'
         : `<span class="badge warn">${esc(DOC_STATUS[d.status] || d.status || '待处理')}</span>`}</td>
@@ -108,7 +70,7 @@ async function viewDocs(){
   }).join('');
 
   const fileRows = rawFiles.map(f => {
-    const st = STATE[f.state] || {label:f.state, cls:''};
+    const st = f.chapter_upgrade ? {label:'待按章入库', cls:'warn'} : STATE[f.state] || {label:f.state, cls:''};
     const acts = [];
     let primary = '';
     if (f.state === 'indexed') {
@@ -150,14 +112,12 @@ async function viewDocs(){
     ${docsRes.stale ? `<div class="card" style="border-color:#7a5a1e;background:#2a2113">
       <b>${esc(docsRes.stale)}</b>
     </div>` : ''}
-    <div class="card">
-      <div class="row" id="docs-tabs">${tabBar}</div>
-    </div>
+    ${tabBar}
     <div class="card" style="margin-top:14px">
       <h2>添加资料</h2>
 
       <div class="sub" style="margin:10px 0 6px">
-        粘贴文件或文件夹路径，也可以把文件拖到下方。
+        选择分类文件夹后，粘贴本机路径或拖入文件。教材和考试资料按章入库。
       </div>
       <div class="row">
         <!-- 卡 C-0074：占位符原来写的是作者本机的绝对路径（含开发者用户名）。
@@ -165,12 +125,10 @@ async function viewDocs(){
              又是把开发者痕迹印在了界面上。改成中性示例。 -->
         <input id="im-src" placeholder="粘贴本机路径，如 D:\\我的课件\\第一讲.pdf"
           style="flex:1;min-width:260px">
-        <input id="im-sub" list="folder-list" placeholder="分类文件夹（可选）"
-          style="width:210px">
+        <label>分类文件夹 <select id="im-sub">
+          <option>课件</option><option>教材</option><option>考试资料</option>
+        </select></label>
         <button class="act" id="im-go">导入</button>
-        <datalist id="folder-list">
-          ${folderOpts.map(f=>`<option value="${esc(f)}">`).join('')}
-        </datalist>
       </div>
       <div class="sub" style="margin-top:6px">大文件或整个文件夹建议使用本机路径。</div>
 

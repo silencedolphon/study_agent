@@ -313,7 +313,7 @@ def plan_files(paths: list[str], *, force: bool = False,
     indexed: dict[str, dict] = {}
     try:
         for r in conn.execute(
-                "SELECT path, size_bytes, content_hash, n_chunks FROM documents"):
+                "SELECT path, size_bytes, content_hash, n_chunks,role,extra FROM documents"):
             indexed[_norm_rel(r["path"])] = dict(r)
     finally:
         if own:
@@ -334,9 +334,11 @@ def plan_files(paths: list[str], *, force: bool = False,
         except OSError:
             continue
         rel = ingest_mod._rel(f)  # noqa: SLF001 — 与入库写库用的是同一个口径
+        folder = ingest_mod.material_folder(f)
         hit = indexed.get(_norm_rel(rel))
         will_skip = bool(hit and not force
                          and hit.get("size_bytes") == st.st_size
+                         and ingest_mod.has_chapter_index(folder, hit)
                          and int(hit.get("n_chunks") or 0) > 0)
         legacy_note = ""
         if kind == "legacy":
@@ -345,7 +347,8 @@ def plan_files(paths: list[str], *, force: bool = False,
             dest = extract.legacy_dest(f)
             dest_hit = (indexed.get(_norm_rel(ingest_mod._rel(dest)))
                         if dest.is_file() else None)
-            if dest_hit and not force and int(dest_hit.get("n_chunks") or 0) > 0:
+            if (dest_hit and not force and int(dest_hit.get("n_chunks") or 0) > 0
+                    and ingest_mod.has_chapter_index(folder, dest_hit)):
                 try:
                     fresh = dest.stat().st_mtime >= st.st_mtime
                 except OSError:
@@ -357,10 +360,11 @@ def plan_files(paths: list[str], *, force: bool = False,
                 legacy_note = (f"旧格式：入库时自动转换为 {dest.name}"
                                f"（需本机 Office；源文件保留）")
         pages = _quick_pages(f, kind) if supported else 0
-        needs_fig = bool(with_figures and supported and kind in ("pdf", "pptx"))
+        chapter_ingest = ingest_mod.uses_chapter_ingest(folder)
+        needs_fig = bool(with_figures and supported and not chapter_ingest and kind in ("pdf", "pptx"))
         calls = pages if needs_fig else 0
         cost = calls * EST_COST_PER_PAGE_CNY
-        if not will_skip and supported and kind in ("pdf", "pptx"):
+        if not will_skip and supported and not chapter_ingest and kind in ("pdf", "pptx"):
             cost += EST_COST_PER_OUTLINE_CNY
         items.append({
             "rel": rel, "name": f.name, "kind": kind, "supported": supported,

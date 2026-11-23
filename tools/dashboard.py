@@ -39,6 +39,7 @@ import webbrowser
 import zipfile                    # 卡 C-0080：只读 zip 中央目录（看包里有什么）
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from contextlib import closing
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
@@ -89,6 +90,7 @@ from core import kp_build as kp_build_mod  # noqa: E402
 from core import textbook_kp as textbook_kp_mod  # noqa: E402
 from core import textbook_batch as textbook_batch_mod  # noqa: E402
 from core import deck_chapter as deck_chapter_mod  # noqa: E402
+from core import question_bank  # noqa: E402
 from core import ingest_knowledge as ingest_knowledge_mod  # noqa: E402
 from core import knowledge_links as knowledge_links_mod  # noqa: E402
 from core import knowledge_links_ai as knowledge_links_ai_mod  # noqa: E402
@@ -329,6 +331,7 @@ def api_docs(conn):
     for r in rows:
         d = dict(r)
         d['rel'] = _norm_doc_path(d['path'])
+        d['folder'] = d['rel'].rpartition('/')[0] or 'raw/'
         docs.append(d)
     return {'documents': docs, 'stale': stale_notice()}
 
@@ -3629,7 +3632,7 @@ def api_raw_list(conn):
         # 必须把 raw/ 相对项目根的前缀拼回去：_rel_to_raw() 给的是**相对 raw/** 的
         # 路径，classify_corpus() 判的却是**相对项目根**的 AUX_DIRS 前缀
         # （理由见 _raw_rel_prefix() 的 docstring）。
-        return db.classify_corpus(f'{rel_prefix}/{rel}' if rel_prefix else rel)
+        return db.classify_corpus(f'{rel_prefix or "raw"}/{rel}')
 
     def _counts(sub: list[dict]) -> dict:
         # C-0109：原实现同样被重建丢成 `...`，返回 None —— 这就是资料页红字
@@ -3655,7 +3658,7 @@ def api_raw_list(conn):
 
     indexed = {}
     for r in conn.execute(
-            'SELECT id, path, content_hash, status, n_chunks, indexed_at FROM documents'):
+            'SELECT id, path, content_hash, status, n_chunks, indexed_at,role,extra FROM documents'):
         indexed[_norm_doc_path(r['path'])] = dict(r)
 
     files = []
@@ -3681,6 +3684,7 @@ def api_raw_list(conn):
                 'state': 'new',
             }
             hit = indexed.get(rel)
+            folder = db.raw_folder('raw/' + rel)
             if hit:
                 info['doc_id'] = hit['id']
                 info['n_chunks'] = hit['n_chunks']
@@ -3688,7 +3692,8 @@ def api_raw_list(conn):
                     same = db.sha256_file(f) == hit['content_hash']
                 except OSError:
                     same = False
-                info['state'] = 'indexed' if same else 'changed'
+                info['chapter_upgrade'] = same and not ingest_mod.has_chapter_index(folder, hit)
+                info['state'] = 'indexed' if same and not info['chapter_upgrade'] else 'changed'
             if kind == 'legacy':
                 # 旧格式的"入库结果"记在转换产物上：把源文件显示成已入库，
                 # 否则每次刷新都会提示它有文件待入库。
@@ -3699,7 +3704,7 @@ def api_raw_list(conn):
                     fresh = bool(dhit) and dest.stat().st_mtime >= st.st_mtime
                 except OSError:
                     fresh = False
-                if dhit and fresh:
+                if dhit and fresh and ingest_mod.has_chapter_index(folder, dhit):
                     info['doc_id'] = dhit['id']
                     info['n_chunks'] = dhit['n_chunks']
                     info['state'] = 'indexed'
@@ -6378,6 +6383,9 @@ def _subject_running() -> str:
     if knowledge_links_ai_mod.is_running():
         return "知识联系分析"
 
+    if question_bank.running():
+        return "批量摘取题目"
+
     return ""
 
 
@@ -7143,6 +7151,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, file.read_bytes(), mime)
 
             # ---------------- 进度 / 分享 ----------------
+            if path in ("/api/question-bank", "/api/question-bank/progress"):
+                with _lock:
+                    subject = subjects_mod.current()
+                    if qs.get("subject") and qs["subject"] != subject:
+                        return self._json({"error": "学科已切换，请重新打开题库"}, 409)
+                    if path.endswith("/progress"):
+                        return self._json(question_bank.progress(subject))
+                    chapter = qs.get("chapter")
+                    try:
+                        with closing(_conn(readonly=True)) as bank_conn:
+                            return self._json(question_bank.view(bank_conn, "" if chapter == "unassigned" else chapter,
+                                                                 _int_arg(qs.get("offset"), 0)))
+                    except (ValueError, OSError, sqlite3.Error) as exc:
+                        return self._json({"error": str(exc)}, 400)
             if path == "/api/ingest/progress":
                 return self._json(api_ingest_progress())
             if path == "/api/ingest/options":
@@ -7463,6 +7485,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json_auto(api_settings_reset(payload))
             if u.path == "/api/settings/prompt":
                 return self._json_auto(api_settings_prompt_save(payload))
+
+            if u.path in ("/api/question-bank/start", "/api/question-bank/assign"):
+                with _lock:
+                    subject = subjects_mod.current()
+                    if payload.get("subject") != subject:
+                        return self._json({"error": "学科已切换，请重新打开题库"}, 409)
+                    try:
+                        with closing(_conn()) as bank_conn:
+                            if u.path.endswith("/assign"):
+                                return self._json(question_bank.assign(bank_conn, payload.get("id"), payload.get("chapter")))
+                            busy = _subject_running()
+                            if busy:
+                                raise ValueError("正在处理" + busy + "，请稍后再摘题")
+                            return self._json(question_bank.start(bank_conn, subject, payload))
+                    except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                        return self._json({"error": str(exc)}, 400)
 
             # ---------------- 知识点构建 ----------------
             if u.path == "/api/kp-build":

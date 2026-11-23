@@ -428,11 +428,7 @@ async function openCleanup(){
 
 async function openDoc(id){
   const d = await api('/api/doc?id='+id);
-  // 跨页跳转（方案 §7.3 里"必须做的例外"）：先把子页签对齐到这份文档所属的库，
-  // **再**进资料页。否则从问答页证据角标点开一份辅库文档，资料页会停在主库页签，
-  // 用户看到的是一张空列表。从资料页内部点标题时 CURRENT 已是 docs、库也一致，
-  // 不会多一次重渲染。
-  const tab = (d.document && d.document.corpus) || 'main';
+  const tab = 'main';
   if (DOCS_TAB !== tab || CURRENT !== 'docs') {
     DOCS_TAB = tab;
     await go('docs');

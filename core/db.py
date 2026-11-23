@@ -566,6 +566,11 @@ def classify_role(title: str, path: str = "") -> str:
     再看教材特征：有版次/教材字样的算教材。
     都不命中时归 courseware（这套系统里课件是常态）。
     """
+    folder = raw_folder(path)
+    if folder in ("考试资料", "药理题库", "题库", "学习笔记"):
+        return "reference"
+    if folder in ("教材", "课件"):
+        return "textbook" if folder == "教材" else "courseware"
     text = f"{title} {path}".strip()
     low = text.lower()
     if _COURSEWARE_PAT.search(low):
@@ -589,7 +594,15 @@ def classify_role(title: str, path: str = "") -> str:
 # 所以零额外输入、零新参数；库归属与幂等键是同一个值，不可能相互矛盾。
 #
 # 目录改名时要同步改这里（将来可提为 config 项 KB_AUX_DIRS 让 .env 覆盖）。
-AUX_DIRS = ("raw/药理题库", "raw/学习笔记", "notes")
+AUX_DIRS = ("raw/考试资料", "raw/题库", "raw/药理题库", "raw/学习笔记", "notes")
+
+
+def raw_folder(path: str) -> str:
+    """Return the first folder under raw, including a subject's raw directory."""
+    parts = str(path or "").replace("\\", "/").lstrip("./").split("/")
+    if parts[0] == "subjects":
+        parts = parts[2:]
+    return parts[1] if len(parts) >= 3 and parts[0] == "raw" else ""
 
 
 def classify_corpus(rel_path: str) -> str:
@@ -603,6 +616,8 @@ def classify_corpus(rel_path: str) -> str:
     前缀带斜杠，所以 `raw/药理题库备份/` 这类同前缀的兄弟目录不会被误判。
     """
     p = (rel_path or "").replace("\\", "/").lstrip("./")
+    if p.startswith("subjects/"):
+        p = p.split("/", 2)[-1]
     for d in AUX_DIRS:
         if p == d or p.startswith(d + "/"):
             return "aux"

@@ -53,6 +53,30 @@ TOKEN_PER_CHAR = 0.75
 TEXTBOOK_MODE = "textbook"
 TEXTBOOK_ROLE = "textbook"
 TEXTBOOK_CHUNK_SCHEME = "textbook-v1"
+EXAM_FOLDERS = {"考试资料", "药理题库", "题库"}
+
+
+def material_folder(path: Path) -> str:
+    try:
+        rel = path.resolve().relative_to(Path(config.RAW_DIR).resolve())
+    except ValueError:
+        return db.raw_folder(_rel(path))
+    return db.raw_folder("raw/" + rel.as_posix())
+
+
+def uses_chapter_ingest(folder: str) -> bool:
+    return folder == "教材" or folder in EXAM_FOLDERS
+
+
+def has_chapter_index(folder: str, row) -> bool:
+    if not uses_chapter_ingest(folder):
+        return True
+    try:
+        extra = json.loads(row["extra"] or "{}")
+    except (TypeError, ValueError):
+        return False
+    role = TEXTBOOK_ROLE if folder == "教材" else "reference"
+    return isinstance(extra, dict) and extra.get("chunk_scheme") == TEXTBOOK_CHUNK_SCHEME and row["role"] == role
 
 # ---------------------------------------------------------------- 整页切块
 # 2026-10-19 用户需求：「课件入库不要再让大模型拆结构；**每一页切一块**；
@@ -406,9 +430,12 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
                           f"打错的 mode 不做静默降级。"}
     # 教材专线：本函数内**只影响下面标注了「教材专线」的四处**，其余每一行
     # 与改造前逐字相同（回归对照见 tools/verify_c0088_regression.py）。
-    is_textbook = (_mode == TEXTBOOK_MODE)
+    folder = material_folder(path)
+    exam_material = folder in EXAM_FOLDERS
+    is_textbook = _mode == TEXTBOOK_MODE or uses_chapter_ingest(folder)
     # 教材专线写库时要附带的两个权威声明（空值 = 走改造前的原路）
-    tb_role = TEXTBOOK_ROLE if is_textbook else ""
+    tb_role = ("reference" if exam_material else TEXTBOOK_ROLE if is_textbook else
+               "courseware" if folder == "课件" else "")
     tb_extra = ({"chunk_scheme": TEXTBOOK_CHUNK_SCHEME} if is_textbook else None)
     tb_diag: dict = {}
     kind = extract.detect_kind(path)
@@ -432,6 +459,9 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     # 与切分那段唯一的差别：这里**不删也不改源文件**（传 `-KeepOriginal`），
     # 产物与源文件同目录并存。切分产出的是"同一份内容的另一种排布"，
     # 而旧格式源文件删掉就没了——用户手上可能只有这一份。
+    if exam_material or folder == "教材" and _mode != TEXTBOOK_MODE:
+        with_ocr, with_figures = True, False
+
     if kind == "legacy":
         try:
             # 转换是本地 COM 操作（不花钱），但一份实测 7~41 秒，不报进度的话
@@ -523,13 +553,13 @@ def ingest_file(conn: sqlite3.Connection, path: Path, force: bool = False,
     content_hash = db.sha256_file(path)
     rel = rel_override or _rel(path)
     row = conn.execute(
-        "SELECT id, content_hash, status, n_chunks FROM documents WHERE path=?",
+        "SELECT id, content_hash, status, n_chunks, role, extra FROM documents WHERE path=?",
         (rel,)
     ).fetchone()
     # "内容未变"才跳过——但**上次没成功入库的不算**（n_chunks=0）。
     # 否则一次失败会永久卡住这份资料：内容没变 → 永远跳过 → 再也没机会重试
     # （实测一本 452 页扫描教材因 OCR 报错失败后，修好了也重跑不了）。
-    if (row and row["content_hash"] == content_hash and not force
+    if (row and has_chapter_index(folder, row) and row["content_hash"] == content_hash and not force
             and int(row["n_chunks"] or 0) > 0):
         return _tag({"path": rel, "status": "skipped", "reason": "内容未变",
                      "doc_id": int(row["id"])})
@@ -1126,11 +1156,12 @@ def _ensure_doc_row(conn, rel: str, path: Path, kind: str, title: str,
     row = conn.execute("SELECT id FROM documents WHERE path=?", (rel,)).fetchone()
     if row:
         return int(row["id"])
+    folder = material_folder(path)
     cur = conn.execute(
         "INSERT INTO documents(path, abs_path, kind, title, content_hash, "
         "status, corpus, indexed_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (rel, str(path), kind, title, content_hash, "partial",
-         db.classify_corpus(rel), db.now(), db.now()))
+         db.classify_corpus("raw/" + folder + "/item" if folder else rel), db.now(), db.now()))
     return int(cur.lastrowid)
 
 
@@ -1221,7 +1252,8 @@ def _upsert_doc(conn: sqlite3.Connection, rel: str, path: Path, kind: str,
     # 依赖默认值的话，新增的 aux 文档会**静默变成 main**——试题漏进 AI 问答
     # 且没人会发现。role 列踩过同一个坑，解法就是"判定规则放 db.py、
     # 回填与写入调同一个函数"，corpus 完全照抄这个范式。
-    corpus = db.classify_corpus(rel)
+    folder = material_folder(path)
+    corpus = db.classify_corpus("raw/" + folder + "/item" if folder else rel)
     row = conn.execute("SELECT id FROM documents WHERE path=?", (rel,)).fetchone()
     if row:
         conn.execute(
